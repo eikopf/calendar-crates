@@ -2,15 +2,13 @@
 
 use std::num::NonZero;
 
-use mitsein::NonEmpty;
-
 /// A string slice satisfying the regex `/[A-Za-z0-9\-\_]{1, 255}/` (RFC 8984 §1.4.1).
 ///
 /// # Invariants
 /// 1. The underlying string has at least 1 and at most 255 characters.
 /// 2. All the characters of the string correspond to the variants of [`IdChar`].
 #[repr(transparent)]
-pub struct Id(NonEmpty<[IdChar]>);
+pub struct Id([IdChar]);
 
 impl Id {
     #[inline(always)]
@@ -18,7 +16,7 @@ impl Id {
         // SAFETY: two slices have the same layout iff their parameter types have the same layout.
         // IdChar has repr(u8), so this is satisfied, and moreover every value of IdChar is valid
         // as a byte
-        unsafe { std::mem::transmute::<&[IdChar], &[u8]>(self.0.as_slice()) }
+        unsafe { std::mem::transmute::<&[IdChar], &[u8]>(&self.0) }
     }
 
     #[inline(always)]
@@ -32,8 +30,8 @@ impl Id {
     }
 
     pub const fn len(&self) -> NonZero<u8> {
-        let length = self.0.len().get();
-        debug_assert!(length <= 255);
+        let length = self.0.len();
+        debug_assert!(length != 0 && length <= 255);
 
         // SAFETY: the length must be nonzero because the return type of NonEmpty::len is nonzero,
         // and `length as u8` can never overflow because it is an invariant of Id that its length
@@ -73,18 +71,14 @@ impl Id {
 
         let bytes = value.as_bytes();
 
-        // SAFETY: consider each of the three lines individually:
+        // SAFETY: consider each of the lines individually:
         // 1. the first line is sound because &[u8] and &[IdChar] have the same layout,
         //    and we have as an invariant that the bytes of the string are all valid
         //    when interpreted as IdChar values
-        // 2. the second line is sound because we have as an invariant that the length
-        //    is not zero
-        // 3. the third line is sound because Id is a transparent newtype of
-        //    NonEmpty<[IdChar]>
+        // 3. the second line is sound because Id is a transparent newtype of [IdChar]
         unsafe {
             let chars = std::mem::transmute::<&[u8], &[IdChar]>(bytes);
-            let inner = NonEmpty::from_slice_unchecked(chars);
-            std::mem::transmute::<&NonEmpty<[IdChar]>, &Id>(inner)
+            std::mem::transmute::<&[IdChar], &Id>(chars)
         }
     }
 
@@ -121,21 +115,7 @@ impl Id {
 
 impl Clone for Box<Id> {
     fn clone(&self) -> Self {
-        // we could implement this function more directly in terms of raw pointer casts if we had
-        // an explicit guarantee that NonEmpty was repr(transparent), but since we have no such
-        // guarantee this is a reasonable workaround
-
-        let mut buf = Vec::with_capacity(self.len().get() as usize);
-        buf.extend_from_slice(self.0.as_slice());
-        debug_assert!(!buf.is_empty());
-
-        // SAFETY: Id is non-empty, so `buf` also has at least one element. moreover casting raw
-        // pointers in this fashion is sound because Id has the same layout as NonEmpty<[IdChar]>
-        unsafe {
-            let box1: Box<NonEmpty<[IdChar]>> =
-                NonEmpty::from_vec_unchecked(buf).into_boxed_slice1();
-            Box::from_raw(Box::into_raw(box1) as *mut Id)
-        }
+        todo!()
     }
 }
 
@@ -244,7 +224,24 @@ impl std::fmt::Debug for IdChar {
 // 1. TimeZoneId (RFC 8984 §1.4.8, §4.7)
 // 2. JsonPointer (RFC 8984 §1.4.9, RFC 6901 §3)
 // 3. a URI type (maybe use iri-string?)
-// -------------------------------------------------------
-// some of these types can be properly implemented with unsized newtypes, but there are multiple
-// places where a dependency should be used instead (e.g. for MIME types). don't go reinventing the
-// wheel without good reason!
+
+#[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct JsonPointer(str);
+
+impl Clone for Box<JsonPointer> {
+    fn clone(&self) -> Self {
+        todo!()
+    }
+}
+
+impl JsonPointer {
+    #[inline(always)]
+    pub fn new(value: &str) -> Result<&JsonPointer, ()> {
+        todo!()
+    }
+
+    #[inline(always)]
+    pub fn into_boxed_json_pointer(&self) -> Box<JsonPointer> {
+        todo!()
+    }
+}

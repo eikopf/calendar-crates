@@ -1,6 +1,6 @@
 //! Date and time data model types.
 
-use std::{cmp::Ordering, num::NonZero};
+use std::num::NonZero;
 
 use crate::model::primitive::Sign;
 

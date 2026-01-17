@@ -23,6 +23,7 @@ impl Int {
 }
 
 /// An unsigned integer in the inclusive range `[0, 2^53 - 1]` (RFC 8984 §1.4.3).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Default, Hash)]
 pub struct UnsignedInt(u64);
 
 impl UnsignedInt {
