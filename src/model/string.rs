@@ -1,6 +1,8 @@
 //! String data model types.
 
-use std::num::NonZero;
+use std::{borrow::Cow, num::NonZero};
+
+use dizzy::DstNewtype;
 
 /// A string slice satisfying the regex `/[A-Za-z0-9\-\_]{1, 255}/` (RFC 8984 §1.4.1).
 ///
@@ -225,23 +227,80 @@ impl std::fmt::Debug for IdChar {
 // 2. JsonPointer (RFC 8984 §1.4.9, RFC 6901 §3)
 // 3. a URI type (maybe use iri-string?)
 
-#[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct JsonPointer(str);
+#[derive(Debug, Clone, Copy)]
+pub enum InvalidImplicitJsonPointerError {
+    /// A tilde (`~`) occurred without being immediately followed by `0` or `1` at this index.
+    BareTilde { index: usize },
+}
 
-impl Clone for Box<JsonPointer> {
-    fn clone(&self) -> Self {
-        todo!()
+/// An implicit unevaluated JSON pointer (RFC 8984 §1.4.9).
+#[derive(PartialEq, Eq, PartialOrd, Ord, Hash, DstNewtype)]
+#[dizzy(invariant = ImplicitJsonPointer::str_is_implicit_json_pointer)]
+#[dizzy(error = InvalidImplicitJsonPointerError)]
+#[dizzy(constructor = pub new)]
+#[dizzy(derive(Debug, CloneBoxed, IntoBoxed))]
+#[dizzy(owned = pub ImplicitJsonPointerBuf(String))]
+#[dizzy(derive_owned(Debug, IntoBoxed))]
+#[repr(transparent)]
+pub struct ImplicitJsonPointer(str);
+
+impl ImplicitJsonPointer {
+    fn str_is_implicit_json_pointer(s: &str) -> Result<(), InvalidImplicitJsonPointerError> {
+        let mut iter = s.char_indices().peekable();
+        while let Some((index, c)) = iter.next() {
+            if c == '~' && iter.peek().is_none_or(|(_, c)| c != &'0' && c != &'1') {
+                return Err(InvalidImplicitJsonPointerError::BareTilde { index });
+            }
+        }
+
+        Ok(())
+    }
+
+    pub fn segments(&self) -> impl Iterator<Item = Cow<'_, str>> {
+        self.0.split('/').map(|s| {
+            let mut buf = Cow::Borrowed("");
+            let mut tail = s;
+
+            while !tail.is_empty() {
+                match tail.split_once('~') {
+                    Some((head, new_tail)) => {
+                        buf += head;
+                        let mut tail_chars = new_tail.chars();
+                        let digit = tail_chars.next().expect("~ must be followed by a char");
+                        let new_tail = tail_chars.as_str();
+                        tail = new_tail;
+
+                        buf += match digit {
+                            '0' => "~",
+                            '1' => "/",
+                            _ => unreachable!(),
+                        };
+                    }
+                    None => {
+                        buf += tail;
+                        tail = "";
+                    }
+                }
+            }
+
+            buf
+        })
     }
 }
 
-impl JsonPointer {
-    #[inline(always)]
-    pub fn new(value: &str) -> Result<&JsonPointer, ()> {
-        todo!()
-    }
+#[cfg(test)]
+mod tests {
+    use super::*;
 
-    #[inline(always)]
-    pub fn into_boxed_json_pointer(&self) -> Box<JsonPointer> {
-        todo!()
+    #[test]
+    fn implicit_json_pointer_segmentation() {
+        let ptr = ImplicitJsonPointer::new("foo/0/~0/a~1b").unwrap();
+        let mut iter = ptr.segments();
+
+        assert_eq!(iter.next(), Some(Cow::Borrowed("foo")));
+        assert_eq!(iter.next(), Some(Cow::Borrowed("0")));
+        assert_eq!(iter.next(), Some(Cow::Borrowed("~")));
+        assert_eq!(iter.next(), Some(Cow::Owned(String::from("a/b"))));
+        assert!(iter.next().is_none());
     }
 }

@@ -2,11 +2,11 @@
 
 use std::collections::{HashMap, HashSet};
 
-use super::{primitive::UnsignedInt, string::JsonPointer};
+use super::{primitive::UnsignedInt, string::ImplicitJsonPointer};
 
 /// A set of patches to be applied to a JSON object (RFC 8984 §1.4.9).
 #[derive(Debug, Clone, PartialEq, Default)]
-pub struct PatchObject<V>(HashMap<Box<JsonPointer>, V>);
+pub struct PatchObject<V>(HashMap<Box<ImplicitJsonPointer>, V>);
 
 // TODO: define an appropriate value type for Relation::relations
 
