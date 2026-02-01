@@ -6,6 +6,8 @@ use std::{
     hash::Hash,
 };
 
+use crate::model::primitive::{Int, UnsignedInt};
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum ValueType {
     Null,
@@ -126,6 +128,9 @@ pub trait ConstructibleJsonValue: Sized {
     fn i64(value: i64) -> Result<Self, Self::InvalidIntegerError>;
     fn u64(value: u64) -> Result<Self, Self::InvalidIntegerError>;
     fn f64(value: f64) -> Self;
+
+    fn int(value: Int) -> Self;
+    fn unsigned_int(value: UnsignedInt) -> Self;
 
     fn array(value: Self::Array) -> Self;
     fn object(value: Self::Object) -> Self;
@@ -447,6 +452,18 @@ mod serde_json_impl {
         #[inline(always)]
         fn f64(value: f64) -> Self {
             value.into()
+        }
+
+        #[inline(always)]
+        fn int(value: crate::model::primitive::Int) -> Self {
+            let Ok(value) = Self::i64(value.get());
+            value
+        }
+
+        #[inline(always)]
+        fn unsigned_int(value: crate::model::primitive::UnsignedInt) -> Self {
+            let Ok(value) = Self::u64(value.get());
+            value
         }
 
         #[inline(always)]
