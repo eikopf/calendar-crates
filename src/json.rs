@@ -92,7 +92,6 @@ pub enum IntoUnsignedIntError {
 
 /// A type representing a JSON value that can be converted into Rust values.
 pub trait DestructibleJsonValue: Sized {
-    type Number;
     type String;
     type Array: JsonArray;
     type Object: JsonObject;
@@ -145,17 +144,15 @@ pub trait DestructibleJsonValue: Sized {
     }
 
     fn try_as_bool(&self) -> Result<bool, TypeError>;
-    fn try_as_number(&self) -> Result<&Self::Number, TypeError>;
+    fn try_as_f64(&self) -> Result<f64, TypeError>;
+    fn try_as_int(&self) -> Result<Int, IntoIntError>;
+    fn try_as_unsigned_int(&self) -> Result<UnsignedInt, IntoUnsignedIntError>;
     fn try_as_string(&self) -> Result<&Self::String, TypeError>;
     fn try_as_array(&self) -> Result<&Self::Array, TypeError>;
     fn try_as_object(&self) -> Result<&Self::Object, TypeError>;
 
-    fn try_as_int(&self) -> Result<Int, IntoIntError>;
-    fn try_as_unsigned_int(&self) -> Result<UnsignedInt, IntoUnsignedIntError>;
-
     // OWNED DOWNCASTS
 
-    fn try_into_number(self) -> Result<Self::Number, TypeError>;
     fn try_into_string(self) -> Result<Self::String, TypeError>;
     fn try_into_array(self) -> Result<Self::Array, TypeError>;
     fn try_into_object(self) -> Result<Self::Object, TypeError>;
@@ -322,7 +319,7 @@ impl<T> JsonArray for Vec<T> {
 mod serde_json_impl {
     use std::{borrow::Cow, hash::Hash};
 
-    use serde_json::{Map, Number, Value};
+    use serde_json::{Map, Value};
 
     use crate::model::primitive::{Int, UnsignedInt};
 
@@ -332,7 +329,6 @@ mod serde_json_impl {
     };
 
     impl DestructibleJsonValue for Value {
-        type Number = Number;
         type String = String;
         type Array = Vec<Value>;
         type Object = Map<String, Value>;
@@ -358,11 +354,13 @@ mod serde_json_impl {
         }
 
         #[inline(always)]
-        fn try_as_number(&self) -> Result<&<Self as DestructibleJsonValue>::Number, TypeError> {
-            self.as_number().ok_or_else(|| TypeError {
-                expected: ValueType::Number,
-                received: self.value_type(),
-            })
+        fn try_as_f64(&self) -> Result<f64, TypeError> {
+            self.as_number()
+                .and_then(|n| n.as_f64())
+                .ok_or_else(|| TypeError {
+                    expected: ValueType::Number,
+                    received: self.value_type(),
+                })
         }
 
         #[inline(always)]
@@ -394,7 +392,13 @@ mod serde_json_impl {
 
         #[inline(always)]
         fn try_as_int(&self) -> Result<Int, IntoIntError> {
-            let number = self.try_as_number()?;
+            let number = match self {
+                Value::Number(number) => Ok(number),
+                _ => Err(TypeError {
+                    expected: ValueType::Number,
+                    received: self.value_type(),
+                }),
+            }?;
 
             if let Some(n) = number.as_i64() {
                 Int::new(n).ok_or(IntoIntError::OutsideRangeSigned(n))
@@ -412,7 +416,13 @@ mod serde_json_impl {
 
         #[inline(always)]
         fn try_as_unsigned_int(&self) -> Result<UnsignedInt, IntoUnsignedIntError> {
-            let number = self.try_as_number()?;
+            let number = match self {
+                Value::Number(number) => Ok(number),
+                _ => Err(TypeError {
+                    expected: ValueType::Number,
+                    received: self.value_type(),
+                }),
+            }?;
 
             if let Some(n) = number.as_u64() {
                 UnsignedInt::new(n).ok_or(IntoUnsignedIntError::OutsideRange(n))
@@ -422,17 +432,6 @@ mod serde_json_impl {
                 Err(IntoUnsignedIntError::NotAnInteger(n))
             } else {
                 unreachable!()
-            }
-        }
-
-        #[inline(always)]
-        fn try_into_number(self) -> Result<<Self as DestructibleJsonValue>::Number, TypeError> {
-            match self {
-                Value::Number(number) => Ok(number),
-                _ => Err(TypeError {
-                    expected: ValueType::Number,
-                    received: self.value_type(),
-                }),
             }
         }
 
