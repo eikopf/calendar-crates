@@ -9,16 +9,36 @@ use dizzy::DstNewtype;
 /// # Invariants
 /// 1. The underlying string has at least 1 and at most 255 characters.
 /// 2. All the characters of the string correspond to the variants of [`IdChar`].
+#[derive(PartialEq, Eq, PartialOrd, Ord, Hash, DstNewtype)]
+#[dizzy(invariant = Id::check_slice, error = InvalidIdError)]
+#[dizzy(constructor = pub const try_from_slice)]
+#[dizzy(unsafe_constructor = const from_slice_unchecked)]
+#[dizzy(getter = pub const as_slice)]
+#[dizzy(derive(CloneBoxed, IntoBoxed))]
 #[repr(transparent)]
 pub struct Id([IdChar]);
 
+impl std::fmt::Debug for Id {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        <str as std::fmt::Debug>::fmt(self.as_str(), f)
+    }
+}
+
 impl Id {
+    const fn check_slice(value: &[IdChar]) -> Result<(), InvalidIdError> {
+        match value.len() {
+            0 => Err(InvalidIdError::EmptyString),
+            1..256 => Ok(()),
+            _ => Err(InvalidIdError::TooLong),
+        }
+    }
+
     #[inline(always)]
     pub const fn as_bytes(&self) -> &[u8] {
         // SAFETY: two slices have the same layout iff their parameter types have the same layout.
         // IdChar has repr(u8), so this is satisfied, and moreover every value of IdChar is valid
         // as a byte
-        unsafe { std::mem::transmute::<&[IdChar], &[u8]>(&self.0) }
+        unsafe { std::mem::transmute::<&[IdChar], &[u8]>(self.as_slice()) }
     }
 
     #[inline(always)]
@@ -31,6 +51,7 @@ impl Id {
         unsafe { str::from_utf8_unchecked(bytes) }
     }
 
+    #[inline(always)]
     pub const fn len(&self) -> NonZero<u8> {
         let length = self.0.len();
         debug_assert!(length != 0 && length <= 255);
@@ -80,7 +101,7 @@ impl Id {
         // 3. the second line is sound because Id is a transparent newtype of [IdChar]
         unsafe {
             let chars = std::mem::transmute::<&[u8], &[IdChar]>(bytes);
-            std::mem::transmute::<&[IdChar], &Id>(chars)
+            Id::from_slice_unchecked(chars)
         }
     }
 
@@ -112,18 +133,6 @@ impl Id {
         }
 
         None
-    }
-}
-
-impl Clone for Box<Id> {
-    fn clone(&self) -> Self {
-        todo!()
-    }
-}
-
-impl std::fmt::Debug for Id {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        <str as std::fmt::Debug>::fmt(self.as_str(), f)
     }
 }
 
