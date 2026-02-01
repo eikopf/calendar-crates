@@ -175,34 +175,12 @@ pub trait ConstructibleJsonValue: Sized {
     fn str(value: &str) -> Self;
     fn cow_str(value: Cow<'_, str>) -> Self;
 
-    fn i32(value: i32) -> Self;
-    fn u32(value: u32) -> Self;
     fn f64(value: f64) -> Self;
     fn int(value: Int) -> Self;
     fn unsigned_int(value: UnsignedInt) -> Self;
 
     fn array(value: Self::Array) -> Self;
     fn object(value: Self::Object) -> Self;
-
-    fn i8(value: i8) -> Self {
-        Self::i32(value as i32)
-    }
-
-    fn u8(value: u8) -> Self {
-        Self::u32(value as u32)
-    }
-
-    fn i16(value: i16) -> Self {
-        Self::i32(value as i32)
-    }
-
-    fn u16(value: u16) -> Self {
-        Self::u32(value as u32)
-    }
-
-    fn f32(value: f32) -> Self {
-        Self::f64(value as f64)
-    }
 }
 
 /// A type which represents a JSON object.
@@ -518,16 +496,6 @@ mod serde_json_impl {
 
         #[inline(always)]
         fn cow_str(value: Cow<'_, str>) -> Self {
-            value.into()
-        }
-
-        #[inline(always)]
-        fn i32(value: i32) -> Self {
-            value.into()
-        }
-
-        #[inline(always)]
-        fn u32(value: u32) -> Self {
             value.into()
         }
 
