@@ -1,5 +1,10 @@
 //! Primitive data model types.
 
+use crate::json::{
+    ConstructibleJsonValue, DestructibleJsonValue, IntoIntError, IntoJson, IntoUnsignedIntError,
+    TryFromJson,
+};
+
 /// A signed integer in the inclusive range `[-2^53 + 1, 2^53 - 1]` (RFC 8984 §1.4.2).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Default, Hash)]
 pub struct Int(i64);
@@ -22,6 +27,20 @@ impl Int {
     }
 }
 
+impl IntoJson for Int {
+    fn into_json<V: ConstructibleJsonValue>(self) -> V {
+        V::int(self)
+    }
+}
+
+impl TryFromJson for Int {
+    type Error = IntoIntError;
+
+    fn try_from_json<V: DestructibleJsonValue>(value: V) -> Result<Self, Self::Error> {
+        value.try_as_int()
+    }
+}
+
 /// An unsigned integer in the inclusive range `[0, 2^53 - 1]` (RFC 8984 §1.4.3).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Default, Hash)]
 pub struct UnsignedInt(u64);
@@ -41,6 +60,20 @@ impl UnsignedInt {
     #[inline(always)]
     pub const fn get(self) -> u64 {
         self.0
+    }
+}
+
+impl IntoJson for UnsignedInt {
+    fn into_json<V: ConstructibleJsonValue>(self) -> V {
+        V::unsigned_int(self)
+    }
+}
+
+impl TryFromJson for UnsignedInt {
+    type Error = IntoUnsignedIntError;
+
+    fn try_from_json<V: DestructibleJsonValue>(value: V) -> Result<Self, Self::Error> {
+        value.try_as_unsigned_int()
     }
 }
 
