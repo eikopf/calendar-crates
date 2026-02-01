@@ -233,8 +233,7 @@ impl std::fmt::Debug for IdChar {
 
 // TODO: define (at a minimum) the following string types:
 // 1. TimeZoneId (RFC 8984 §1.4.8, §4.7)
-// 2. JsonPointer (RFC 8984 §1.4.9, RFC 6901 §3)
-// 3. a URI type (maybe use iri-string?)
+// 2. a URI type (maybe use iri-string?)
 
 #[derive(Debug, Clone, Copy)]
 pub enum InvalidImplicitJsonPointerError {
@@ -297,6 +296,85 @@ impl ImplicitJsonPointer {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum InvalidVendorStrError {
+    /// The string was empty.
+    EmptyString,
+    /// A colon occurred at the beginning of the string.
+    EmptyPrefix,
+    /// The only colon occurred at the end of the string.
+    EmptySuffix,
+    /// No colon occurred in the string.
+    MissingColon,
+}
+
+/// A string slice prefixed by a vendor domain name (RFC 8984 §3.3).
+///
+/// # Invariants
+/// 1. The underlying string is not empty.
+/// 2. The underlying string contains at least one colon (U+003A) character.
+/// 3. After splitting on the first colon, both resulting substrings will not be empty.
+#[derive(PartialEq, Eq, PartialOrd, Ord, Hash, DstNewtype)]
+#[dizzy(invariant = VendorStr::is_vendor_str, error = InvalidVendorStrError)]
+#[dizzy(constructor = pub const new)]
+#[dizzy(getter = pub const as_str)]
+#[dizzy(derive(Debug, CloneBoxed, IntoBoxed))]
+#[dizzy(owned = pub VendorString(String))]
+#[dizzy(derive_owned(Debug, IntoBoxed))]
+#[repr(transparent)]
+pub struct VendorStr(str);
+
+impl VendorStr {
+    const fn is_vendor_str(s: &str) -> Result<(), InvalidVendorStrError> {
+        match s.as_bytes().split_first() {
+            None => Err(InvalidVendorStrError::EmptyString),
+            Some((b':', _)) => Err(InvalidVendorStrError::EmptyPrefix),
+            Some((_, tail)) => match tail.split_last() {
+                None => Err(InvalidVendorStrError::MissingColon),
+                Some((b':', _)) => Err(InvalidVendorStrError::EmptySuffix),
+                Some((_, body)) => {
+                    let mut i = 0;
+
+                    while i < body.len() {
+                        if body[i] == b':' {
+                            return Ok(());
+                        }
+
+                        i += 1;
+                    }
+
+                    Err(InvalidVendorStrError::MissingColon)
+                }
+            },
+        }
+    }
+
+    #[inline(always)]
+    pub const fn len(&self) -> NonZero<usize> {
+        debug_assert!(!self.as_str().is_empty());
+
+        // SAFETY: it is an invariant of VendorStr that the underlying string slice is not empty
+        unsafe { NonZero::new_unchecked(self.as_str().len()) }
+    }
+
+    #[inline(always)]
+    pub fn split_at_colon(&self) -> (&str, &str) {
+        self.as_str()
+            .split_once(':')
+            .expect("a VendorStr must contain at least one colon")
+    }
+
+    #[inline(always)]
+    pub fn vendor_domain(&self) -> &str {
+        self.split_at_colon().0
+    }
+
+    #[inline(always)]
+    pub fn suffix(&self) -> &str {
+        self.split_at_colon().1
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -311,5 +389,19 @@ mod tests {
         assert_eq!(iter.next(), Some(Cow::Borrowed("~")));
         assert_eq!(iter.next(), Some(Cow::Owned(String::from("a/b"))));
         assert!(iter.next().is_none());
+    }
+
+    #[test]
+    fn vendor_str_predicate() {
+        let p = VendorStr::is_vendor_str;
+
+        assert_eq!(p(""), Err(InvalidVendorStrError::EmptyString));
+        assert_eq!(p(":"), Err(InvalidVendorStrError::EmptyPrefix));
+        assert_eq!(p("a:"), Err(InvalidVendorStrError::EmptySuffix));
+        assert_eq!(p("a"), Err(InvalidVendorStrError::MissingColon));
+
+        assert!(p("a:b").is_ok());
+        assert!(p("foo:bar").is_ok());
+        assert!(p("example.com:foo:bar:baz").is_ok());
     }
 }
