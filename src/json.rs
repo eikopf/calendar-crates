@@ -84,6 +84,8 @@ pub trait DestructibleJsonValue {
 
 /// A type representing a JSON value that can be built from Rust values.
 pub trait ConstructibleJsonValue: Sized {
+    type Array: JsonArray;
+    type Object: JsonObject;
     type InvalidIntegerError;
 
     // CONSTRUCTORS
@@ -101,8 +103,8 @@ pub trait ConstructibleJsonValue: Sized {
     fn u64(value: u64) -> Result<Self, Self::InvalidIntegerError>;
     fn f64(value: f64) -> Self;
 
-    fn array_with_capacity(capacity: usize) -> Self;
-    fn object_with_capacity(capacity: usize) -> Self;
+    fn array(value: Self::Array) -> Self;
+    fn object(value: Self::Object) -> Self;
 
     fn i8(value: i8) -> Self {
         Self::i32(value as i32)
@@ -123,20 +125,14 @@ pub trait ConstructibleJsonValue: Sized {
     fn f32(value: f32) -> Self {
         Self::f64(value as f64)
     }
-
-    fn array() -> Self {
-        Self::array_with_capacity(0)
-    }
-
-    fn object() -> Self {
-        Self::object_with_capacity(0)
-    }
 }
 
 /// A type which represents a JSON object.
-pub trait JsonObject {
+pub trait JsonObject: Sized {
     type Key;
     type Value;
+
+    fn with_capacity(capacity: usize) -> Self;
 
     fn get<Q>(&self, key: &Q) -> Option<&Self::Value>
     where
@@ -151,6 +147,11 @@ pub trait JsonObject {
     fn len(&self) -> usize;
     fn iter(&self) -> impl Iterator<Item = (&Self::Key, &Self::Value)>;
     fn into_iter(self) -> impl Iterator<Item = (Self::Key, Self::Value)>;
+
+    #[inline(always)]
+    fn new() -> Self {
+        Self::with_capacity(0)
+    }
 
     #[inline(always)]
     fn is_empty(&self) -> bool {
@@ -169,13 +170,19 @@ pub trait JsonObject {
 }
 
 /// A type which represents a JSON array.
-pub trait JsonArray {
+pub trait JsonArray: Sized {
     type Elem;
 
+    fn with_capacity(capacity: usize) -> Self;
     fn get(&self, index: usize) -> Option<&Self::Elem>;
     fn len(&self) -> usize;
     fn iter(&self) -> impl Iterator<Item = &Self::Elem>;
     fn into_iter(self) -> impl Iterator<Item = Self::Elem>;
+
+    #[inline(always)]
+    fn new() -> Self {
+        Self::with_capacity(0)
+    }
 
     #[inline(always)]
     fn is_empty(&self) -> bool {
@@ -186,6 +193,11 @@ pub trait JsonArray {
 impl<K: Eq + Hash, V> JsonObject for HashMap<K, V> {
     type Key = K;
     type Value = V;
+
+    #[inline(always)]
+    fn with_capacity(capacity: usize) -> Self {
+        HashMap::with_capacity(capacity)
+    }
 
     #[inline(always)]
     fn get<Q>(&self, key: &Q) -> Option<&Self::Value>
@@ -223,6 +235,11 @@ impl<K: Eq + Hash, V> JsonObject for HashMap<K, V> {
 
 impl<T> JsonArray for Vec<T> {
     type Elem = T;
+
+    #[inline(always)]
+    fn with_capacity(capacity: usize) -> Self {
+        Vec::with_capacity(capacity)
+    }
 
     #[inline(always)]
     fn get(&self, index: usize) -> Option<&Self::Elem> {
@@ -354,6 +371,8 @@ mod serde_json_impl {
     }
 
     impl ConstructibleJsonValue for Value {
+        type Array = Vec<Self>;
+        type Object = Map<String, Self>;
         type InvalidIntegerError = std::convert::Infallible;
 
         #[inline(always)]
@@ -407,19 +426,24 @@ mod serde_json_impl {
         }
 
         #[inline(always)]
-        fn array_with_capacity(capacity: usize) -> Self {
-            Self::Array(Vec::with_capacity(capacity))
+        fn array(value: <Self as ConstructibleJsonValue>::Array) -> Self {
+            Value::Array(value)
         }
 
         #[inline(always)]
-        fn object_with_capacity(capacity: usize) -> Self {
-            Self::Object(Map::with_capacity(capacity))
+        fn object(value: <Self as ConstructibleJsonValue>::Object) -> Self {
+            Value::Object(value)
         }
     }
 
     impl JsonObject for Map<String, Value> {
         type Key = String;
         type Value = Value;
+
+        #[inline(always)]
+        fn with_capacity(capacity: usize) -> Self {
+            Map::with_capacity(capacity)
+        }
 
         #[inline(always)]
         fn get<Q>(&self, key: &Q) -> Option<&Self::Value>
