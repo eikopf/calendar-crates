@@ -2,18 +2,18 @@
 
 use std::collections::{HashMap, HashSet};
 
+use crate::model::{set::RelationValue, string::VendorStr};
+
 use super::{primitive::UnsignedInt, string::ImplicitJsonPointer};
 
 /// A set of patches to be applied to a JSON object (RFC 8984 §1.4.9).
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct PatchObject<V>(HashMap<Box<ImplicitJsonPointer>, V>);
 
-// TODO: define an appropriate value type for Relation::relations
-
 /// A set of relationship types (RFC 8984 §1.4.10).
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct Relation {
-    relations: HashSet<String>,
+    relations: HashSet<RelationValue<Box<VendorStr>>>,
 }
 
 /// A link to an external resource (RFC 8984 §1.4.11).
