@@ -22,6 +22,30 @@ pub struct TypeError {
     pub received: ValueType,
 }
 
+pub trait TryFromJson: Sized {
+    type Error;
+
+    fn try_from_json<V: DestructibleJsonValue>(value: V) -> Result<Self, Self::Error>;
+}
+
+pub trait TryIntoJson {
+    type Error;
+
+    fn try_into_json<V: ConstructibleJsonValue>(self) -> Result<V, Self::Error>;
+}
+
+pub trait IntoJson {
+    fn into_json<V: ConstructibleJsonValue>(self) -> V;
+}
+
+impl<T: IntoJson> TryIntoJson for T {
+    type Error = std::convert::Infallible;
+
+    fn try_into_json<V: ConstructibleJsonValue>(self) -> Result<V, Self::Error> {
+        Ok(self.into_json())
+    }
+}
+
 /// A type representing a JSON value that can be converted into Rust values.
 pub trait DestructibleJsonValue {
     type Number;
