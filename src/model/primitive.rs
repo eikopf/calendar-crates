@@ -93,3 +93,102 @@ impl Sign {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[cfg(feature = "serde_json")]
+    #[test]
+    #[allow(clippy::approx_constant)]
+    fn int_from_serde_json() {
+        use serde_json::Value;
+
+        use crate::json::{TypeError, ValueType};
+
+        let parse = |s| Int::try_from_json(serde_json::from_str::<'_, Value>(s).unwrap());
+
+        assert_eq!(parse("0"), Ok(Int::new(0).unwrap()));
+        assert_eq!(parse("-9007199254740991"), Ok(Int::MIN));
+        assert_eq!(parse("9007199254740991"), Ok(Int::MAX));
+
+        assert_eq!(parse("2.718281"), Err(IntoIntError::NotAnInteger(2.718281)));
+
+        // Int::MIN - 1
+        assert_eq!(
+            parse("-9007199254740992"),
+            Err(IntoIntError::OutsideRangeSigned(-9007199254740992))
+        );
+        // Int::MAX + 1
+        assert_eq!(
+            parse("9007199254740992"),
+            Err(IntoIntError::OutsideRangeSigned(9007199254740992))
+        );
+        // u64::MAX
+        assert_eq!(
+            parse("18446744073709551615"),
+            Err(IntoIntError::OutsideRangeUnsigned(u64::MAX))
+        );
+
+        assert_eq!(
+            parse("true"),
+            Err(TypeError {
+                expected: ValueType::Number,
+                received: ValueType::Bool
+            }
+            .into())
+        );
+
+        assert_eq!(
+            parse("{}"),
+            Err(TypeError {
+                expected: ValueType::Number,
+                received: ValueType::Object
+            }
+            .into())
+        );
+    }
+
+    #[cfg(feature = "serde_json")]
+    #[test]
+    #[allow(clippy::approx_constant)]
+    fn unsigned_int_from_serde_json() {
+        use serde_json::Value;
+
+        use crate::json::{TypeError, ValueType};
+
+        let parse = |s| UnsignedInt::try_from_json(serde_json::from_str::<'_, Value>(s).unwrap());
+
+        assert_eq!(parse("0"), Ok(UnsignedInt::MIN));
+        assert_eq!(parse("9007199254740991"), Ok(UnsignedInt::MAX));
+
+        assert_eq!(parse("-1"), Err(IntoUnsignedIntError::NegativeInteger(-1)));
+        assert_eq!(
+            parse("3.141592"),
+            Err(IntoUnsignedIntError::NotAnInteger(3.141592))
+        );
+        // UnsignedInt::MAX + 1
+        assert_eq!(
+            parse("9007199254740992"),
+            Err(IntoUnsignedIntError::OutsideRange(9007199254740992))
+        );
+
+        assert_eq!(
+            parse("false"),
+            Err(TypeError {
+                expected: ValueType::Number,
+                received: ValueType::Bool
+            }
+            .into())
+        );
+
+        assert_eq!(
+            parse("[]"),
+            Err(TypeError {
+                expected: ValueType::Number,
+                received: ValueType::Array
+            }
+            .into())
+        );
+    }
+}
