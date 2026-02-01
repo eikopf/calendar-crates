@@ -6,23 +6,9 @@ use std::{
     hash::Hash,
 };
 
+use thiserror::Error;
+
 use crate::model::primitive::{Int, UnsignedInt};
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub enum ValueType {
-    Null,
-    Bool,
-    Number,
-    String,
-    Array,
-    Object,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct TypeError {
-    pub expected: ValueType,
-    pub received: ValueType,
-}
 
 pub trait TryFromJson: Sized {
     type Error;
@@ -48,8 +34,64 @@ impl<T: IntoJson> TryIntoJson for T {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum ValueType {
+    Null,
+    Bool,
+    Number,
+    String,
+    Array,
+    Object,
+}
+
+impl std::fmt::Display for ValueType {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let s = match self {
+            ValueType::Null => "null",
+            ValueType::Bool => "bool",
+            ValueType::Number => "number",
+            ValueType::String => "string",
+            ValueType::Array => "array",
+            ValueType::Object => "object",
+        };
+
+        write!(f, "{s}")
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Error)]
+#[error("expected a value of type {expected} but received type {received} instead")]
+pub struct TypeError {
+    pub expected: ValueType,
+    pub received: ValueType,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, PartialOrd, Error)]
+pub enum IntoIntError {
+    #[error("type error: {0}")]
+    TypeError(#[from] TypeError),
+    #[error("expected an integer but received {0}")]
+    NotAnInteger(f64),
+    #[error("the signed integer {0} falls outside the valid range for Int")]
+    OutsideRangeSigned(i64),
+    #[error("the unsigned integer {0} falls outside the valid range for Int")]
+    OutsideRangeUnsigned(u64),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, PartialOrd, Error)]
+pub enum IntoUnsignedIntError {
+    #[error("type error: {0}")]
+    TypeError(#[from] TypeError),
+    #[error("expected an integer but received {0}")]
+    NotAnInteger(f64),
+    #[error("expected an unsigned integer but received {0}")]
+    NegativeInteger(i64),
+    #[error("the unsigned integer {0} falls outside the valid range for UnsignedInt")]
+    OutsideRange(u64),
+}
+
 /// A type representing a JSON value that can be converted into Rust values.
-pub trait DestructibleJsonValue {
+pub trait DestructibleJsonValue: Sized {
     type Number;
     type String;
     type Array: JsonArray;
@@ -91,21 +133,32 @@ pub trait DestructibleJsonValue {
 
     // REFERENTIAL DOWNCASTS
 
-    fn as_null(&self) -> Option<()>;
-    fn as_bool(&self) -> Option<bool>;
-    fn as_number(&self) -> Option<&Self::Number>;
-    fn as_string(&self) -> Option<&Self::String>;
-    fn as_array(&self) -> Option<&Self::Array>;
-    fn as_object(&self) -> Option<&Self::Object>;
+    #[inline(always)]
+    fn try_as_null(&self) -> Result<(), TypeError> {
+        match self.value_type() {
+            ValueType::Null => Ok(()),
+            received => Err(TypeError {
+                expected: ValueType::Null,
+                received,
+            }),
+        }
+    }
+
+    fn try_as_bool(&self) -> Result<bool, TypeError>;
+    fn try_as_number(&self) -> Result<&Self::Number, TypeError>;
+    fn try_as_string(&self) -> Result<&Self::String, TypeError>;
+    fn try_as_array(&self) -> Result<&Self::Array, TypeError>;
+    fn try_as_object(&self) -> Result<&Self::Object, TypeError>;
+
+    fn try_as_int(&self) -> Result<Int, IntoIntError>;
+    fn try_as_unsigned_int(&self) -> Result<UnsignedInt, IntoUnsignedIntError>;
 
     // OWNED DOWNCASTS
 
-    fn into_null(self) -> Option<()>;
-    fn into_bool(self) -> Option<bool>;
-    fn into_number(self) -> Option<Self::Number>;
-    fn into_string(self) -> Option<Self::String>;
-    fn into_array(self) -> Option<Self::Array>;
-    fn into_object(self) -> Option<Self::Object>;
+    fn try_into_number(self) -> Result<Self::Number, TypeError>;
+    fn try_into_string(self) -> Result<Self::String, TypeError>;
+    fn try_into_array(self) -> Result<Self::Array, TypeError>;
+    fn try_into_object(self) -> Result<Self::Object, TypeError>;
 }
 
 /// A type representing a JSON value that can be built from Rust values.
@@ -297,7 +350,12 @@ mod serde_json_impl {
 
     use serde_json::{Map, Number, Value};
 
-    use super::{ConstructibleJsonValue, DestructibleJsonValue, JsonObject, ValueType};
+    use crate::model::primitive::{Int, UnsignedInt};
+
+    use super::{
+        ConstructibleJsonValue, DestructibleJsonValue, IntoIntError, IntoUnsignedIntError,
+        JsonObject, TypeError, ValueType,
+    };
 
     impl DestructibleJsonValue for Value {
         type Number = Number;
@@ -318,83 +376,122 @@ mod serde_json_impl {
         }
 
         #[inline(always)]
-        fn as_null(&self) -> Option<()> {
-            self.as_null()
+        fn try_as_bool(&self) -> Result<bool, TypeError> {
+            self.as_bool().ok_or_else(|| TypeError {
+                expected: ValueType::Bool,
+                received: self.value_type(),
+            })
         }
 
         #[inline(always)]
-        fn as_bool(&self) -> Option<bool> {
-            self.as_bool()
+        fn try_as_number(&self) -> Result<&<Self as DestructibleJsonValue>::Number, TypeError> {
+            self.as_number().ok_or_else(|| TypeError {
+                expected: ValueType::Number,
+                received: self.value_type(),
+            })
         }
 
         #[inline(always)]
-        fn as_number(&self) -> Option<&<Self as DestructibleJsonValue>::Number> {
-            self.as_number()
-        }
-
-        #[inline(always)]
-        fn as_string(&self) -> Option<&<Self as DestructibleJsonValue>::String> {
+        fn try_as_string(&self) -> Result<&<Self as DestructibleJsonValue>::String, TypeError> {
             match self {
-                Value::String(s) => Some(s),
-                _ => None,
+                Value::String(s) => Ok(s),
+                _ => Err(TypeError {
+                    expected: ValueType::String,
+                    received: self.value_type(),
+                }),
             }
         }
 
         #[inline(always)]
-        fn as_array(&self) -> Option<&<Self as DestructibleJsonValue>::Array> {
-            self.as_array()
+        fn try_as_array(&self) -> Result<&<Self as DestructibleJsonValue>::Array, TypeError> {
+            self.as_array().ok_or_else(|| TypeError {
+                expected: ValueType::Array,
+                received: self.value_type(),
+            })
         }
 
         #[inline(always)]
-        fn as_object(&self) -> Option<&<Self as DestructibleJsonValue>::Object> {
-            self.as_object()
+        fn try_as_object(&self) -> Result<&<Self as DestructibleJsonValue>::Object, TypeError> {
+            self.as_object().ok_or_else(|| TypeError {
+                expected: ValueType::Object,
+                received: self.value_type(),
+            })
         }
 
         #[inline(always)]
-        fn into_null(self) -> Option<()> {
-            match self {
-                Value::Null => Some(()),
-                _ => None,
+        fn try_as_int(&self) -> Result<Int, IntoIntError> {
+            let number = self.try_as_number()?;
+
+            if let Some(n) = number.as_i64() {
+                Int::new(n).ok_or(IntoIntError::OutsideRangeSigned(n))
+            } else if let Some(n) = number.as_u64() {
+                i64::try_from(n)
+                    .ok()
+                    .and_then(Int::new)
+                    .ok_or(IntoIntError::OutsideRangeUnsigned(n))
+            } else if let Some(n) = number.as_f64() {
+                Err(IntoIntError::NotAnInteger(n))
+            } else {
+                unreachable!()
             }
         }
 
         #[inline(always)]
-        fn into_bool(self) -> Option<bool> {
-            match self {
-                Value::Bool(b) => Some(b),
-                _ => None,
+        fn try_as_unsigned_int(&self) -> Result<UnsignedInt, IntoUnsignedIntError> {
+            let number = self.try_as_number()?;
+
+            if let Some(n) = number.as_u64() {
+                UnsignedInt::new(n).ok_or(IntoUnsignedIntError::OutsideRange(n))
+            } else if let Some(n) = number.as_i64() {
+                Err(IntoUnsignedIntError::NegativeInteger(n))
+            } else if let Some(n) = number.as_f64() {
+                Err(IntoUnsignedIntError::NotAnInteger(n))
+            } else {
+                unreachable!()
             }
         }
 
         #[inline(always)]
-        fn into_number(self) -> Option<<Self as DestructibleJsonValue>::Number> {
+        fn try_into_number(self) -> Result<<Self as DestructibleJsonValue>::Number, TypeError> {
             match self {
-                Value::Number(number) => Some(number),
-                _ => None,
+                Value::Number(number) => Ok(number),
+                _ => Err(TypeError {
+                    expected: ValueType::Number,
+                    received: self.value_type(),
+                }),
             }
         }
 
         #[inline(always)]
-        fn into_string(self) -> Option<<Self as DestructibleJsonValue>::String> {
+        fn try_into_string(self) -> Result<<Self as DestructibleJsonValue>::String, TypeError> {
             match self {
-                Value::String(string) => Some(string),
-                _ => None,
+                Value::String(s) => Ok(s),
+                _ => Err(TypeError {
+                    expected: ValueType::String,
+                    received: self.value_type(),
+                }),
             }
         }
 
         #[inline(always)]
-        fn into_array(self) -> Option<<Self as DestructibleJsonValue>::Array> {
+        fn try_into_array(self) -> Result<<Self as DestructibleJsonValue>::Array, TypeError> {
             match self {
-                Value::Array(array) => Some(array),
-                _ => None,
+                Value::Array(array) => Ok(array),
+                _ => Err(TypeError {
+                    expected: ValueType::Array,
+                    received: self.value_type(),
+                }),
             }
         }
 
         #[inline(always)]
-        fn into_object(self) -> Option<<Self as DestructibleJsonValue>::Object> {
+        fn try_into_object(self) -> Result<<Self as DestructibleJsonValue>::Object, TypeError> {
             match self {
-                Value::Object(object) => Some(object),
-                _ => None,
+                Value::Object(object) => Ok(object),
+                _ => Err(TypeError {
+                    expected: ValueType::Object,
+                    received: self.value_type(),
+                }),
             }
         }
     }
@@ -455,13 +552,13 @@ mod serde_json_impl {
         }
 
         #[inline(always)]
-        fn int(value: crate::model::primitive::Int) -> Self {
+        fn int(value: Int) -> Self {
             let Ok(value) = Self::i64(value.get());
             value
         }
 
         #[inline(always)]
-        fn unsigned_int(value: crate::model::primitive::UnsignedInt) -> Self {
+        fn unsigned_int(value: UnsignedInt) -> Self {
             let Ok(value) = Self::u64(value.get());
             value
         }
