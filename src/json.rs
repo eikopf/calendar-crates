@@ -165,7 +165,6 @@ pub trait DestructibleJsonValue: Sized {
 pub trait ConstructibleJsonValue: Sized {
     type Array: JsonArray;
     type Object: JsonObject;
-    type InvalidIntegerError;
 
     // CONSTRUCTORS
 
@@ -178,10 +177,7 @@ pub trait ConstructibleJsonValue: Sized {
 
     fn i32(value: i32) -> Self;
     fn u32(value: u32) -> Self;
-    fn i64(value: i64) -> Result<Self, Self::InvalidIntegerError>;
-    fn u64(value: u64) -> Result<Self, Self::InvalidIntegerError>;
     fn f64(value: f64) -> Self;
-
     fn int(value: Int) -> Self;
     fn unsigned_int(value: UnsignedInt) -> Self;
 
@@ -499,7 +495,6 @@ mod serde_json_impl {
     impl ConstructibleJsonValue for Value {
         type Array = Vec<Self>;
         type Object = Map<String, Self>;
-        type InvalidIntegerError = std::convert::Infallible;
 
         #[inline(always)]
         fn null() -> Self {
@@ -537,30 +532,18 @@ mod serde_json_impl {
         }
 
         #[inline(always)]
-        fn i64(value: i64) -> Result<Self, Self::InvalidIntegerError> {
-            Ok(value.into())
-        }
-
-        #[inline(always)]
-        fn u64(value: u64) -> Result<Self, Self::InvalidIntegerError> {
-            Ok(value.into())
-        }
-
-        #[inline(always)]
         fn f64(value: f64) -> Self {
             value.into()
         }
 
         #[inline(always)]
         fn int(value: Int) -> Self {
-            let Ok(value) = Self::i64(value.get());
-            value
+            value.get().into()
         }
 
         #[inline(always)]
         fn unsigned_int(value: UnsignedInt) -> Self {
-            let Ok(value) = Self::u64(value.get());
-            value
+            value.get().into()
         }
 
         #[inline(always)]
