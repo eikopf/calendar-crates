@@ -22,59 +22,12 @@ pub struct TypeError {
     pub received: ValueType,
 }
 
-/// A type representing a JSON value.
-pub trait JsonValue: Sized {
+/// A type representing a JSON value that can be converted into Rust values.
+pub trait DestructibleJsonValue {
     type Number;
     type String;
     type Array: JsonArray;
     type Object: JsonObject;
-    type InvalidIntegerError;
-
-    // CONSTRUCTORS
-
-    fn null() -> Self;
-    fn bool(value: bool) -> Self;
-
-    fn string(value: String) -> Self;
-    fn str(value: &str) -> Self;
-    fn cow_str(value: Cow<'_, str>) -> Self;
-
-    fn i32(value: i32) -> Self;
-    fn u32(value: u32) -> Self;
-    fn i64(value: i64) -> Result<Self, Self::InvalidIntegerError>;
-    fn u64(value: u64) -> Result<Self, Self::InvalidIntegerError>;
-    fn f64(value: f64) -> Self;
-
-    fn array_with_capacity(capacity: usize) -> Self;
-    fn object_with_capacity(capacity: usize) -> Self;
-
-    fn i8(value: i8) -> Self {
-        Self::i32(value as i32)
-    }
-
-    fn u8(value: u8) -> Self {
-        Self::u32(value as u32)
-    }
-
-    fn i16(value: i16) -> Self {
-        Self::i32(value as i32)
-    }
-
-    fn u16(value: u16) -> Self {
-        Self::u32(value as u32)
-    }
-
-    fn f32(value: f32) -> Self {
-        Self::f64(value as f64)
-    }
-
-    fn array() -> Self {
-        Self::array_with_capacity(0)
-    }
-
-    fn object() -> Self {
-        Self::object_with_capacity(0)
-    }
 
     // TYPE CHECKS
 
@@ -127,6 +80,57 @@ pub trait JsonValue: Sized {
     fn into_string(self) -> Option<Self::String>;
     fn into_array(self) -> Option<Self::Array>;
     fn into_object(self) -> Option<Self::Object>;
+}
+
+/// A type representing a JSON value that can be built from Rust values.
+pub trait ConstructibleJsonValue: Sized {
+    type InvalidIntegerError;
+
+    // CONSTRUCTORS
+
+    fn null() -> Self;
+    fn bool(value: bool) -> Self;
+
+    fn string(value: String) -> Self;
+    fn str(value: &str) -> Self;
+    fn cow_str(value: Cow<'_, str>) -> Self;
+
+    fn i32(value: i32) -> Self;
+    fn u32(value: u32) -> Self;
+    fn i64(value: i64) -> Result<Self, Self::InvalidIntegerError>;
+    fn u64(value: u64) -> Result<Self, Self::InvalidIntegerError>;
+    fn f64(value: f64) -> Self;
+
+    fn array_with_capacity(capacity: usize) -> Self;
+    fn object_with_capacity(capacity: usize) -> Self;
+
+    fn i8(value: i8) -> Self {
+        Self::i32(value as i32)
+    }
+
+    fn u8(value: u8) -> Self {
+        Self::u32(value as u32)
+    }
+
+    fn i16(value: i16) -> Self {
+        Self::i32(value as i32)
+    }
+
+    fn u16(value: u16) -> Self {
+        Self::u32(value as u32)
+    }
+
+    fn f32(value: f32) -> Self {
+        Self::f64(value as f64)
+    }
+
+    fn array() -> Self {
+        Self::array_with_capacity(0)
+    }
+
+    fn object() -> Self {
+        Self::object_with_capacity(0)
+    }
 }
 
 /// A type which represents a JSON object.
@@ -247,13 +251,109 @@ mod serde_json_impl {
 
     use serde_json::{Map, Number, Value};
 
-    use super::{JsonObject, JsonValue, ValueType};
+    use super::{ConstructibleJsonValue, DestructibleJsonValue, JsonObject, ValueType};
 
-    impl JsonValue for Value {
+    impl DestructibleJsonValue for Value {
         type Number = Number;
         type String = String;
         type Array = Vec<Value>;
         type Object = Map<String, Value>;
+
+        #[inline(always)]
+        fn value_type(&self) -> ValueType {
+            match self {
+                Value::Null => ValueType::Null,
+                Value::Bool(_) => ValueType::Bool,
+                Value::Number(_) => ValueType::Number,
+                Value::String(_) => ValueType::String,
+                Value::Array(_) => ValueType::Array,
+                Value::Object(_) => ValueType::Object,
+            }
+        }
+
+        #[inline(always)]
+        fn as_null(&self) -> Option<()> {
+            self.as_null()
+        }
+
+        #[inline(always)]
+        fn as_bool(&self) -> Option<bool> {
+            self.as_bool()
+        }
+
+        #[inline(always)]
+        fn as_number(&self) -> Option<&<Self as DestructibleJsonValue>::Number> {
+            self.as_number()
+        }
+
+        #[inline(always)]
+        fn as_string(&self) -> Option<&<Self as DestructibleJsonValue>::String> {
+            match self {
+                Value::String(s) => Some(s),
+                _ => None,
+            }
+        }
+
+        #[inline(always)]
+        fn as_array(&self) -> Option<&<Self as DestructibleJsonValue>::Array> {
+            self.as_array()
+        }
+
+        #[inline(always)]
+        fn as_object(&self) -> Option<&<Self as DestructibleJsonValue>::Object> {
+            self.as_object()
+        }
+
+        #[inline(always)]
+        fn into_null(self) -> Option<()> {
+            match self {
+                Value::Null => Some(()),
+                _ => None,
+            }
+        }
+
+        #[inline(always)]
+        fn into_bool(self) -> Option<bool> {
+            match self {
+                Value::Bool(b) => Some(b),
+                _ => None,
+            }
+        }
+
+        #[inline(always)]
+        fn into_number(self) -> Option<<Self as DestructibleJsonValue>::Number> {
+            match self {
+                Value::Number(number) => Some(number),
+                _ => None,
+            }
+        }
+
+        #[inline(always)]
+        fn into_string(self) -> Option<<Self as DestructibleJsonValue>::String> {
+            match self {
+                Value::String(string) => Some(string),
+                _ => None,
+            }
+        }
+
+        #[inline(always)]
+        fn into_array(self) -> Option<<Self as DestructibleJsonValue>::Array> {
+            match self {
+                Value::Array(array) => Some(array),
+                _ => None,
+            }
+        }
+
+        #[inline(always)]
+        fn into_object(self) -> Option<<Self as DestructibleJsonValue>::Object> {
+            match self {
+                Value::Object(object) => Some(object),
+                _ => None,
+            }
+        }
+    }
+
+    impl ConstructibleJsonValue for Value {
         type InvalidIntegerError = std::convert::Infallible;
 
         #[inline(always)]
@@ -314,99 +414,6 @@ mod serde_json_impl {
         #[inline(always)]
         fn object_with_capacity(capacity: usize) -> Self {
             Self::Object(Map::with_capacity(capacity))
-        }
-
-        #[inline(always)]
-        fn value_type(&self) -> ValueType {
-            match self {
-                Value::Null => ValueType::Null,
-                Value::Bool(_) => ValueType::Bool,
-                Value::Number(_) => ValueType::Number,
-                Value::String(_) => ValueType::String,
-                Value::Array(_) => ValueType::Array,
-                Value::Object(_) => ValueType::Object,
-            }
-        }
-
-        #[inline(always)]
-        fn as_null(&self) -> Option<()> {
-            self.as_null()
-        }
-
-        #[inline(always)]
-        fn as_bool(&self) -> Option<bool> {
-            self.as_bool()
-        }
-
-        #[inline(always)]
-        fn as_number(&self) -> Option<&<Self as JsonValue>::Number> {
-            self.as_number()
-        }
-
-        #[inline(always)]
-        fn as_string(&self) -> Option<&<Self as JsonValue>::String> {
-            match self {
-                Value::String(s) => Some(s),
-                _ => None,
-            }
-        }
-
-        #[inline(always)]
-        fn as_array(&self) -> Option<&<Self as JsonValue>::Array> {
-            self.as_array()
-        }
-
-        #[inline(always)]
-        fn as_object(&self) -> Option<&<Self as JsonValue>::Object> {
-            self.as_object()
-        }
-
-        #[inline(always)]
-        fn into_null(self) -> Option<()> {
-            match self {
-                Value::Null => Some(()),
-                _ => None,
-            }
-        }
-
-        #[inline(always)]
-        fn into_bool(self) -> Option<bool> {
-            match self {
-                Value::Bool(b) => Some(b),
-                _ => None,
-            }
-        }
-
-        #[inline(always)]
-        fn into_number(self) -> Option<<Self as JsonValue>::Number> {
-            match self {
-                Value::Number(number) => Some(number),
-                _ => None,
-            }
-        }
-
-        #[inline(always)]
-        fn into_string(self) -> Option<<Self as JsonValue>::String> {
-            match self {
-                Value::String(string) => Some(string),
-                _ => None,
-            }
-        }
-
-        #[inline(always)]
-        fn into_array(self) -> Option<<Self as JsonValue>::Array> {
-            match self {
-                Value::Array(array) => Some(array),
-                _ => None,
-            }
-        }
-
-        #[inline(always)]
-        fn into_object(self) -> Option<<Self as JsonValue>::Object> {
-            match self {
-                Value::Object(object) => Some(object),
-                _ => None,
-            }
         }
     }
 
