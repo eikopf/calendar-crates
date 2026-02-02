@@ -2,6 +2,8 @@
 
 use std::num::NonZero;
 
+use thiserror::Error;
+
 use crate::model::primitive::Sign;
 
 /// A marker struct for the UTC timezone.
@@ -17,6 +19,16 @@ pub type UtcDateTime = DateTime<Utc>;
 
 /// A [`DateTime`] in the implicit [`Local`] timezone (RFC 8984 §1.4.4).
 pub type LocalDateTime = DateTime<Local>;
+
+#[derive(Debug, Clone, Copy, Error, PartialEq, Eq)]
+pub enum InvalidDateTimeError<F> {
+    #[error("invalid date: {0}")]
+    Date(#[from] InvalidDateError),
+    #[error("invalid time: {0}")]
+    Time(#[from] InvalidTimeError),
+    #[error("invalid offset marker")]
+    Marker(F),
+}
 
 /// An ISO 8601 datetime with the timezone format `F` (RFC 3339 §5.6).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -34,13 +46,26 @@ pub struct Date {
     day: Day,
 }
 
+impl Date {
+    #[inline(always)]
+    pub const fn new(year: Year, month: Month, day: Day) -> Result<Self, InvalidDateError> {
+        Ok(Self { year, month, day })
+    }
+}
+
+#[derive(Debug, Clone, Copy, Error, PartialEq, Eq)]
+pub enum InvalidDateError {
+    #[error("invalid year: {0}")]
+    Year(#[from] InvalidYearError),
+    #[error("invalid month: {0}")]
+    Month(#[from] InvalidMonthError),
+    #[error("invalid day: {0}")]
+    Day(#[from] InvalidDayError),
+}
+
 /// A four-digit year ranging from 0 CE through 9999 CE.
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct Year(u16);
-
-// NOTE: since the two highest bits of Year should always be zero, it is *technically* possible to
-// carve out niche values by making it use repr(C) and using halfling::Nibble as the first byte,
-// but this ordering depends on the endianness of the host!
 
 impl std::fmt::Debug for Year {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -52,13 +77,26 @@ impl std::fmt::Debug for Year {
 impl Year {
     pub const MIN: Self = Self(0);
     pub const MAX: Self = Self(9999);
+
+    #[inline(always)]
+    pub const fn new(value: u16) -> Result<Self, InvalidYearError> {
+        if value <= 9999 {
+            Ok(Year(value))
+        } else {
+            Err(InvalidYearError(value))
+        }
+    }
 }
+
+#[derive(Debug, Clone, Copy, Error, PartialEq, Eq)]
+#[error("expected an integer of at most 9999 but received {0} instead")]
+pub struct InvalidYearError(u16);
 
 /// One of the twelve Gregorian months.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 #[repr(u8)]
 pub enum Month {
-    Jan,
+    Jan = 1,
     Feb,
     Mar,
     Apr,
@@ -72,11 +110,28 @@ pub enum Month {
     Dec,
 }
 
+impl Month {
+    pub const fn new(value: u8) -> Result<Self, InvalidMonthError> {
+        match value {
+            1..=12 => Ok({
+                // SAFETY: Month is repr(u8) and takes the values in the range 1..=12, which are
+                // the only possible values in this branch
+                unsafe { std::mem::transmute::<u8, Month>(value) }
+            }),
+            _ => Err(InvalidMonthError(value)),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, Error, PartialEq, Eq)]
+#[error("expected an integer between 1 and 12 but received {0} instead")]
+pub struct InvalidMonthError(u8);
+
 /// One of the 31 days of the Gregorian month.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 #[repr(u8)]
 pub enum Day {
-    D01,
+    D01 = 1,
     D02,
     D03,
     D04,
@@ -109,12 +164,40 @@ pub enum Day {
     D31,
 }
 
+impl Day {
+    #[inline(always)]
+    pub const fn new(value: u8) -> Result<Self, InvalidDayError> {
+        match value {
+            1..=31 => Ok({
+                // SAFETY: Day is repr(u8) and takes the values in the range 1..=31, which are
+                // the only possible values in this branch
+                unsafe { std::mem::transmute::<u8, Self>(value) }
+            }),
+            _ => Err(InvalidDayError(value)),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, Error, PartialEq, Eq)]
+#[error("expected an integer between 1 and 31 but received {0} instead")]
+pub struct InvalidDayError(u8);
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct Time {
     hour: Hour,
     minute: Minute,
     second: Second,
     frac: Option<FractionalSecond>,
+}
+
+#[derive(Debug, Clone, Copy, Error, PartialEq, Eq)]
+pub enum InvalidTimeError {
+    #[error("invalid hour: {0}")]
+    Hour(#[from] InvalidHourError),
+    #[error("invalid minute: {0}")]
+    Minute(#[from] InvalidMinuteError),
+    #[error("invalid second: {0}")]
+    Second(#[from] InvalidSecondError),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
@@ -146,6 +229,10 @@ pub enum Hour {
     H22,
     H23,
 }
+
+#[derive(Debug, Clone, Copy, Error, PartialEq, Eq)]
+#[error("expected an integer between 0 and 23 but received {0}")]
+pub struct InvalidHourError(NonZero<u8>);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
 #[repr(u8)]
@@ -212,6 +299,10 @@ pub enum Minute {
     M58,
     M59,
 }
+
+#[derive(Debug, Clone, Copy, Error, PartialEq, Eq)]
+#[error("expected an integer between 0 and 59 but received {0}")]
+pub struct InvalidMinuteError(NonZero<u8>);
 
 /// One of the 61 possible seconds in a minute.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
@@ -280,6 +371,10 @@ pub enum Second {
     S59,
     S60,
 }
+
+#[derive(Debug, Clone, Copy, Error, PartialEq, Eq)]
+#[error("expected an integer between 0 and 60 but received {0}")]
+pub struct InvalidSecondError(NonZero<u8>);
 
 /// A non-zero fractional second, represented as an integer multiple of nanoseconds. This
 /// guarantees nine digits of decimal precision and a maximum error of 10^-9.
