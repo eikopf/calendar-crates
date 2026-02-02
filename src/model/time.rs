@@ -1,6 +1,6 @@
 //! Date and time data model types.
 
-use std::num::NonZero;
+use std::{marker::PhantomData, num::NonZero};
 
 use thiserror::Error;
 
@@ -21,21 +21,21 @@ pub type UtcDateTime = DateTime<Utc>;
 pub type LocalDateTime = DateTime<Local>;
 
 #[derive(Debug, Clone, Copy, Error, PartialEq, Eq)]
-pub enum InvalidDateTimeError<F> {
+pub enum InvalidDateTimeError<M> {
     #[error("invalid date: {0}")]
     Date(#[from] InvalidDateError),
     #[error("invalid time: {0}")]
     Time(#[from] InvalidTimeError),
     #[error("invalid offset marker")]
-    Marker(F),
+    Marker(PhantomData<M>),
 }
 
-/// An ISO 8601 datetime with the timezone format `F` (RFC 3339 §5.6).
+/// An ISO 8601 datetime with the timezone marker `M` (RFC 3339 §5.6).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct DateTime<F> {
-    date: Date,
-    time: Time,
-    format: F,
+pub struct DateTime<M> {
+    pub date: Date,
+    pub time: Time,
+    pub marker: M,
 }
 
 /// An ISO 8601 date.
