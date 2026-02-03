@@ -1,242 +1,346 @@
 //! Parsers for types which are encoded as strings by JSCalendar.
 
-use std::{cmp::Ordering, num::NonZero};
+use std::cmp::Ordering;
+
+use thiserror::Error;
 
 use crate::model::time::{
-    Date, DateTime, Day, InvalidDateError, InvalidDateTimeError, InvalidDayError,
-    InvalidMonthError, InvalidTimeError, InvalidYearError, Local, Month, Time, Utc, Year,
+    Date, Day, InvalidDateError, InvalidDayError, InvalidMonthError, InvalidTimeError,
+    InvalidYearError, Month, Time, Year,
 };
 
-pub fn parse_full<T, E>(
-    parser: impl FnOnce(&mut &str) -> Result<T, ParseError<E>>,
-) -> impl FnOnce(&str) -> Result<Result<T, E>, ParseFullError> {
+pub fn parse_full<'i, T, Sy, Se>(
+    parser: impl FnOnce(&mut &'i str) -> ParseResult<'i, T, Sy, Se>,
+) -> impl FnOnce(&'i str) -> ParseResult<'i, T, Sy, Se> {
     |s| {
         let mut input = s;
-        match parser(&mut input) {
-            Ok(value) => match BytesRemaining::of(input) {
-                Some(br) => Err(ParseFullError::RemainingInput(br)),
-                None => Ok(Ok(value)),
-            },
-            Err(error) => error.into_parse_full_error(input).map(Err),
+        let result = parser(&mut input)?;
+
+        match input.is_empty() {
+            true => Ok(result),
+            false => Err(ParseError::general(
+                input,
+                GeneralParseError::UnconsumedInput,
+            )),
         }
     }
 }
 
-/// A non-zero number describing the number of bytes remaining in a string slice. This can be seen
-/// as the complement of a 0-based index, and for such an index `i` into a string `s` the
-/// expression `s.len() - i` will return the corresponding number of remaining bytes.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct BytesRemaining(NonZero<usize>);
-
-impl From<NonZero<usize>> for BytesRemaining {
-    #[inline(always)]
-    fn from(value: NonZero<usize>) -> Self {
-        Self(value)
-    }
-}
-
-impl TryFrom<usize> for BytesRemaining {
-    type Error = ();
-
-    #[inline(always)]
-    fn try_from(value: usize) -> Result<Self, Self::Error> {
-        NonZero::new(value).ok_or(()).map(Self)
-    }
-}
-
-impl BytesRemaining {
-    #[inline(always)]
-    pub fn of(value: impl AsRef<[u8]>) -> Option<Self> {
-        NonZero::new(value.as_ref().len()).map(BytesRemaining)
-    }
-}
+pub type ParseResult<'i, T, Sy, Se> = Result<T, ParseError<&'i str, Sy, Se>>;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ParseFullError {
-    UnexpectedEof,
-    UnexpectedByte(u8, BytesRemaining),
-    InvalidSplitIndex(usize, BytesRemaining),
-    RemainingInput(BytesRemaining),
+pub struct ParseError<I, Sy, Se> {
+    input: I,
+    error: ParseErrorKind<Sy, Se>,
 }
 
-/// An error which may relate to parsing or else be semantic.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ParseError<E> {
-    UnexpectedEof,
-    UnexpectedByte(u8, BytesRemaining),
-    InvalidSplitIndex(usize, BytesRemaining),
-    Semantic(E),
-}
-
-impl<E> From<E> for ParseError<E> {
-    fn from(v: E) -> Self {
-        Self::Semantic(v)
-    }
-}
-
-impl<E> ParseError<E> {
-    fn coerce<E2>(self) -> ParseError<E2>
+impl<I, Sy, Se> ParseError<I, Sy, Se> {
+    #[inline(always)]
+    pub fn unexpected_eof() -> Self
     where
-        E: Into<E2>,
+        &'static str: Into<I>,
     {
-        match self {
-            ParseError::UnexpectedEof => ParseError::UnexpectedEof,
-            ParseError::UnexpectedByte(b, br) => ParseError::UnexpectedByte(b, br),
-            ParseError::InvalidSplitIndex(i, br) => ParseError::InvalidSplitIndex(i, br),
-            ParseError::Semantic(error) => ParseError::Semantic(error.into()),
+        Self {
+            input: "".into(),
+            error: ParseErrorKind::General(GeneralParseError::UnexpectedEof),
         }
     }
 
-    fn into_parse_full_error(self, tail: &str) -> Result<E, ParseFullError> {
-        match NonZero::new(tail.len()) {
-            Some(n) => Err(ParseFullError::RemainingInput(BytesRemaining(n))),
-            None => match self {
-                ParseError::UnexpectedEof => Err(ParseFullError::UnexpectedEof),
-                ParseError::UnexpectedByte(b, br) => Err(ParseFullError::UnexpectedByte(b, br)),
-                ParseError::InvalidSplitIndex(i, br) => {
-                    Err(ParseFullError::InvalidSplitIndex(i, br))
-                }
-                ParseError::Semantic(error) => Ok(error),
-            },
-        }
-    }
-}
-
-pub trait DateTimeMarker: Sized {
-    fn parser(input: &mut &str) -> Result<Self, ParseError<InvalidDateTimeError<Self>>>;
-}
-
-impl DateTimeMarker for Utc {
-    fn parser(input: &mut &str) -> Result<Self, ParseError<InvalidDateTimeError<Self>>> {
-        let [byte] = take_bytes(input).copied()?;
-
-        match byte {
-            b'Z' => Ok(Utc),
-            _ => Err(ParseError::Semantic(InvalidDateTimeError::Marker(
-                Default::default(),
-            ))),
-        }
-    }
-}
-
-impl DateTimeMarker for Local {
     #[inline(always)]
-    fn parser(_input: &mut &str) -> Result<Self, ParseError<InvalidDateTimeError<Self>>> {
-        // immediately succeed without advancing the input
-        Ok(Local)
+    pub const fn invalid_split_index(input: I, index: usize) -> Self {
+        Self {
+            input,
+            error: ParseErrorKind::General(GeneralParseError::InvalidSplitIndex(index)),
+        }
+    }
+
+    #[inline(always)]
+    pub const fn insufficient_input(input: I, count: usize) -> Self {
+        Self {
+            input,
+            error: ParseErrorKind::General(GeneralParseError::InvalidSplitIndex(count)),
+        }
+    }
+
+    #[inline(always)]
+    pub const fn general(input: I, error: GeneralParseError) -> Self {
+        Self {
+            input,
+            error: ParseErrorKind::General(error),
+        }
+    }
+
+    #[inline(always)]
+    pub const fn syntax(input: I, error: Sy) -> Self {
+        Self {
+            input,
+            error: ParseErrorKind::Syntax(error),
+        }
+    }
+
+    #[inline(always)]
+    pub const fn semantic(input: I, error: Se) -> Self {
+        Self {
+            input,
+            error: ParseErrorKind::Semantic(error),
+        }
+    }
+
+    #[inline(always)]
+    pub fn into_semantic(self) -> Option<Se> {
+        match self.error {
+            ParseErrorKind::Semantic(error) => Some(error),
+            _ => None,
+        }
+    }
+
+    pub fn coerce<Sy2, Se2>(self) -> ParseError<I, Sy2, Se2>
+    where
+        Sy: Into<Sy2>,
+        Se: Into<Se2>,
+    {
+        let Self { input, error } = self;
+
+        match error {
+            ParseErrorKind::General(error) => ParseError::general(input, error),
+            ParseErrorKind::Syntax(error) => ParseError::syntax(input, error.into()),
+            ParseErrorKind::Semantic(error) => ParseError::semantic(input, error.into()),
+        }
+    }
+
+    #[inline(always)]
+    pub fn coerce_semantic<Se2>(self) -> ParseError<I, Sy, Se2>
+    where
+        Se: Into<Se2>,
+    {
+        self.coerce()
+    }
+
+    #[inline(always)]
+    pub fn coerce_syntax<Sy2>(self) -> ParseError<I, Sy2, Se>
+    where
+        Sy: Into<Sy2>,
+    {
+        self.coerce()
     }
 }
 
-pub fn date_time<M: DateTimeMarker>(
-    input: &mut &str,
-) -> Result<DateTime<M>, ParseError<InvalidDateTimeError<M>>> {
-    let date = date(input).map_err(ParseError::coerce)?;
-    let _ = byte_where(input, |b| b == b'T')?;
-    let time = time(input).map_err(ParseError::coerce)?;
-    let marker = M::parser(input)?;
-    Ok(DateTime { date, time, marker })
+#[derive(Debug, Clone, Copy, Error, PartialEq, Eq)]
+pub enum ParseErrorKind<Sy, Se> {
+    #[error("parse error: {0}")]
+    General(GeneralParseError),
+    #[error("syntax error: {0}")]
+    Syntax(Sy),
+    #[error("semantic error: {0}")]
+    Semantic(Se),
 }
 
-pub fn date(input: &mut &str) -> Result<Date, ParseError<InvalidDateError>> {
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Error)]
+pub enum GeneralParseError {
+    #[error("unexpected end of input")]
+    UnexpectedEof,
+    #[error("insufficient input (expected {0} bytes)")]
+    InsufficientInput(usize),
+    #[error("attempted to split input at an invalid index ({0})")]
+    InvalidSplitIndex(usize),
+    #[error("unconsumed input")]
+    UnconsumedInput,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Error)]
+pub enum DateParseError {
+    #[error("invalid year: {0}")]
+    Year(#[from] YearParseError),
+    #[error("invalid month: {0}")]
+    Month(#[from] MonthParseError),
+    #[error("invalid day: {0}")]
+    Day(#[from] DayParseError),
+    #[error("expected a hyphen but got {0} instead")]
+    InvalidSeparator(char),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Error)]
+#[error(transparent)]
+pub struct YearParseError(#[from] DigitParseError);
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Error)]
+#[error(transparent)]
+pub struct MonthParseError(#[from] DigitParseError);
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Error)]
+#[error(transparent)]
+pub struct DayParseError(#[from] DigitParseError);
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Error)]
+#[error("expected an ASCII digit but got the byte {0:02X} instead")]
+pub struct DigitParseError(u8);
+
+// TODO: implement separate parsers for LocalDateTime and UtcDateTime
+
+// pub fn date_time<M: DateTimeMarker>(
+//     input: &mut &str,
+// ) -> Result<DateTime<M>, ParseError<InvalidDateTimeError<M>>> {
+//     let date = date(input).map_err(ParseError::coerce)?;
+//     let _ = byte_where(input, |b| b == b'T')?;
+//     let time = time(input).map_err(ParseError::coerce)?;
+//     let marker = M::parser(input)?;
+//     Ok(DateTime { date, time, marker })
+// }
+
+pub fn date<'i>(input: &mut &'i str) -> ParseResult<'i, Date, DateParseError, InvalidDateError> {
+    fn hyphen<'i>(input: &mut &'i str) -> ParseResult<'i, (), DateParseError, InvalidDateError> {
+        let checkpoint = *input;
+
+        match char(input)? {
+            '-' => Ok(()),
+            c => {
+                *input = checkpoint;
+                Err(ParseError::syntax(
+                    input,
+                    DateParseError::InvalidSeparator(c),
+                ))
+            }
+        }
+    }
+
+    let checkpoint = *input;
     let year = year(input).map_err(ParseError::coerce)?;
     let () = hyphen(input)?;
     let month = month(input).map_err(ParseError::coerce)?;
     let () = hyphen(input)?;
     let day = day(input).map_err(ParseError::coerce)?;
 
-    Date::new(year, month, day).map_err(Into::into)
+    match Date::new(year, month, day) {
+        Ok(date) => Ok(date),
+        Err(error) => {
+            *input = checkpoint;
+            Err(ParseError::semantic(input, error))
+        }
+    }
 }
 
-pub fn year(input: &mut &str) -> Result<Year, ParseError<InvalidYearError>> {
-    let a = digit(input)? as u16;
-    let b = digit(input)? as u16;
-    let c = digit(input)? as u16;
-    let d = digit(input)? as u16;
-
+/// Parses a [`Year`].
+pub fn year<'i>(input: &mut &'i str) -> ParseResult<'i, Year, YearParseError, InvalidYearError> {
+    let checkpoint = *input;
+    let a = digit(input).map_err(ParseError::coerce_syntax)? as u16;
+    let b = digit(input).map_err(ParseError::coerce_syntax)? as u16;
+    let c = digit(input).map_err(ParseError::coerce_syntax)? as u16;
+    let d = digit(input).map_err(ParseError::coerce_syntax)? as u16;
     let value = (a * 1000) + (b * 100) + (c * 10) + d;
-    Year::new(value).map_err(Into::into)
+
+    match Year::new(value) {
+        Ok(year) => Ok(year),
+        Err(error) => {
+            *input = checkpoint;
+            Err(ParseError::semantic(input, error))
+        }
+    }
 }
 
-pub fn month(input: &mut &str) -> Result<Month, ParseError<InvalidMonthError>> {
-    let a = digit(input)?;
-    let b = digit(input)?;
+/// Parses a [`Month`].
+pub fn month<'i>(
+    input: &mut &'i str,
+) -> ParseResult<'i, Month, MonthParseError, InvalidMonthError> {
+    let checkpoint = *input;
+    let a = digit(input).map_err(ParseError::coerce_syntax)?;
+    let b = digit(input).map_err(ParseError::coerce_syntax)?;
     let value = (a * 10) + b;
-    Month::new(value).map_err(Into::into)
+
+    match Month::new(value) {
+        Ok(month) => Ok(month),
+        Err(error) => {
+            *input = checkpoint;
+            Err(ParseError::semantic(input, error))
+        }
+    }
 }
 
-pub fn day(input: &mut &str) -> Result<Day, ParseError<InvalidDayError>> {
-    let a = digit(input)?;
-    let b = digit(input)?;
+/// Parses a [`Day`].
+pub fn day<'i>(input: &mut &'i str) -> ParseResult<'i, Day, DayParseError, InvalidDayError> {
+    let checkpoint = *input;
+    let a = digit(input).map_err(ParseError::coerce_syntax)?;
+    let b = digit(input).map_err(ParseError::coerce_syntax)?;
     let value = (a * 10) + b;
-    Day::new(value).map_err(Into::into)
+
+    match Day::new(value) {
+        Ok(day) => Ok(day),
+        Err(error) => {
+            *input = checkpoint;
+            Err(ParseError::semantic(input, error))
+        }
+    }
 }
 
-pub fn time(input: &mut &str) -> Result<Time, ParseError<InvalidTimeError>> {
+/// Parses a [`Time`].
+pub fn time<'i>(input: &mut &'i str) -> ParseResult<'i, Time, (), InvalidTimeError> {
     todo!()
-}
-
-#[inline(always)]
-fn hyphen<E>(input: &mut &str) -> Result<(), ParseError<E>> {
-    let _ = byte_where(input, |b| b == b'-')?;
-    Ok(())
 }
 
 // COMBINATORS
 
 /// Parses a single digit.
-fn digit<E>(input: &mut &str) -> Result<u8, ParseError<E>> {
-    let byte = byte_where(input, |b| b.is_ascii_digit())?;
-    Ok(byte - b'0')
-}
+fn digit<'i, Se>(input: &mut &'i str) -> ParseResult<'i, u8, DigitParseError, Se> {
+    let checkpoint = *input;
+    let byte = byte(input)?;
 
-/// Parses a single byte matching the given predicate. If removing the first byte from the input
-/// would produce an invalid string, the parser will panic.
-fn byte_where<E>(input: &mut &str, f: impl FnOnce(u8) -> bool) -> Result<u8, ParseError<E>> {
-    let bytes_remaining = BytesRemaining::of(&input).ok_or(ParseError::UnexpectedEof)?;
-    let [byte] = take_bytes(input).copied()?;
-
-    match f(byte) {
-        true => Ok(byte),
-        false => Err(ParseError::UnexpectedByte(byte, bytes_remaining)),
+    match byte.is_ascii_digit() {
+        true => Ok(byte - b'0'),
+        false => {
+            *input = checkpoint;
+            Err(ParseError::syntax(input, DigitParseError(byte)))
+        }
     }
 }
 
-/// Takes the first `N` bytes from the `input`.
-fn take_bytes<'a, E, const N: usize>(input: &mut &'a str) -> Result<&'a [u8; N], ParseError<E>> {
-    let bytes = input
-        .as_bytes()
-        .first_chunk::<N>()
-        .ok_or(ParseError::UnexpectedEof)?;
-    let () = skip(input, N)?;
-    Ok(bytes)
+/// Parses a single character.
+fn char<'i, Sy, Se>(input: &mut &'i str) -> ParseResult<'i, char, Sy, Se> {
+    let mut chars = input.chars();
+
+    match chars.next() {
+        None => Err(ParseError::unexpected_eof()),
+        Some(c) => {
+            *input = chars.as_str();
+            Ok(c)
+        }
+    }
+}
+
+/// Parses a single byte.
+fn byte<'i, Sy, Se>(input: &mut &'i str) -> ParseResult<'i, u8, Sy, Se> {
+    match input.as_bytes().first() {
+        None => Err(ParseError::unexpected_eof()),
+        Some(&b) => match input.split_at_checked(1) {
+            None => Err(ParseError::invalid_split_index(input, 1)),
+            Some((_, tail)) => {
+                *input = tail;
+                Ok(b)
+            }
+        },
+    }
 }
 
 /// Skips the next `count` bytes in the `input`.
-fn skip<E>(input: &mut &str, count: usize) -> Result<(), ParseError<E>> {
+fn skip<'i, Sy, Se>(input: &mut &'i str, count: usize) -> ParseResult<'i, (), Sy, Se> {
     take_str(input, count).and(Ok(()))
 }
 
 /// Takes the first `count` bytes from the `input`, returning an error if removing these inputs
 /// would leave the `input` in an invalid state.
-fn take_str<'i, E>(input: &mut &'i str, count: usize) -> Result<&'i str, ParseError<E>> {
+fn take_str<'i, Sy, Se>(input: &mut &'i str, count: usize) -> ParseResult<'i, &'i str, Sy, Se> {
     match input.len().cmp(&count) {
-        Ordering::Less => Err(ParseError::UnexpectedEof),
+        Ordering::Less => Err(ParseError::insufficient_input(input, count)),
         Ordering::Equal => {
             let (head, tail) = (*input, "");
             *input = tail;
             Ok(head)
         }
-        Ordering::Greater => {
-            let bytes_remaining = BytesRemaining::from(NonZero::new(input.len()).unwrap());
-
-            match input.split_at_checked(count) {
-                None => Err(ParseError::InvalidSplitIndex(count, bytes_remaining)),
-                Some((head, tail)) => {
-                    *input = tail;
-                    Ok(head)
-                }
+        Ordering::Greater => match input.split_at_checked(count) {
+            None => Err(ParseError::invalid_split_index(input, count)),
+            Some((head, tail)) => {
+                *input = tail;
+                Ok(head)
             }
-        }
+        },
     }
 }
 
@@ -256,7 +360,10 @@ mod tests {
                     let day = Day::new(d).unwrap();
 
                     let parser = parse_full(date);
-                    assert_eq!(parser(&input), Ok(Date::new(year, month, day)));
+                    assert_eq!(
+                        parser(&input).map_err(|e| e.into_semantic().unwrap()),
+                        Date::new(year, month, day)
+                    );
                 }
             }
         }
@@ -274,9 +381,9 @@ mod tests {
 
     #[test]
     fn month_parser() {
-        assert_eq!(month(&mut ""), Err(ParseError::UnexpectedEof));
-        assert_eq!(month(&mut "0"), Err(ParseError::UnexpectedEof));
-        assert_eq!(month(&mut "1"), Err(ParseError::UnexpectedEof));
+        assert_eq!(month(&mut ""), Err(ParseError::unexpected_eof()));
+        assert_eq!(month(&mut "0"), Err(ParseError::unexpected_eof()));
+        assert_eq!(month(&mut "1"), Err(ParseError::unexpected_eof()));
         assert!(month(&mut "00").is_err());
 
         for i in 1..=12 {
@@ -289,9 +396,9 @@ mod tests {
 
     #[test]
     fn day_parser() {
-        assert_eq!(day(&mut ""), Err(ParseError::UnexpectedEof));
-        assert_eq!(day(&mut "0"), Err(ParseError::UnexpectedEof));
-        assert_eq!(day(&mut "1"), Err(ParseError::UnexpectedEof));
+        assert_eq!(day(&mut ""), Err(ParseError::unexpected_eof()));
+        assert_eq!(day(&mut "0"), Err(ParseError::unexpected_eof()));
+        assert_eq!(day(&mut "1"), Err(ParseError::unexpected_eof()));
         assert!(day(&mut "00").is_err());
 
         for i in 1..=31 {
@@ -304,7 +411,7 @@ mod tests {
 
     #[test]
     fn digit_parser() {
-        assert_eq!(digit::<()>(&mut ""), Err(ParseError::UnexpectedEof));
+        assert_eq!(digit::<()>(&mut ""), Err(ParseError::unexpected_eof()));
 
         assert_eq!(digit::<()>(&mut "0"), Ok(0));
         assert_eq!(digit::<()>(&mut "1"), Ok(1));
@@ -318,7 +425,7 @@ mod tests {
         assert_eq!(digit::<()>(&mut "9"), Ok(9));
         assert_eq!(
             digit::<()>(&mut "A"),
-            Err(ParseError::UnexpectedByte(b'A', 1.try_into().unwrap()))
+            Err(ParseError::syntax("A", DigitParseError(b'A')))
         );
 
         assert_eq!(digit::<()>(&mut "0dgsahjk"), Ok(0));
@@ -329,7 +436,7 @@ mod tests {
         assert_eq!(digit::<()>(&mut "59888988"), Ok(5));
         assert_eq!(
             digit::<()>(&mut "A0"),
-            Err(ParseError::UnexpectedByte(b'A', 2.try_into().unwrap()))
+            Err(ParseError::syntax("A0", DigitParseError(b'A')))
         );
     }
 
@@ -337,54 +444,60 @@ mod tests {
     fn skip_parser() {
         let input = &mut "0123456789ABCDEF";
 
-        assert_eq!(skip::<()>(input, 0), Ok(()));
+        assert_eq!(skip::<(), ()>(input, 0), Ok(()));
         assert_eq!(*input, "0123456789ABCDEF");
-        assert_eq!(skip::<()>(input, 4), Ok(()));
+        assert_eq!(skip::<(), ()>(input, 4), Ok(()));
         assert_eq!(*input, "456789ABCDEF");
-        assert_eq!(skip::<()>(input, 6), Ok(()));
+        assert_eq!(skip::<(), ()>(input, 6), Ok(()));
         assert_eq!(*input, "ABCDEF");
-        assert_eq!(skip::<()>(input, 5), Ok(()));
+        assert_eq!(skip::<(), ()>(input, 5), Ok(()));
         assert_eq!(*input, "F");
-        assert_eq!(skip::<()>(input, 1), Ok(()));
+        assert_eq!(skip::<(), ()>(input, 1), Ok(()));
         assert_eq!(*input, "");
-        assert_eq!(skip::<()>(input, 0), Ok(()));
+        assert_eq!(skip::<(), ()>(input, 0), Ok(()));
         assert_eq!(*input, "");
-        assert_eq!(skip::<()>(input, 1), Err(ParseError::UnexpectedEof));
+        assert_eq!(
+            skip::<(), ()>(input, 1),
+            Err(ParseError::insufficient_input("", 1))
+        );
     }
 
     #[test]
     fn take_str_parser() {
         let input = &mut "abcdαβγδ";
 
-        assert_eq!(take_str::<()>(input, 0), Ok(""));
+        assert_eq!(take_str::<(), ()>(input, 0), Ok(""));
         assert_eq!(*input, "abcdαβγδ");
-        assert_eq!(take_str::<()>(input, 2), Ok("ab"));
+        assert_eq!(take_str::<(), ()>(input, 2), Ok("ab"));
         assert_eq!(*input, "cdαβγδ");
-        assert_eq!(take_str::<()>(input, 2), Ok("cd"));
+        assert_eq!(take_str::<(), ()>(input, 2), Ok("cd"));
         assert_eq!(*input, "αβγδ");
-        assert_eq!(take_str::<()>(input, 2), Ok("α"));
+        assert_eq!(take_str::<(), ()>(input, 2), Ok("α"));
         assert_eq!(*input, "βγδ");
 
         assert_eq!(
-            take_str::<()>(input, 3),
-            Err(ParseError::InvalidSplitIndex(3, 6.try_into().unwrap()))
+            take_str::<(), ()>(input, 3),
+            Err(ParseError::invalid_split_index("βγδ", 3))
         );
         assert_eq!(*input, "βγδ");
 
-        assert_eq!(take_str::<()>(input, 4), Ok("βγ"));
+        assert_eq!(take_str::<(), ()>(input, 4), Ok("βγ"));
         assert_eq!(*input, "δ");
 
         assert_eq!(
-            take_str::<()>(input, 1),
-            Err(ParseError::InvalidSplitIndex(1, 2.try_into().unwrap()))
+            take_str::<(), ()>(input, 1),
+            Err(ParseError::invalid_split_index("δ", 1))
         );
         assert_eq!(*input, "δ");
 
-        assert_eq!(take_str::<()>(input, 3), Err(ParseError::UnexpectedEof));
+        assert_eq!(
+            take_str::<(), ()>(input, 3),
+            Err(ParseError::insufficient_input("δ", 3))
+        );
         assert_eq!(*input, "δ");
-        assert_eq!(take_str::<()>(input, 2), Ok("δ"));
+        assert_eq!(take_str::<(), ()>(input, 2), Ok("δ"));
         assert_eq!(*input, "");
-        assert_eq!(take_str::<()>(input, 0), Ok(""));
+        assert_eq!(take_str::<(), ()>(input, 0), Ok(""));
         assert_eq!(*input, "");
     }
 }
