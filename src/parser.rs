@@ -9,6 +9,37 @@ use crate::model::time::{
     InvalidYearError, Month, Time, Year,
 };
 
+// # Implementation
+//
+// An incremental parser is a function which takes &mut &str (and potentially other parameters as
+// well) and returns a Result. The parser *succeeds* if it returns Ok, and *fails* otherwise. We
+// require that a parser function must not (visibly) write through the &mut &str parameter unless
+// it succeeds.
+//
+// This pattern is quite similar to winnow, although winnow also supports non-function parsers. The
+// reason we're not using winnow is because we want total control over the error types produced by
+// parsers, and in particular we want to avoid producing opaque string-based errors.
+//
+// In this module, errors fall into three classes:
+//
+// 1. Non-specific parsing errors.
+// 2. Specific syntactic errors.
+// 3. Specific semantic errors.
+//
+// The first class contains all general parsing errors, represented by GeneralParseError. This is
+// mostly used by lower-level combinators and primitives to return errors that can't be given more
+// specific context based on the type being parsed (e.g. the unexpected end of input or a malformed
+// string slice).
+//
+// The second and third classes are specific to the type being parsed, and are distinguished from
+// one another by their relative scopes. The second kind of error can *only* appear when a parser
+// in this module produces it, and is fundamentally still about parsing; by contrast the third kind
+// may have any scope and appear anywhere in the codebase. For example, Year::new might be called
+// anywhere to return an InvalidYearError (including the downstream code of users), whereas
+// YearParseError can only occur because someone called the year parser in this module.
+
+/// Converts an incremental parser into a complete parser, which will return an error if the input
+/// string is not completely consumed.
 pub fn parse_full<'i, T, Sy, Se>(
     parser: impl FnOnce(&mut &'i str) -> ParseResult<'i, T, Sy, Se>,
 ) -> impl FnOnce(&'i str) -> ParseResult<'i, T, Sy, Se> {
@@ -26,8 +57,11 @@ pub fn parse_full<'i, T, Sy, Se>(
     }
 }
 
+/// The result of applying a parser, which is either a `T` or a [`ParseError<&'i str, Sy, Se>`].
 pub type ParseResult<'i, T, Sy, Se> = Result<T, ParseError<&'i str, Sy, Se>>;
 
+/// The error produced by a parser, holding some input `I` and an error which may be general (of
+/// type [`GeneralParseError`]), syntactic (of type `Sy`), or semantic (of type `Se`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ParseError<I, Sy, Se> {
     input: I,
@@ -131,24 +165,33 @@ impl<I, Sy, Se> ParseError<I, Sy, Se> {
     }
 }
 
+/// The kind of a [`ParseError`].
 #[derive(Debug, Clone, Copy, Error, PartialEq, Eq)]
 pub enum ParseErrorKind<Sy, Se> {
+    /// A non-specific parsing error.
     #[error("parse error: {0}")]
     General(GeneralParseError),
+    /// A syntactic error specific to the type being parsed.
     #[error("syntax error: {0}")]
     Syntax(Sy),
+    /// A semantic error specific to the type being parsed.
     #[error("semantic error: {0}")]
     Semantic(Se),
 }
 
+/// A non-specific parsing error.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Error)]
 pub enum GeneralParseError {
+    /// The input was completely empty.
     #[error("unexpected end of input")]
     UnexpectedEof,
+    /// The input did not have enough data to proceed.
     #[error("insufficient input (expected {0} bytes)")]
     InsufficientInput(usize),
+    /// The input was split in the middle of a UTF-8 character.
     #[error("attempted to split input at an invalid index ({0})")]
     InvalidSplitIndex(usize),
+    /// After parsing, the input was not completely consumed.
     #[error("unconsumed input")]
     UnconsumedInput,
 }
