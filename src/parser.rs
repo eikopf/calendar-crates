@@ -1,6 +1,6 @@
 //! Parsers for types which are encoded as strings by JSCalendar.
 
-use std::cmp::Ordering;
+use std::{cmp::Ordering, convert::Infallible};
 
 use thiserror::Error;
 
@@ -32,6 +32,12 @@ pub type ParseResult<'i, T, Sy, Se> = Result<T, ParseError<&'i str, Sy, Se>>;
 pub struct ParseError<I, Sy, Se> {
     input: I,
     error: ParseErrorKind<Sy, Se>,
+}
+
+impl<I, Sy, Se> From<Infallible> for ParseError<I, Sy, Se> {
+    fn from(value: Infallible) -> Self {
+        match value {}
+    }
 }
 
 impl<I, Sy, Se> ParseError<I, Sy, Se> {
@@ -277,6 +283,14 @@ pub fn time<'i>(input: &mut &'i str) -> ParseResult<'i, Time, (), InvalidTimeErr
 }
 
 // COMBINATORS
+
+/// Converts a fallible parser of `T` into an infallible parser of [`Option<T>`].
+#[inline(always)]
+fn optional<'i, T, Sy, Se>(
+    parser: impl FnOnce(&mut &'i str) -> ParseResult<'i, T, Sy, Se>,
+) -> impl FnOnce(&mut &'i str) -> Result<Option<T>, Infallible> {
+    |input| Ok(parser(input).ok())
+}
 
 /// Parses a single digit.
 fn digit<'i, Se>(input: &mut &'i str) -> ParseResult<'i, u8, DigitParseError, Se> {
