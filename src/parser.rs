@@ -5,8 +5,9 @@ use std::{cmp::Ordering, convert::Infallible};
 use thiserror::Error;
 
 use crate::model::time::{
-    Date, Day, InvalidDateError, InvalidDayError, InvalidMonthError, InvalidTimeError,
-    InvalidYearError, Month, Time, Year,
+    Date, Day, FractionalSecond, Hour, InvalidDateError, InvalidDayError,
+    InvalidFractionalSecondError, InvalidHourError, InvalidMinuteError, InvalidMonthError,
+    InvalidSecondError, InvalidTimeError, InvalidYearError, Minute, Month, Second, Time, Year,
 };
 
 // # Implementation
@@ -209,6 +210,20 @@ pub enum DateParseError {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Error)]
+pub enum TimeParseError {
+    #[error("invalid hour: {0}")]
+    Hour(#[from] HourParseError),
+    #[error("invalid minute: {0}")]
+    Minute(#[from] MinuteParseError),
+    #[error("invalid second: {0}")]
+    Second(#[from] SecondParseError),
+    #[error("invalid fractional second: {0}")]
+    FractionalSecond(#[from] FractionalSecondParseError),
+    #[error("expected a colon but got {0} instead")]
+    InvalidSeparator(char),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Error)]
 #[error(transparent)]
 pub struct YearParseError(#[from] DigitParseError);
 
@@ -219,6 +234,30 @@ pub struct MonthParseError(#[from] DigitParseError);
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Error)]
 #[error(transparent)]
 pub struct DayParseError(#[from] DigitParseError);
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Error)]
+#[error(transparent)]
+pub struct HourParseError(#[from] DigitParseError);
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Error)]
+#[error(transparent)]
+pub struct MinuteParseError(#[from] DigitParseError);
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Error)]
+#[error(transparent)]
+pub struct SecondParseError(#[from] DigitParseError);
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Error)]
+pub enum FractionalSecondParseError {
+    #[error(transparent)]
+    Digit(#[from] DigitParseError),
+    #[error("a trailing zero was encountered")]
+    TrailingZeros,
+    #[error("no digits after the decimal point")]
+    NoDigits,
+    #[error("more than 9 digits")]
+    TooManyDigits,
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Error)]
 #[error("expected an ASCII digit but got the byte {0:02X} instead")]
@@ -237,22 +276,9 @@ pub struct DigitParseError(u8);
 // }
 
 pub fn date<'i>(input: &mut &'i str) -> ParseResult<'i, Date, DateParseError, InvalidDateError> {
-    fn hyphen<'i>(input: &mut &'i str) -> ParseResult<'i, (), DateParseError, InvalidDateError> {
-        let checkpoint = *input;
-
-        match char(input)? {
-            '-' => Ok(()),
-            c => {
-                *input = checkpoint;
-                Err(ParseError::syntax(
-                    input,
-                    DateParseError::InvalidSeparator(c),
-                ))
-            }
-        }
-    }
-
     let checkpoint = *input;
+    let hyphen = separator('-', DateParseError::InvalidSeparator);
+
     let year = year(input).map_err(ParseError::coerce)?;
     let () = hyphen(input)?;
     let month = month(input).map_err(ParseError::coerce)?;
@@ -321,8 +347,118 @@ pub fn day<'i>(input: &mut &'i str) -> ParseResult<'i, Day, DayParseError, Inval
 }
 
 /// Parses a [`Time`].
-pub fn time<'i>(input: &mut &'i str) -> ParseResult<'i, Time, (), InvalidTimeError> {
+pub fn time<'i>(input: &mut &'i str) -> ParseResult<'i, Time, TimeParseError, InvalidTimeError> {
+    let checkpoint = *input;
+    let colon = separator(':', TimeParseError::InvalidSeparator);
+
+    let hour = hour(input).map_err(ParseError::coerce)?;
+    let () = colon(input)?;
+    let minute = minute(input).map_err(ParseError::coerce)?;
+    let () = colon(input)?;
+    let second = second(input).map_err(ParseError::coerce)?;
+    let frac = fractional_second(input).map_err(ParseError::coerce)?;
+
+    match Time::new(hour, minute, second, frac) {
+        Ok(time) => Ok(time),
+        Err(error) => {
+            *input = checkpoint;
+            Err(ParseError::semantic(input, error))
+        }
+    }
+}
+
+/// Parses an [`Hour`].
+pub fn hour<'i>(input: &mut &'i str) -> ParseResult<'i, Hour, HourParseError, InvalidHourError> {
+    let checkpoint = *input;
+    let a = digit(input).map_err(ParseError::coerce_syntax)?;
+    let b = digit(input).map_err(ParseError::coerce_syntax)?;
+    let value = (a * 10) + b;
+
+    match Hour::new(value) {
+        Ok(hour) => Ok(hour),
+        Err(error) => {
+            *input = checkpoint;
+            Err(ParseError::semantic(input, error))
+        }
+    }
+}
+
+/// Parses a [`Minute`].
+pub fn minute<'i>(
+    input: &mut &'i str,
+) -> ParseResult<'i, Minute, MinuteParseError, InvalidMinuteError> {
     todo!()
+}
+
+/// Parses a [`Second`].
+pub fn second<'i>(
+    input: &mut &'i str,
+) -> ParseResult<'i, Second, SecondParseError, InvalidSecondError> {
+    todo!()
+}
+
+/// Parses an optional [`FractionalSecond`], including its initial `.` separator.
+pub fn fractional_second<'i>(
+    input: &mut &'i str,
+) -> ParseResult<
+    'i,
+    Option<FractionalSecond>,
+    FractionalSecondParseError,
+    InvalidFractionalSecondError,
+> {
+    if input.is_empty() || !input.starts_with('.') {
+        return Ok(None);
+    }
+
+    let checkpoint = *input;
+    let () = skip(input, 1)?;
+    let digits = digits0(input)?;
+
+    match digits.len() {
+        0 => Err(ParseError::syntax(
+            input,
+            FractionalSecondParseError::NoDigits,
+        )),
+        10.. => Err(ParseError::syntax(
+            input,
+            FractionalSecondParseError::TooManyDigits,
+        )),
+        1..=9 => {
+            const PLACE_VALUES: [u32; 9] = [
+                100_000_000, // 100ms
+                10_000_000,  // 10ms
+                1_000_000,   // 1ms
+                100_000,     // 100μs
+                10_000,      // 10μs
+                1000,        // 1μs
+                100,         // 100ns
+                10,          // 10ns
+                1,           // 1ns
+            ];
+
+            if digits.as_bytes().last() == Some(&b'0') {
+                return Err(ParseError::syntax(
+                    input,
+                    FractionalSecondParseError::TrailingZeros,
+                ));
+            }
+
+            let value = digits
+                .as_bytes()
+                .iter()
+                .zip(PLACE_VALUES)
+                .map(|(&d, p)| ((d - b'0') as u32) * p)
+                .sum::<u32>();
+
+            match FractionalSecond::new(value) {
+                Ok(frac) => Ok(Some(frac)),
+                Err(error) => {
+                    *input = checkpoint;
+                    Err(ParseError::semantic(input, error))
+                }
+            }
+        }
+    }
 }
 
 // COMBINATORS
@@ -333,6 +469,41 @@ fn optional<'i, T, Sy, Se>(
     parser: impl FnOnce(&mut &'i str) -> ParseResult<'i, T, Sy, Se>,
 ) -> impl FnOnce(&mut &'i str) -> Result<Option<T>, Infallible> {
     |input| Ok(parser(input).ok())
+}
+
+/// Constructs a parser that tries to parse `sep`, and constructs an error message from the parsed
+/// character using `f` if it fails.
+fn separator<'i, Sy, Se>(
+    sep: char,
+    f: impl Fn(char) -> Sy,
+) -> impl Fn(&mut &'i str) -> ParseResult<'i, (), Sy, Se> {
+    move |input| {
+        let checkpoint = *input;
+        let c = char(input)?;
+
+        if c == sep {
+            Ok(())
+        } else {
+            *input = checkpoint;
+            Err(ParseError::syntax(input, f(c)))
+        }
+    }
+}
+
+/// Parses zero or more digits. Unlike the [`digit`] parser, the resulting slice contains ASCII
+/// digits rather than the literal values of each digit.
+fn digits0<'i, Sy, Se>(input: &mut &'i str) -> ParseResult<'i, &'i str, Sy, Se> {
+    match input.split_once(|c: char| !c.is_ascii_digit()) {
+        None => {
+            let (head, tail) = (*input, "");
+            *input = tail;
+            Ok(head)
+        }
+        Some((head, _)) => {
+            let () = skip(input, head.len())?;
+            Ok(head)
+        }
+    }
 }
 
 /// Parses a single digit.
@@ -464,6 +635,26 @@ mod tests {
             assert_eq!(day(&mut input), Ok(Day::new(i).unwrap()));
             assert!(input.is_empty());
         }
+    }
+
+    #[test]
+    fn fractional_second_parser() {
+        assert_eq!(fractional_second(&mut ""), Ok(None));
+        assert_eq!(fractional_second(&mut "1.00001"), Ok(None));
+
+        assert_eq!(
+            fractional_second(&mut ".000000001"),
+            Ok(Some(FractionalSecond::MIN))
+        );
+        assert_eq!(
+            fractional_second(&mut ".999999999"),
+            Ok(Some(FractionalSecond::MAX))
+        );
+
+        assert_eq!(
+            fractional_second(&mut ".001"),
+            Ok(FractionalSecond::new(1_000_000).ok())
+        );
     }
 
     #[test]

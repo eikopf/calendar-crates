@@ -1,6 +1,6 @@
 //! Date and time data model types.
 
-use std::{marker::PhantomData, num::NonZero};
+use std::{convert::Infallible, marker::PhantomData, num::NonZero};
 
 use thiserror::Error;
 
@@ -190,6 +190,25 @@ pub struct Time {
     frac: Option<FractionalSecond>,
 }
 
+impl Time {
+    pub const fn new(
+        hour: Hour,
+        minute: Minute,
+        second: Second,
+        frac: Option<FractionalSecond>,
+    ) -> Result<Self, InvalidTimeError> {
+        // refer to RFC 3339 §5.7 for details about when leap seconds are valid. for now, we're
+        // just going to unconditionally construct a Time
+
+        Ok(Self {
+            hour,
+            minute,
+            second,
+            frac,
+        })
+    }
+}
+
 #[derive(Debug, Clone, Copy, Error, PartialEq, Eq)]
 pub enum InvalidTimeError {
     #[error("invalid hour: {0}")]
@@ -198,6 +217,14 @@ pub enum InvalidTimeError {
     Minute(#[from] InvalidMinuteError),
     #[error("invalid second: {0}")]
     Second(#[from] InvalidSecondError),
+    #[error("invalid fractional second: {0}")]
+    FractionalSecond(#[from] InvalidFractionalSecondError),
+}
+
+impl From<Infallible> for InvalidTimeError {
+    fn from(value: Infallible) -> Self {
+        match value {}
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
@@ -228,6 +255,22 @@ pub enum Hour {
     H21,
     H22,
     H23,
+}
+
+impl Hour {
+    pub const fn new(value: u8) -> Result<Self, InvalidHourError> {
+        match NonZero::new(value) {
+            None => Ok(Self::H00),
+            Some(value) => match value.get() <= 23 {
+                false => Err(InvalidHourError(value)),
+                true => Ok({
+                    // SAFETY: `value` must be less than 24 in this branch, so it is a valid hour,
+                    // and Hour is repr(u8)
+                    unsafe { std::mem::transmute::<u8, Hour>(value.get()) }
+                }),
+            },
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, Error, PartialEq, Eq)]
@@ -298,6 +341,22 @@ pub enum Minute {
     M57,
     M58,
     M59,
+}
+
+impl Minute {
+    pub const fn new(value: u8) -> Result<Self, InvalidMinuteError> {
+        match NonZero::new(value) {
+            None => Ok(Self::M00),
+            Some(value) => match value.get() <= 59 {
+                false => Err(InvalidMinuteError(value)),
+                true => Ok({
+                    // SAFETY: `value` must be less than 59 in this branch, so it is a valid minute,
+                    // and Minute is repr(u8)
+                    unsafe { std::mem::transmute::<u8, Minute>(value.get()) }
+                }),
+            },
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, Error, PartialEq, Eq)]
@@ -372,6 +431,22 @@ pub enum Second {
     S60,
 }
 
+impl Second {
+    pub const fn new(value: u8) -> Result<Self, InvalidSecondError> {
+        match NonZero::new(value) {
+            None => Ok(Self::S00),
+            Some(value) => match value.get() <= 60 {
+                false => Err(InvalidSecondError(value)),
+                true => Ok({
+                    // SAFETY: `value` must be less than 60 in this branch, so it is a valid second,
+                    // and Second is repr(u8)
+                    unsafe { std::mem::transmute::<u8, Second>(value.get()) }
+                }),
+            },
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, Error, PartialEq, Eq)]
 #[error("expected an integer between 0 and 60 but received {0}")]
 pub struct InvalidSecondError(NonZero<u8>);
@@ -392,6 +467,24 @@ impl FractionalSecond {
     pub const MIN: Self = Self(NonZero::new(1).unwrap());
     /// The largest fractional second; this value is 10^9 - 1 nanoseconds.
     pub const MAX: Self = Self(NonZero::new(10u32.pow(9) - 1).unwrap());
+
+    pub const fn new(value: u32) -> Result<Self, InvalidFractionalSecondError> {
+        match NonZero::new(value) {
+            None => Err(InvalidFractionalSecondError::AllZero),
+            Some(value) => match value.get() <= Self::MAX.0.get() {
+                true => Ok(Self(value)),
+                false => Err(InvalidFractionalSecondError::TooManyDigits(value)),
+            },
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, Error, PartialEq, Eq)]
+pub enum InvalidFractionalSecondError {
+    #[error("at least one fractional second digit must be non-zero")]
+    AllZero,
+    #[error("{0} has more than nine decimal digits")]
+    TooManyDigits(NonZero<u32>),
 }
 
 /// An unsigned length of time (RFC 8984 §1.4.6).
