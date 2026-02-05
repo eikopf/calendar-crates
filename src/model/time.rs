@@ -4,7 +4,14 @@ use std::{convert::Infallible, num::NonZero};
 
 use thiserror::Error;
 
-use crate::model::primitive::Sign;
+use crate::{
+    json::{DestructibleJsonValue, TryFromJson, TypeErrorOr},
+    model::primitive::Sign,
+    parser::{
+        DateTimeParseError, OwnedParseError, UtcDateTimeParseError, local_date_time, parse_full,
+        utc_date_time,
+    },
+};
 
 /// A marker struct for the UTC timezone.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -42,6 +49,26 @@ pub enum InvalidDateTimeError {
     Date(#[from] InvalidDateError),
     #[error("invalid time: {0}")]
     Time(#[from] InvalidTimeError),
+}
+
+impl TryFromJson for LocalDateTime {
+    type Error = TypeErrorOr<OwnedParseError<DateTimeParseError, InvalidDateTimeError>>;
+
+    fn try_from_json<V: DestructibleJsonValue>(value: V) -> Result<Self, Self::Error> {
+        let input = value.try_into_string()?;
+        let date_time = parse_full(local_date_time)(input.as_ref()).map_err(TypeErrorOr::Other)?;
+        Ok(date_time)
+    }
+}
+
+impl TryFromJson for UtcDateTime {
+    type Error = TypeErrorOr<OwnedParseError<UtcDateTimeParseError, InvalidDateTimeError>>;
+
+    fn try_from_json<V: DestructibleJsonValue>(value: V) -> Result<Self, Self::Error> {
+        let input = value.try_into_string()?;
+        let date_time = parse_full(utc_date_time)(input.as_ref()).map_err(TypeErrorOr::Other)?;
+        Ok(date_time)
+    }
 }
 
 /// An ISO 8601 date.
@@ -571,4 +598,31 @@ pub struct ExactDuration {
     minutes: u32,
     seconds: u32,
     frac: Option<FractionalSecond>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[cfg(feature = "serde_json")]
+    #[test]
+    fn utc_date_time_from_serde_json() {
+        use serde_json::Value;
+
+        let parse = |s| UtcDateTime::try_from_json(serde_json::from_str::<'_, Value>(s).unwrap());
+
+        assert!(parse("\"2025-01-01T12:00:00Z\"").is_ok());
+        assert!(parse("\"2025-01-01T12:00:00\"").is_err());
+    }
+
+    #[cfg(feature = "serde_json")]
+    #[test]
+    fn local_date_time_from_serde_json() {
+        use serde_json::Value;
+
+        let parse = |s| LocalDateTime::try_from_json(serde_json::from_str::<'_, Value>(s).unwrap());
+
+        assert!(parse("\"2025-01-01T12:00:00\"").is_ok());
+        assert!(parse("\"2025-01-01T12:00:00Z\"").is_err());
+    }
 }
