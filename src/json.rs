@@ -59,6 +59,13 @@ impl std::fmt::Display for ValueType {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Error)]
+#[error(transparent)]
+pub enum TypeErrorOr<E> {
+    TypeError(#[from] TypeError),
+    Other(E),
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Error)]
 #[error("expected a value of type {expected} but received type {received} instead")]
 pub struct TypeError {
@@ -92,7 +99,7 @@ pub enum IntoUnsignedIntError {
 
 /// A type representing a JSON value that can be converted into Rust values.
 pub trait DestructibleJsonValue: Sized {
-    type String;
+    type String: AsRef<str> + Into<String>;
     type Array: JsonArray;
     type Object: JsonObject;
 
