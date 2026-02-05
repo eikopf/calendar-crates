@@ -571,33 +571,26 @@ pub enum Duration {
 /// A [`Duration`] which may be positive or negative (RFC 8984 §1.4.7).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct SignedDuration {
-    sign: Sign,
-    duration: Duration,
+    pub sign: Sign,
+    pub duration: Duration,
 }
 
 /// A [`Duration`] measured in terms of weeks, days, hours, minutes, seconds, and fractional
 /// seconds.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct NominalDuration {
-    inner: NominalDurationInner,
-    exact: Option<ExactDuration>,
-}
-
-/// The nominal component of a [`NominalDuration`].
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-enum NominalDurationInner {
-    Days(u32),
-    Weeks(u32),
-    WeeksAndDays(u32, u32),
+    pub weeks: u32,
+    pub days: u32,
+    pub exact: Option<ExactDuration>,
 }
 
 /// A [`Duration`] measured only in terms of hours, minutes, seconds, and fractional seconds.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct ExactDuration {
-    hours: u32,
-    minutes: u32,
-    seconds: u32,
-    frac: Option<FractionalSecond>,
+    pub hours: u32,
+    pub minutes: u32,
+    pub seconds: u32,
+    pub frac: Option<FractionalSecond>,
 }
 
 #[cfg(test)]
