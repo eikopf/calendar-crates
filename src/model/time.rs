@@ -468,6 +468,11 @@ impl FractionalSecond {
     /// The largest fractional second; this value is 10^9 - 1 nanoseconds.
     pub const MAX: Self = Self(NonZero::new(10u32.pow(9) - 1).unwrap());
 
+    #[inline(always)]
+    pub const fn get(self) -> NonZero<u32> {
+        self.0
+    }
+
     pub const fn new(value: u32) -> Result<Self, InvalidFractionalSecondError> {
         match NonZero::new(value) {
             None => Err(InvalidFractionalSecondError::AllZero),

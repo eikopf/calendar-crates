@@ -387,14 +387,36 @@ pub fn hour<'i>(input: &mut &'i str) -> ParseResult<'i, Hour, HourParseError, In
 pub fn minute<'i>(
     input: &mut &'i str,
 ) -> ParseResult<'i, Minute, MinuteParseError, InvalidMinuteError> {
-    todo!()
+    let checkpoint = *input;
+    let a = digit(input).map_err(ParseError::coerce_syntax)?;
+    let b = digit(input).map_err(ParseError::coerce_syntax)?;
+    let value = (a * 10) + b;
+
+    match Minute::new(value) {
+        Ok(minute) => Ok(minute),
+        Err(error) => {
+            *input = checkpoint;
+            Err(ParseError::semantic(input, error))
+        }
+    }
 }
 
 /// Parses a [`Second`].
 pub fn second<'i>(
     input: &mut &'i str,
 ) -> ParseResult<'i, Second, SecondParseError, InvalidSecondError> {
-    todo!()
+    let checkpoint = *input;
+    let a = digit(input).map_err(ParseError::coerce_syntax)?;
+    let b = digit(input).map_err(ParseError::coerce_syntax)?;
+    let value = (a * 10) + b;
+
+    match Second::new(value) {
+        Ok(second) => Ok(second),
+        Err(error) => {
+            *input = checkpoint;
+            Err(ParseError::semantic(input, error))
+        }
+    }
 }
 
 /// Parses an optional [`FractionalSecond`], including its initial `.` separator.
@@ -638,6 +660,62 @@ mod tests {
     }
 
     #[test]
+    fn time_parser() {
+        assert_eq!(time(&mut ""), Err(ParseError::unexpected_eof()));
+
+        for hour in 0..=23 {
+            for minute in 0..=59 {
+                for second in 0..=60 {
+                    // create an arbitrary fractional second from the other parameters
+                    let frac = FractionalSecond::new({
+                        let mut x: u32 = 0xafbc1234;
+                        x = x.wrapping_shr(hour as u32);
+                        x = x.wrapping_shr(minute as u32);
+                        x = x.wrapping_shl(second as u32);
+                        x / 10
+                    })
+                    .ok()
+                    .filter(|_| second % 2 == 0);
+
+                    // build the basic input
+                    let mut buf = format!("{hour:02}:{minute:02}:{second:02}");
+
+                    // append any fractional second
+                    if let Some(frac) = frac {
+                        // push all nine digits into the string
+                        let tail = format!(".{:09}", frac.get());
+                        buf.push_str(&tail);
+
+                        // strip off trailing zeros
+                        while buf.ends_with('0') {
+                            buf.pop();
+                        }
+                    }
+
+                    let mut input = buf.as_str();
+
+                    let expected = Time::new(
+                        Hour::new(hour).unwrap(),
+                        Minute::new(minute).unwrap(),
+                        Second::new(second).unwrap(),
+                        frac,
+                    );
+
+                    dbg![&input];
+                    dbg![&expected];
+
+                    assert_eq!(
+                        time(&mut input).map_err(|e| e.into_semantic().unwrap()),
+                        expected
+                    );
+
+                    assert!(input.is_empty());
+                }
+            }
+        }
+    }
+
+    #[test]
     fn fractional_second_parser() {
         assert_eq!(fractional_second(&mut ""), Ok(None));
         assert_eq!(fractional_second(&mut "1.00001"), Ok(None));
@@ -655,6 +733,10 @@ mod tests {
             fractional_second(&mut ".001"),
             Ok(FractionalSecond::new(1_000_000).ok())
         );
+
+        assert!(fractional_second(&mut ".00000").is_err());
+        assert!(fractional_second(&mut ".00100").is_err());
+        assert!(fractional_second(&mut ".1111111111").is_err());
     }
 
     #[test]
