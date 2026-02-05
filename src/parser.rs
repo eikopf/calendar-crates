@@ -5,9 +5,10 @@ use std::{cmp::Ordering, convert::Infallible};
 use thiserror::Error;
 
 use crate::model::time::{
-    Date, Day, FractionalSecond, Hour, InvalidDateError, InvalidDayError,
-    InvalidFractionalSecondError, InvalidHourError, InvalidMinuteError, InvalidMonthError,
-    InvalidSecondError, InvalidTimeError, InvalidYearError, Minute, Month, Second, Time, Year,
+    Date, DateTime, Day, FractionalSecond, Hour, InvalidDateError, InvalidDateTimeError,
+    InvalidDayError, InvalidFractionalSecondError, InvalidHourError, InvalidMinuteError,
+    InvalidMonthError, InvalidSecondError, InvalidTimeError, InvalidYearError, Local,
+    LocalDateTime, Minute, Month, Second, Time, Utc, UtcDateTime, Year,
 };
 
 // # Implementation
@@ -198,6 +199,24 @@ pub enum GeneralParseError {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Error)]
+pub enum UtcDateTimeParseError {
+    #[error(transparent)]
+    DateTime(#[from] DateTimeParseError),
+    #[error("expected Z but got {0} instead")]
+    InvalidMarker(char),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Error)]
+pub enum DateTimeParseError {
+    #[error("invalid date: {0}")]
+    Date(#[from] DateParseError),
+    #[error("invalid time: {0}")]
+    Time(#[from] TimeParseError),
+    #[error("expected T but got {0} instead")]
+    InvalidSeparator(char),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Error)]
 pub enum DateParseError {
     #[error("invalid year: {0}")]
     Year(#[from] YearParseError),
@@ -263,17 +282,44 @@ pub enum FractionalSecondParseError {
 #[error("expected an ASCII digit but got the byte {0:02X} instead")]
 pub struct DigitParseError(u8);
 
-// TODO: implement separate parsers for LocalDateTime and UtcDateTime
+pub fn utc_date_time<'i>(
+    input: &mut &'i str,
+) -> ParseResult<'i, UtcDateTime, UtcDateTimeParseError, InvalidDateTimeError> {
+    let DateTime { date, time, .. } = date_time(input).map_err(ParseError::coerce)?;
+    let () = separator('Z', UtcDateTimeParseError::InvalidMarker)(input)?;
 
-// pub fn date_time<M: DateTimeMarker>(
-//     input: &mut &str,
-// ) -> Result<DateTime<M>, ParseError<InvalidDateTimeError<M>>> {
-//     let date = date(input).map_err(ParseError::coerce)?;
-//     let _ = byte_where(input, |b| b == b'T')?;
-//     let time = time(input).map_err(ParseError::coerce)?;
-//     let marker = M::parser(input)?;
-//     Ok(DateTime { date, time, marker })
-// }
+    Ok(DateTime {
+        date,
+        time,
+        marker: Utc,
+    })
+}
+
+pub fn local_date_time<'i>(
+    input: &mut &'i str,
+) -> ParseResult<'i, LocalDateTime, DateTimeParseError, InvalidDateTimeError> {
+    let DateTime { date, time, .. } = date_time(input).map_err(ParseError::coerce)?;
+
+    Ok(DateTime {
+        date,
+        time,
+        marker: Local,
+    })
+}
+
+pub fn date_time<'i>(
+    input: &mut &'i str,
+) -> ParseResult<'i, DateTime<()>, DateTimeParseError, InvalidDateTimeError> {
+    let date = date(input).map_err(ParseError::coerce)?;
+    let () = separator('T', DateTimeParseError::InvalidSeparator)(input)?;
+    let time = time(input).map_err(ParseError::coerce)?;
+
+    Ok(DateTime {
+        date,
+        time,
+        marker: (),
+    })
+}
 
 pub fn date<'i>(input: &mut &'i str) -> ParseResult<'i, Date, DateParseError, InvalidDateError> {
     let checkpoint = *input;
@@ -289,7 +335,7 @@ pub fn date<'i>(input: &mut &'i str) -> ParseResult<'i, Date, DateParseError, In
         Ok(date) => Ok(date),
         Err(error) => {
             *input = checkpoint;
-            Err(ParseError::semantic(input, error))
+            Err(ParseError::semantic(input, error.into()))
         }
     }
 }
@@ -599,6 +645,44 @@ mod tests {
     use super::*;
 
     #[test]
+    fn utc_date_time_parser() {
+        assert_eq!(utc_date_time(&mut ""), Err(ParseError::unexpected_eof()));
+
+        assert_eq!(
+            utc_date_time(&mut "2025-03-15T12:00:00"),
+            Err(ParseError::unexpected_eof())
+        );
+
+        assert_eq!(
+            utc_date_time(&mut "2025-03-15T12:00:00z"),
+            Err(ParseError::syntax(
+                "z",
+                UtcDateTimeParseError::InvalidMarker('z')
+            ))
+        );
+
+        assert!(utc_date_time(&mut "2025-03-15T12:00:00Z").is_ok());
+    }
+
+    #[test]
+    fn date_time_parser() {
+        assert_eq!(date_time(&mut ""), Err(ParseError::unexpected_eof()));
+
+        let input = &mut "2025-03-15T12:00:00";
+
+        assert_eq!(
+            date_time(input),
+            Ok(DateTime {
+                date: Date::new(Year::new(2025).unwrap(), Month::Mar, Day::D15).unwrap(),
+                time: Time::new(Hour::H12, Minute::M00, Second::S00, None).unwrap(),
+                marker: ()
+            })
+        );
+
+        assert!(input.is_empty());
+    }
+
+    #[test]
     fn date_parser() {
         for y in 0..=9999 {
             for m in 1..=12 {
@@ -612,7 +696,7 @@ mod tests {
                     let parser = parse_full(date);
                     assert_eq!(
                         parser(&input).map_err(|e| e.into_semantic().unwrap()),
-                        Date::new(year, month, day)
+                        Date::new(year, month, day).map_err(Into::into)
                     );
                 }
             }

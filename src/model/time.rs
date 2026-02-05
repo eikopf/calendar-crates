@@ -1,6 +1,6 @@
 //! Date and time data model types.
 
-use std::{convert::Infallible, marker::PhantomData, num::NonZero};
+use std::{convert::Infallible, num::NonZero};
 
 use thiserror::Error;
 
@@ -20,22 +20,28 @@ pub type UtcDateTime = DateTime<Utc>;
 /// A [`DateTime`] in the implicit [`Local`] timezone (RFC 8984 §1.4.4).
 pub type LocalDateTime = DateTime<Local>;
 
-#[derive(Debug, Clone, Copy, Error, PartialEq, Eq)]
-pub enum InvalidDateTimeError<M> {
-    #[error("invalid date: {0}")]
-    Date(#[from] InvalidDateError),
-    #[error("invalid time: {0}")]
-    Time(#[from] InvalidTimeError),
-    #[error("invalid offset marker")]
-    Marker(PhantomData<M>),
-}
-
 /// An ISO 8601 datetime with the timezone marker `M` (RFC 3339 §5.6).
+///
+/// This type makes no guarantees about the relationship between its fields, and in particular does
+/// not guarantee that the [`time`] field represents a time that actually occurred on the date
+/// represented by the [`date`] field; that is, it does not encode any information about leap
+/// seconds.
+///
+/// [`time`]: DateTime::time
+/// [`date`]: DateTime::date
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct DateTime<M> {
     pub date: Date,
     pub time: Time,
     pub marker: M,
+}
+
+#[derive(Debug, Clone, Copy, Error, PartialEq, Eq)]
+pub enum InvalidDateTimeError {
+    #[error("invalid date: {0}")]
+    Date(#[from] InvalidDateError),
+    #[error("invalid time: {0}")]
+    Time(#[from] InvalidTimeError),
 }
 
 /// An ISO 8601 date.
@@ -48,8 +54,28 @@ pub struct Date {
 
 impl Date {
     #[inline(always)]
-    pub const fn new(year: Year, month: Month, day: Day) -> Result<Self, InvalidDateError> {
-        Ok(Self { year, month, day })
+    pub const fn new(year: Year, month: Month, day: Day) -> Result<Self, ImpossibleDateError> {
+        if (day as u8) <= (Date::maximum_day(year, month) as u8) {
+            Ok(Self { year, month, day })
+        } else {
+            Err(ImpossibleDateError { year, month, day })
+        }
+    }
+
+    /// Returns the maximum day of `month` in `year`, based on the table given in RFC 3339 §5.7.
+    const fn maximum_day(year: Year, month: Month) -> Day {
+        match month {
+            Month::Feb if year.is_leap_year() => Day::D29,
+            Month::Feb => Day::D28,
+            Month::Jan
+            | Month::Mar
+            | Month::May
+            | Month::Jul
+            | Month::Aug
+            | Month::Oct
+            | Month::Dec => Day::D31,
+            Month::Apr | Month::Jun | Month::Sep | Month::Nov => Day::D30,
+        }
     }
 }
 
@@ -61,6 +87,16 @@ pub enum InvalidDateError {
     Month(#[from] InvalidMonthError),
     #[error("invalid day: {0}")]
     Day(#[from] InvalidDayError),
+    #[error(transparent)]
+    ImpossibleDate(#[from] ImpossibleDateError),
+}
+
+#[derive(Debug, Clone, Copy, Error, PartialEq, Eq)]
+#[error("the given date is impossible")]
+pub struct ImpossibleDateError {
+    year: Year,
+    month: Month,
+    day: Day,
 }
 
 /// A four-digit year ranging from 0 CE through 9999 CE.
@@ -77,6 +113,12 @@ impl std::fmt::Debug for Year {
 impl Year {
     pub const MIN: Self = Self(0);
     pub const MAX: Self = Self(9999);
+
+    pub const fn is_leap_year(self) -> bool {
+        let year = self.0;
+        // as given by RFC 3339, Appendix C
+        year % 4 == 0 && (year % 100 != 0 || year % 400 == 0)
+    }
 
     #[inline(always)]
     pub const fn new(value: u16) -> Result<Self, InvalidYearError> {
