@@ -44,17 +44,46 @@ use crate::model::time::{
 /// string is not completely consumed.
 pub fn parse_full<'i, T, Sy, Se>(
     parser: impl FnOnce(&mut &'i str) -> ParseResult<'i, T, Sy, Se>,
-) -> impl FnOnce(&'i str) -> ParseResult<'i, T, Sy, Se> {
+) -> impl FnOnce(&'i str) -> Result<T, OwnedParseError<Sy, Se>> {
     |s| {
         let mut input = s;
-        let result = parser(&mut input)?;
+        let result = parser(&mut input)
+            .map_err(|error| OwnedParseError::from_parse_error(error, s.into()))?;
 
         match input.is_empty() {
             true => Ok(result),
-            false => Err(ParseError::general(
-                input,
-                GeneralParseError::UnconsumedInput,
-            )),
+            false => {
+                let parse_error = ParseError::general(input, GeneralParseError::UnconsumedInput);
+                let error = OwnedParseError::from_parse_error(parse_error, s.into());
+                Err(error)
+            }
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct OwnedParseError<Sy, Se> {
+    complete_input: Box<str>,
+    index: usize,
+    error: ParseErrorKind<Sy, Se>,
+}
+
+impl<Sy, Se> OwnedParseError<Sy, Se> {
+    fn from_parse_error(error: ParseError<&str, Sy, Se>, complete_input: Box<str>) -> Self {
+        debug_assert!(complete_input.contains(error.input));
+        let index = complete_input.len() - error.input.len();
+
+        Self {
+            complete_input,
+            index,
+            error: error.error,
+        }
+    }
+
+    fn into_semantic(self) -> Option<Se> {
+        match self.error {
+            ParseErrorKind::Semantic(error) => Some(error),
+            _ => None,
         }
     }
 }
