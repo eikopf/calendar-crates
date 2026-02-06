@@ -36,11 +36,12 @@ impl TryFromJson for String {
 impl<T> TryFromJson for Vec<T>
 where
     T: TryFromJson,
-    T::Error: SplitPath,
-    <T::Error as SplitPath>::Residual: SplitTypeError,
+    T::Error: IntoDocumentError,
+    <T::Error as IntoDocumentError>::Residual: SplitTypeError,
 {
-    type Error =
-        DocumentError<TypeErrorOr<<<T::Error as SplitPath>::Residual as SplitTypeError>::Residual>>;
+    type Error = DocumentError<
+        TypeErrorOr<<<T::Error as IntoDocumentError>::Residual as SplitTypeError>::Residual>,
+    >;
 
     fn try_from_json<V: DestructibleJsonValue>(value: V) -> Result<Self, Self::Error> {
         let array = value
@@ -56,10 +57,12 @@ where
             .enumerate()
             .map(|(i, elem)| {
                 T::try_from_json(elem).map_err(|error| {
-                    let (error, mut path) = error.split_path();
-                    path.push_front(PathSegment::Index(i));
-                    let error = error.split_type_error();
-                    DocumentError { path, error }
+                    let mut error = error.into_document_error();
+                    error.path.push_front(PathSegment::Index(i));
+                    DocumentError {
+                        error: error.error.split_type_error(),
+                        path: error.path,
+                    }
                 })
             })
             .collect::<Result<Vec<_>, _>>()
@@ -87,58 +90,63 @@ impl<T: IntoJson> TryIntoJson for T {
     }
 }
 
-pub trait SplitPath: Sized {
+pub trait IntoDocumentError: Sized {
     type Residual;
 
-    fn split_path(self) -> (Self::Residual, VecDeque<PathSegment<Box<str>>>);
+    fn into_document_error(self) -> DocumentError<Self::Residual>;
 }
 
-macro_rules! trivial_split_path {
+macro_rules! trivial_into_document_error {
     ($name:ident) => {
-        impl SplitPath for $name {
+        impl IntoDocumentError for $name {
             type Residual = $name;
 
             #[inline(always)]
-            fn split_path(self) -> (Self::Residual, VecDeque<PathSegment<Box<str>>>) {
-                (self, VecDeque::new())
+            fn into_document_error(self) -> DocumentError<Self::Residual> {
+                DocumentError {
+                    error: self,
+                    path: VecDeque::new(),
+                }
             }
         }
     };
 }
 
-trivial_split_path!(IntoIntError);
-trivial_split_path!(IntoUnsignedIntError);
-trivial_split_path!(TypeError);
+trivial_into_document_error!(IntoIntError);
+trivial_into_document_error!(IntoUnsignedIntError);
+trivial_into_document_error!(TypeError);
 
-impl SplitPath for Infallible {
+impl IntoDocumentError for Infallible {
     type Residual = Infallible;
 
     #[inline(always)]
-    fn split_path(self) -> (Self::Residual, VecDeque<PathSegment<Box<str>>>) {
+    fn into_document_error(self) -> DocumentError<Self::Residual> {
         match self {}
     }
 }
 
-impl<E: SplitPath> SplitPath for TypeErrorOr<E> {
+impl<E: IntoDocumentError> IntoDocumentError for TypeErrorOr<E> {
     type Residual = TypeErrorOr<E::Residual>;
 
-    fn split_path(self) -> (Self::Residual, VecDeque<PathSegment<Box<str>>>) {
-        match self {
+    fn into_document_error(self) -> DocumentError<Self::Residual> {
+        let (error, path) = match self {
             TypeErrorOr::TypeError(type_error) => (type_error.into(), VecDeque::new()),
             TypeErrorOr::Other(error) => {
-                let (error, path) = error.split_path();
+                let DocumentError { error, path } = error.into_document_error();
                 (TypeErrorOr::Other(error), path)
             }
-        }
+        };
+
+        DocumentError { error, path }
     }
 }
 
-impl<E: SplitPath> SplitPath for DocumentError<E> {
+impl<E: IntoDocumentError> IntoDocumentError for DocumentError<E> {
     type Residual = E;
 
     #[inline(always)]
-    fn split_path(self) -> (Self::Residual, VecDeque<PathSegment<Box<str>>>) {
-        (self.error, self.path)
+    fn into_document_error(self) -> DocumentError<Self::Residual> {
+        self
     }
 }
 
