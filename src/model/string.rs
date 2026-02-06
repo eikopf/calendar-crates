@@ -7,6 +7,12 @@ use thiserror::Error;
 
 use crate::json::{DestructibleJsonValue, TryFromJson, TypeErrorOr};
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct StringError<E> {
+    input: Box<str>,
+    error: E,
+}
+
 /// A string slice satisfying the regex `/[A-Za-z0-9\-\_]{1, 255}/` (RFC 8984 §1.4.1).
 ///
 /// # Invariants
@@ -158,8 +164,7 @@ impl Id {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Error)]
-#[error("TODO: OwnedInvalidIdError")]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct OwnedInvalidIdError {
     input: Box<str>,
     error: InvalidIdError,
@@ -278,6 +283,22 @@ impl std::fmt::Debug for IdChar {
 #[dizzy(derive(Debug, CloneBoxed, IntoBoxed))]
 #[repr(transparent)]
 pub struct CustomTimeZoneId(str);
+
+impl TryFromJson for Box<CustomTimeZoneId> {
+    type Error = TypeErrorOr<StringError<InvalidCustomTimeZoneIdError>>;
+
+    fn try_from_json<V: DestructibleJsonValue>(value: V) -> Result<Self, Self::Error> {
+        let input = value.try_into_string()?;
+
+        CustomTimeZoneId::new(input.as_ref())
+            .map(Into::into)
+            .map_err(|error| StringError {
+                input: String::from(input.as_ref()).into(),
+                error,
+            })
+            .map_err(TypeErrorOr::Other)
+    }
+}
 
 impl CustomTimeZoneId {
     fn str_is_custom_time_zone_id(s: &str) -> Result<(), InvalidCustomTimeZoneIdError> {
