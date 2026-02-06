@@ -145,7 +145,7 @@ impl Year {
     pub const fn is_leap_year(self) -> bool {
         let year = self.0;
         // as given by RFC 3339, Appendix C
-        year % 4 == 0 && (year % 100 != 0 || year % 400 == 0)
+        year.is_multiple_of(4) && (!year.is_multiple_of(100) || year.is_multiple_of(400))
     }
 
     #[inline(always)]
