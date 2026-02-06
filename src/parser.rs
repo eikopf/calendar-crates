@@ -4,11 +4,15 @@ use std::{cmp::Ordering, convert::Infallible};
 
 use thiserror::Error;
 
-use crate::model::time::{
-    Date, DateTime, Day, FractionalSecond, Hour, InvalidDateError, InvalidDateTimeError,
-    InvalidDayError, InvalidFractionalSecondError, InvalidHourError, InvalidMinuteError,
-    InvalidMonthError, InvalidSecondError, InvalidTimeError, InvalidYearError, Local,
-    LocalDateTime, Minute, Month, Second, Time, Utc, UtcDateTime, Year,
+use crate::model::{
+    primitive::Sign,
+    time::{
+        Date, DateTime, Day, Duration, ExactDuration, FractionalSecond, Hour, InvalidDateError,
+        InvalidDateTimeError, InvalidDayError, InvalidDurationError, InvalidFractionalSecondError,
+        InvalidHourError, InvalidMinuteError, InvalidMonthError, InvalidSecondError,
+        InvalidTimeError, InvalidYearError, Local, LocalDateTime, Minute, Month, NominalDuration,
+        Second, SignedDuration, Time, Utc, UtcDateTime, Year,
+    },
 };
 
 // # Implementation
@@ -228,6 +232,40 @@ pub enum GeneralParseError {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Error)]
+pub enum SignedDurationParseError {
+    #[error("expected +, -, or P, but got {0} instead")]
+    InvalidPrefix(char),
+    #[error(transparent)]
+    Duration(#[from] DurationParseError),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Error)]
+pub enum DurationParseError {
+    #[error("expected P but got {0} instead")]
+    InvalidPrefix(char),
+    #[error("expected W or D but got {0} instead")]
+    InvalidNominalTerminator(char),
+    #[error("expected T or an ASCII digit but got {0} instead")]
+    InvalidTimePrefix(char),
+    #[error("expected D but got {0} instead")]
+    InvalidDayTerminator(char),
+    #[error("expected H but got {0} instead")]
+    InvalidHourTerminator(char),
+    #[error("expected M but got {0} instead")]
+    InvalidMinuteTerminator(char),
+    #[error("expected S but got {0} instead")]
+    InvalidSecondTerminator(char),
+    #[error("expected some data after T")]
+    NoDataAfterTimePrefix,
+    #[error("exact time contains hours and seconds but not minutes")]
+    HourAndSecondWithoutMinute,
+    #[error(transparent)]
+    U32(#[from] U32ParseError),
+    #[error(transparent)]
+    FractionalSecond(#[from] FractionalSecondParseError),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Error)]
 pub enum UtcDateTimeParseError {
     #[error(transparent)]
     DateTime(#[from] DateTimeParseError),
@@ -308,8 +346,180 @@ pub enum FractionalSecondParseError {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Error)]
+pub enum U32ParseError {
+    #[error("expected an ASCII decimal digit")]
+    NoDigits,
+    #[error(transparent)]
+    Digit(#[from] DigitParseError),
+    #[error("encountered an integer greater than u32::MAX")]
+    Overflow,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Error)]
 #[error("expected an ASCII digit but got the byte {0:02X} instead")]
 pub struct DigitParseError(u8);
+
+pub fn signed_duration<'i>(
+    input: &mut &'i str,
+) -> ParseResult<'i, SignedDuration, SignedDurationParseError, InvalidDurationError> {
+    let sign = match peek(input)? {
+        '+' => {
+            let () = skip(input, 1)?;
+            Ok(Sign::Pos)
+        }
+        '-' => {
+            let () = skip(input, 1)?;
+            Ok(Sign::Neg)
+        }
+        'P' => Ok(Sign::default()),
+        c => Err(ParseError::syntax(
+            *input,
+            SignedDurationParseError::InvalidPrefix(c),
+        )),
+    }?;
+
+    let duration = duration(input).map_err(ParseError::coerce)?;
+    Ok(SignedDuration { sign, duration })
+}
+
+pub fn duration<'i>(
+    input: &mut &'i str,
+) -> ParseResult<'i, Duration, DurationParseError, InvalidDurationError> {
+    // # Grammar (from RFC 8984 §1.4.6).
+    //
+    // dur-secfrac = "." 1*DIGIT
+    // dur-second  = 1*DIGIT [dur-secfrac] "S"
+    // dur-minute  = 1*DIGIT "M" [dur-second]
+    // dur-hour    = 1*DIGIT "H" [dur-minute]
+    // dur-time    = "T" (dur-hour / dur-minute / dur-second)
+    // dur-day     = 1*DIGIT "D"
+    // dur-week    = 1*DIGIT "W"
+    // dur-cal     = (dur-week [dur-day] / dur-day)
+    //
+    // duration    = "P" (dur-cal [dur-time] / dur-time)
+    //
+    // # Implementation
+    //
+    // After looking at the first character and checking it's "P", we need to be a little clever
+    // with how we check what grammar rule we should follow; we can also avoid throwing away work
+    // in a few places.
+    //
+    // - duration: check for the literal "T" to decide between the two branches
+    // - dur-cal: parse a number unconditionally and check the next byte ("W" or "D")
+    // - dur-time: parse a number unconditionally and check the next byte ("H", "M", "S", or ".")
+
+    #[inline(always)]
+    fn dur_second<'i>(
+        input: &mut &'i str,
+    ) -> ParseResult<'i, (u32, Option<FractionalSecond>), DurationParseError, InvalidDurationError>
+    {
+        let seconds = u32(input).map_err(ParseError::coerce_syntax)?;
+        let frac = fractional_second(input).map_err(ParseError::coerce)?;
+        let () = separator('S', DurationParseError::InvalidSecondTerminator)(input)?;
+        Ok((seconds, frac))
+    }
+
+    fn u32_char<'i>(
+        terminator: char,
+        f: impl Fn(char) -> DurationParseError,
+    ) -> impl FnOnce(&mut &'i str) -> ParseResult<'i, u32, DurationParseError, InvalidDurationError>
+    {
+        move |input| {
+            let value = u32(input).map_err(ParseError::coerce_syntax)?;
+            let () = separator(terminator, f)(input)?;
+            Ok(value)
+        }
+    }
+
+    /// A modified version of the `dur-time` rule without the leading `T`.
+    fn dur_time<'i>(
+        input: &mut &'i str,
+    ) -> ParseResult<'i, ExactDuration, DurationParseError, InvalidDurationError> {
+        let checkpoint = *input;
+
+        let hours = optional(u32_char('H', DurationParseError::InvalidHourTerminator))(input)?;
+        let minutes = optional(u32_char('M', DurationParseError::InvalidMinuteTerminator))(input)?;
+        let seconds = optional(dur_second)(input)?;
+
+        match (hours, minutes, seconds) {
+            (Some(_), None, Some(_)) => {
+                *input = checkpoint;
+                Err(ParseError::syntax(
+                    input,
+                    DurationParseError::HourAndSecondWithoutMinute,
+                ))
+            }
+            (None, None, None) => {
+                *input = checkpoint;
+                Err(ParseError::syntax(
+                    input,
+                    DurationParseError::NoDataAfterTimePrefix,
+                ))
+            }
+            (_, _, _) => {
+                let hours = hours.unwrap_or_default();
+                let minutes = minutes.unwrap_or_default();
+                let (seconds, frac) = seconds.unwrap_or((0, None));
+
+                Ok(ExactDuration {
+                    hours,
+                    minutes,
+                    seconds,
+                    frac,
+                })
+            }
+        }
+    }
+
+    fn dur_cal<'i>(
+        input: &mut &'i str,
+    ) -> ParseResult<'i, (u32, u32), DurationParseError, InvalidDurationError> {
+        let value = u32(input).map_err(ParseError::coerce_syntax)?;
+
+        match char(input)? {
+            'W' => match peek::<(), ()>(input).ok() {
+                Some('0'..='9') => {
+                    let weeks = value;
+                    let days = u32(input).map_err(ParseError::coerce_syntax)?;
+                    let () = separator('D', DurationParseError::InvalidDayTerminator)(input)?;
+
+                    Ok((weeks, days))
+                }
+                _ => Ok((value, 0)),
+            },
+            'D' => Ok((0, value)),
+            c => Err(ParseError::syntax(
+                input,
+                DurationParseError::InvalidNominalTerminator(c),
+            )),
+        }
+    }
+
+    let () = separator('P', DurationParseError::InvalidPrefix)(input)?;
+    match peek(input)? {
+        'T' => {
+            let () = skip(input, 1)?;
+            Ok(Duration::Exact(dur_time(input)?))
+        }
+        '0'..='9' => {
+            let (weeks, days) = dur_cal(input)?;
+
+            let exact = match peek::<(), ()>(input).ok() {
+                Some('T') => {
+                    let () = skip(input, 1)?;
+                    Some(dur_time(input)?)
+                }
+                _ => None,
+            };
+
+            Ok(Duration::Nominal(NominalDuration { weeks, days, exact }))
+        }
+        c => Err(ParseError::syntax(
+            input,
+            DurationParseError::InvalidTimePrefix(c),
+        )),
+    }
+}
 
 pub fn utc_date_time<'i>(
     input: &mut &'i str,
@@ -568,6 +778,15 @@ fn optional<'i, T, Sy, Se>(
     |input| Ok(parser(input).ok())
 }
 
+/// Returns the next character of the input without advancing.
+#[inline(always)]
+fn peek<'i, Sy, Se>(input: &&'i str) -> ParseResult<'i, char, Sy, Se> {
+    input
+        .chars()
+        .next()
+        .ok_or_else(|| ParseError::unexpected_eof())
+}
+
 /// Constructs a parser that tries to parse `sep`, and constructs an error message from the parsed
 /// character using `f` if it fails.
 fn separator<'i, Sy, Se>(
@@ -584,6 +803,22 @@ fn separator<'i, Sy, Se>(
             *input = checkpoint;
             Err(ParseError::syntax(input, f(c)))
         }
+    }
+}
+
+/// Parses a [`u32`].
+fn u32<'i, Se>(input: &mut &'i str) -> ParseResult<'i, u32, U32ParseError, Se> {
+    let checkpoint = *input;
+    let digits = digits0(input)?;
+
+    if digits.is_empty() {
+        Err(ParseError::syntax(input, U32ParseError::NoDigits))
+    } else {
+        str::parse::<u32>(digits).map_err(|error| {
+            debug_assert_eq!(error.kind(), &std::num::IntErrorKind::PosOverflow);
+            *input = checkpoint;
+            ParseError::syntax(*input, U32ParseError::Overflow)
+        })
     }
 }
 
@@ -672,6 +907,64 @@ fn take_str<'i, Sy, Se>(input: &mut &'i str, count: usize) -> ParseResult<'i, &'
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn signed_duration_parser() {
+        assert_eq!(duration(&mut ""), Err(ParseError::unexpected_eof()));
+
+        assert_eq!(
+            signed_duration(&mut "+P7W"),
+            Ok(Duration::Nominal(NominalDuration {
+                weeks: 7,
+                ..Default::default()
+            })
+            .into())
+        );
+
+        assert_eq!(
+            signed_duration(&mut "-P15DT5H0M20S"),
+            Ok(SignedDuration {
+                sign: Sign::Neg,
+                duration: Duration::Nominal(NominalDuration {
+                    weeks: 0,
+                    days: 15,
+                    exact: Some(ExactDuration {
+                        hours: 5,
+                        minutes: 0,
+                        seconds: 20,
+                        frac: None
+                    }),
+                })
+            })
+        );
+    }
+
+    #[test]
+    fn duration_parser() {
+        assert_eq!(duration(&mut ""), Err(ParseError::unexpected_eof()));
+
+        assert_eq!(
+            duration(&mut "P7W"),
+            Ok(Duration::Nominal(NominalDuration {
+                weeks: 7,
+                ..Default::default()
+            }))
+        );
+
+        assert_eq!(
+            duration(&mut "P15DT5H0M20S"),
+            Ok(Duration::Nominal(NominalDuration {
+                weeks: 0,
+                days: 15,
+                exact: Some(ExactDuration {
+                    hours: 5,
+                    minutes: 0,
+                    seconds: 20,
+                    frac: None
+                }),
+            }))
+        );
+    }
 
     #[test]
     fn utc_date_time_parser() {
