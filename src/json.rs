@@ -57,12 +57,10 @@ where
             .enumerate()
             .map(|(i, elem)| {
                 T::try_from_json(elem).map_err(|error| {
-                    let mut error = error.into_document_error();
-                    error.path.push_front(PathSegment::Index(i));
-                    DocumentError {
-                        error: error.error.lift_type_error(),
-                        path: error.path,
-                    }
+                    let DocumentError { mut path, error } = error.into_document_error();
+                    let error = error.lift_type_error();
+                    path.push_front(PathSegment::Index(i));
+                    DocumentError { error, path }
                 })
             })
             .collect::<Result<Vec<_>, _>>()
