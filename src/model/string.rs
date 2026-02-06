@@ -3,6 +3,7 @@
 use std::{borrow::Cow, num::NonZero};
 
 use dizzy::DstNewtype;
+use thiserror::Error;
 
 /// A string slice satisfying the regex `/[A-Za-z0-9\-\_]{1, 255}/` (RFC 8984 §1.4.1).
 ///
@@ -70,7 +71,7 @@ impl Id {
             0 => Err(InvalidIdError::EmptyString),
             256.. => Err(InvalidIdError::TooLong),
             _ => match Id::invalid_char_index(value) {
-                Some(index) => Err(InvalidIdError::InvalidChar { index }),
+                Some((index, c)) => Err(InvalidIdError::InvalidChar { index, c }),
                 None => {
                     // SAFETY: we know that the length of `value` is more than 0 and less than 256
                     // from the outer match statement, and in this branch we know that there is no
@@ -109,7 +110,7 @@ impl Id {
     /// not an [`IdChar`] occurs; if no such index exists then `None` is returned. If this method
     /// returns `None` then all the characters of the given `value` satisfy [`IdChar::contains`].
     #[inline(always)]
-    const fn invalid_char_index(value: &str) -> Option<u8> {
+    const fn invalid_char_index(value: &str) -> Option<(u8, char)> {
         if value.is_empty() {
             return None;
         }
@@ -128,7 +129,7 @@ impl Id {
                 continue;
             } else {
                 debug_assert!(i <= 255);
-                return Some(i as u8);
+                return Some((i as u8, c));
             }
         }
 
@@ -136,10 +137,13 @@ impl Id {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Error)]
 pub enum InvalidIdError {
-    InvalidChar { index: u8 },
+    #[error("expected an ASCII alphanumeric character, hyphen, or underscore, but got {c} instead")]
+    InvalidChar { index: u8, c: char },
+    #[error("empty string")]
     EmptyString,
+    #[error("string exceeds 255 bytes in length")]
     TooLong,
 }
 
