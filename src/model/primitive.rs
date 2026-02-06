@@ -2,7 +2,7 @@
 
 use crate::json::{
     ConstructibleJsonValue, DestructibleJsonValue, IntoIntError, IntoJson, IntoUnsignedIntError,
-    TryFromJson,
+    TryFromJson, TypeErrorOr,
 };
 
 /// A signed integer in the inclusive range `[-2^53 + 1, 2^53 - 1]` (RFC 8984 §1.4.2).
@@ -34,7 +34,7 @@ impl IntoJson for Int {
 }
 
 impl TryFromJson for Int {
-    type Error = IntoIntError;
+    type Error = TypeErrorOr<IntoIntError>;
 
     fn try_from_json<V: DestructibleJsonValue>(value: V) -> Result<Self, Self::Error> {
         value.try_as_int()
@@ -70,7 +70,7 @@ impl IntoJson for UnsignedInt {
 }
 
 impl TryFromJson for UnsignedInt {
-    type Error = IntoUnsignedIntError;
+    type Error = TypeErrorOr<IntoUnsignedIntError>;
 
     fn try_from_json<V: DestructibleJsonValue>(value: V) -> Result<Self, Self::Error> {
         value.try_as_unsigned_int()
@@ -112,22 +112,31 @@ mod tests {
         assert_eq!(parse("-9007199254740991"), Ok(Int::MIN));
         assert_eq!(parse("9007199254740991"), Ok(Int::MAX));
 
-        assert_eq!(parse("2.718281"), Err(IntoIntError::NotAnInteger(2.718281)));
+        assert_eq!(
+            parse("2.718281"),
+            Err(TypeErrorOr::Other(IntoIntError::NotAnInteger(2.718281)))
+        );
 
         // Int::MIN - 1
         assert_eq!(
             parse("-9007199254740992"),
-            Err(IntoIntError::OutsideRangeSigned(-9007199254740992))
+            Err(TypeErrorOr::Other(IntoIntError::OutsideRangeSigned(
+                -9007199254740992
+            )))
         );
         // Int::MAX + 1
         assert_eq!(
             parse("9007199254740992"),
-            Err(IntoIntError::OutsideRangeSigned(9007199254740992))
+            Err(TypeErrorOr::Other(IntoIntError::OutsideRangeSigned(
+                9007199254740992
+            )))
         );
         // u64::MAX
         assert_eq!(
             parse("18446744073709551615"),
-            Err(IntoIntError::OutsideRangeUnsigned(u64::MAX))
+            Err(TypeErrorOr::Other(IntoIntError::OutsideRangeUnsigned(
+                u64::MAX
+            )))
         );
 
         assert_eq!(
@@ -162,15 +171,24 @@ mod tests {
         assert_eq!(parse("0"), Ok(UnsignedInt::MIN));
         assert_eq!(parse("9007199254740991"), Ok(UnsignedInt::MAX));
 
-        assert_eq!(parse("-1"), Err(IntoUnsignedIntError::NegativeInteger(-1)));
+        assert_eq!(
+            parse("-1"),
+            Err(TypeErrorOr::Other(IntoUnsignedIntError::NegativeInteger(
+                -1
+            )))
+        );
         assert_eq!(
             parse("3.141592"),
-            Err(IntoUnsignedIntError::NotAnInteger(3.141592))
+            Err(TypeErrorOr::Other(IntoUnsignedIntError::NotAnInteger(
+                3.141592
+            )))
         );
         // UnsignedInt::MAX + 1
         assert_eq!(
             parse("9007199254740992"),
-            Err(IntoUnsignedIntError::OutsideRange(9007199254740992))
+            Err(TypeErrorOr::Other(IntoUnsignedIntError::OutsideRange(
+                9007199254740992
+            )))
         );
 
         assert_eq!(

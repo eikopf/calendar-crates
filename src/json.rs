@@ -3,6 +3,7 @@
 use std::{
     borrow::{Borrow, Cow},
     collections::HashMap,
+    convert::Infallible,
     hash::Hash,
 };
 
@@ -32,6 +33,39 @@ impl TryFromJson for String {
     }
 }
 
+impl<T> TryFromJson for Vec<T>
+where
+    T: TryFromJson,
+    T::Error: SplitPath,
+    <T::Error as SplitPath>::Residual: SplitTypeError,
+{
+    type Error =
+        DocumentError<TypeErrorOr<<<T::Error as SplitPath>::Residual as SplitTypeError>::Residual>>;
+
+    fn try_from_json<V: DestructibleJsonValue>(value: V) -> Result<Self, Self::Error> {
+        let array = value
+            .try_into_array()
+            .map_err(TypeErrorOr::from)
+            .map_err(|error| DocumentError {
+                path: vec![],
+                error,
+            })?;
+
+        array
+            .into_iter()
+            .enumerate()
+            .map(|(i, elem)| {
+                T::try_from_json(elem).map_err(|error| {
+                    let (error, mut path) = error.split_path();
+                    path.insert(0, PathSegment::Index(i));
+                    let error = error.split_type_error();
+                    DocumentError { path, error }
+                })
+            })
+            .collect::<Result<Vec<_>, _>>()
+    }
+}
+
 pub trait TryIntoJson {
     type Error;
 
@@ -47,6 +81,138 @@ impl<T: IntoJson> TryIntoJson for T {
 
     fn try_into_json<V: ConstructibleJsonValue>(self) -> Result<V, Self::Error> {
         Ok(self.into_json())
+    }
+}
+
+pub trait SplitPath: Sized {
+    type Residual;
+
+    fn split_path(self) -> (Self::Residual, Vec<PathSegment<Box<str>>>);
+}
+
+macro_rules! trivial_split_path {
+    ($name:ident) => {
+        impl SplitPath for $name {
+            type Residual = $name;
+
+            #[inline(always)]
+            fn split_path(self) -> (Self::Residual, Vec<PathSegment<Box<str>>>) {
+                (self, Vec::new())
+            }
+        }
+    };
+}
+
+trivial_split_path!(IntoIntError);
+trivial_split_path!(IntoUnsignedIntError);
+trivial_split_path!(TypeError);
+
+impl<E: SplitPath> SplitPath for TypeErrorOr<E> {
+    type Residual = TypeErrorOr<E::Residual>;
+
+    fn split_path(self) -> (Self::Residual, Vec<PathSegment<Box<str>>>) {
+        match self {
+            TypeErrorOr::TypeError(type_error) => (type_error.into(), vec![]),
+            TypeErrorOr::Other(error) => {
+                let (error, path) = error.split_path();
+                (TypeErrorOr::Other(error), path)
+            }
+        }
+    }
+}
+
+impl<E: SplitPath> SplitPath for DocumentError<E> {
+    type Residual = E;
+
+    #[inline(always)]
+    fn split_path(self) -> (Self::Residual, Vec<PathSegment<Box<str>>>) {
+        (self.error, self.path)
+    }
+}
+
+pub trait SplitTypeError {
+    type Residual;
+
+    fn split_type_error(self) -> TypeErrorOr<Self::Residual>;
+}
+
+macro_rules! trivial_split_type_error {
+    ($name:ident) => {
+        impl SplitTypeError for $name {
+            type Residual = $name;
+
+            #[inline(always)]
+            fn split_type_error(self) -> TypeErrorOr<Self::Residual> {
+                TypeErrorOr::Other(self)
+            }
+        }
+    };
+}
+
+trivial_split_type_error!(IntoIntError);
+trivial_split_type_error!(IntoUnsignedIntError);
+
+impl SplitTypeError for TypeError {
+    type Residual = Infallible;
+
+    #[inline(always)]
+    fn split_type_error(self) -> TypeErrorOr<Self::Residual> {
+        self.into()
+    }
+}
+
+impl<E> SplitTypeError for TypeErrorOr<E> {
+    type Residual = E;
+
+    #[inline(always)]
+    fn split_type_error(self) -> TypeErrorOr<Self::Residual> {
+        self
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DocumentError<E> {
+    path: Vec<PathSegment<Box<str>>>,
+    error: E,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PathSegment<S> {
+    Index(usize),
+    Static(&'static str),
+    String(S),
+}
+
+impl<S> PathSegment<S> {
+    #[inline(always)]
+    fn map<T>(
+        self,
+        f: impl FnOnce(usize) -> usize,
+        g: impl FnOnce(&'static str) -> &'static str,
+        h: impl FnOnce(S) -> T,
+    ) -> PathSegment<T> {
+        match self {
+            PathSegment::Index(i) => PathSegment::Index(f(i)),
+            PathSegment::Static(s) => PathSegment::Static(g(s)),
+            PathSegment::String(s) => PathSegment::String(h(s)),
+        }
+    }
+
+    pub fn as_str(&self) -> PathSegment<&str>
+    where
+        S: AsRef<str>,
+    {
+        match self {
+            PathSegment::Index(i) => PathSegment::Index(*i),
+            PathSegment::Static(s) => PathSegment::Static(s),
+            PathSegment::String(s) => PathSegment::String(s.as_ref()),
+        }
+    }
+}
+
+impl PathSegment<&str> {
+    pub fn to_box_str(self) -> PathSegment<Box<str>> {
+        self.map(|x| x, |x| x, Into::into)
     }
 }
 
@@ -91,8 +257,6 @@ pub struct TypeError {
 
 #[derive(Debug, Clone, Copy, PartialEq, PartialOrd, Error)]
 pub enum IntoIntError {
-    #[error("type error: {0}")]
-    TypeError(#[from] TypeError),
     #[error("expected an integer but received {0}")]
     NotAnInteger(f64),
     #[error("the signed integer {0} falls outside the valid range for Int")]
@@ -103,8 +267,6 @@ pub enum IntoIntError {
 
 #[derive(Debug, Clone, Copy, PartialEq, PartialOrd, Error)]
 pub enum IntoUnsignedIntError {
-    #[error("type error: {0}")]
-    TypeError(#[from] TypeError),
     #[error("expected an integer but received {0}")]
     NotAnInteger(f64),
     #[error("expected an unsigned integer but received {0}")]
@@ -116,8 +278,8 @@ pub enum IntoUnsignedIntError {
 /// A type representing a JSON value that can be converted into Rust values.
 pub trait DestructibleJsonValue: Sized {
     type String: AsRef<str> + Into<String>;
-    type Array: JsonArray;
-    type Object: JsonObject;
+    type Array: JsonArray<Elem = Self>;
+    type Object: JsonObject<Value = Self>;
 
     // TYPE CHECKS
 
@@ -168,8 +330,8 @@ pub trait DestructibleJsonValue: Sized {
 
     fn try_as_bool(&self) -> Result<bool, TypeError>;
     fn try_as_f64(&self) -> Result<f64, TypeError>;
-    fn try_as_int(&self) -> Result<Int, IntoIntError>;
-    fn try_as_unsigned_int(&self) -> Result<UnsignedInt, IntoUnsignedIntError>;
+    fn try_as_int(&self) -> Result<Int, TypeErrorOr<IntoIntError>>;
+    fn try_as_unsigned_int(&self) -> Result<UnsignedInt, TypeErrorOr<IntoUnsignedIntError>>;
     fn try_as_string(&self) -> Result<&Self::String, TypeError>;
     fn try_as_array(&self) -> Result<&Self::Array, TypeError>;
     fn try_as_object(&self) -> Result<&Self::Object, TypeError>;
@@ -344,7 +506,10 @@ mod serde_json_impl {
 
     use serde_json::{Map, Value};
 
-    use crate::model::primitive::{Int, UnsignedInt};
+    use crate::{
+        json::TypeErrorOr,
+        model::primitive::{Int, UnsignedInt},
+    };
 
     use super::{
         ConstructibleJsonValue, DestructibleJsonValue, IntoIntError, IntoUnsignedIntError,
@@ -414,7 +579,7 @@ mod serde_json_impl {
         }
 
         #[inline(always)]
-        fn try_as_int(&self) -> Result<Int, IntoIntError> {
+        fn try_as_int(&self) -> Result<Int, TypeErrorOr<IntoIntError>> {
             let number = match self {
                 Value::Number(number) => Ok(number),
                 _ => Err(TypeError {
@@ -435,10 +600,11 @@ mod serde_json_impl {
             } else {
                 unreachable!()
             }
+            .map_err(TypeErrorOr::Other)
         }
 
         #[inline(always)]
-        fn try_as_unsigned_int(&self) -> Result<UnsignedInt, IntoUnsignedIntError> {
+        fn try_as_unsigned_int(&self) -> Result<UnsignedInt, TypeErrorOr<IntoUnsignedIntError>> {
             let number = match self {
                 Value::Number(number) => Ok(number),
                 _ => Err(TypeError {
@@ -456,6 +622,7 @@ mod serde_json_impl {
             } else {
                 unreachable!()
             }
+            .map_err(TypeErrorOr::Other)
         }
 
         #[inline(always)]
@@ -588,5 +755,54 @@ mod serde_json_impl {
         fn into_iter(self) -> impl Iterator<Item = (Self::Key, Self::Value)> {
             IntoIterator::into_iter(self)
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[cfg(feature = "serde_json")]
+    #[test]
+    fn vec_from_serde_json() {
+        use serde_json::json;
+
+        let input = json!([true, true, false, true]);
+        assert_eq!(Vec::try_from_json(input), Ok(vec![true, true, false, true]));
+
+        let input = json!([[], [0, 1], [2]]);
+        assert_eq!(
+            Vec::<Vec<Int>>::try_from_json(input),
+            Ok(vec![
+                vec![],
+                vec![Int::new(0).unwrap(), Int::new(1).unwrap()],
+                vec![Int::new(2).unwrap()]
+            ])
+        );
+
+        let input = json!([true, false, "true", false]);
+        assert_eq!(
+            Vec::<bool>::try_from_json(input),
+            Err(DocumentError {
+                path: vec![PathSegment::Index(2)],
+                error: TypeErrorOr::TypeError(TypeError {
+                    expected: ValueType::Bool,
+                    received: ValueType::String
+                })
+            })
+        );
+
+        let input = json!([[], [0, 1], [true]]);
+        let res = Vec::<Vec<UnsignedInt>>::try_from_json(input);
+        assert_eq!(
+            res,
+            Err(DocumentError {
+                path: vec![PathSegment::Index(2), PathSegment::Index(0)],
+                error: TypeErrorOr::TypeError(TypeError {
+                    expected: ValueType::Number,
+                    received: ValueType::Bool
+                })
+            })
+        );
     }
 }
