@@ -4,18 +4,18 @@ version = 4
 
 [[package]]
 name = "dizzy"
-version = "0.1.0"
+version = "0.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6ec5acc43a0fc9c68faa925425fc41fb48fc777512627c9cfc26a7c2dee6b780"
+checksum = "cdf3af93fb0a8888834bd887324fa9a0b853e329c8ac8ea490e853df877e07a1"
 dependencies = [
  "dizzy-macros",
 ]
 
 [[package]]
 name = "dizzy-macros"
-version = "0.1.0"
+version = "0.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7035d916e25f73668c3edd070eb99e709afd84be84b684806f065ea0b315ef2e"
+checksum = "5db8d7e5e392620d513a1b8b2761efdd5822e8d152802181233ee6288f03889f"
 dependencies = [
  "proc-macro2",
  "quote",
