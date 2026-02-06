@@ -5,6 +5,8 @@ use std::{borrow::Cow, num::NonZero};
 use dizzy::DstNewtype;
 use thiserror::Error;
 
+use crate::json::{DestructibleJsonValue, TryFromJson, TypeErrorOr};
+
 /// A string slice satisfying the regex `/[A-Za-z0-9\-\_]{1, 255}/` (RFC 8984 §1.4.1).
 ///
 /// # Invariants
@@ -18,6 +20,25 @@ use thiserror::Error;
 #[dizzy(derive(CloneBoxed, IntoBoxed))]
 #[repr(transparent)]
 pub struct Id([IdChar]);
+
+impl TryFromJson for Box<Id> {
+    type Error = TypeErrorOr<OwnedInvalidIdError>;
+
+    fn try_from_json<V: DestructibleJsonValue>(value: V) -> Result<Self, Self::Error> {
+        // NOTE: since the given `value` might be an owned string, it might be better to call
+        // `.into()` to get a String without copying and then try to convert that into a Box<Id>
+
+        let input = value.try_into_string()?;
+
+        Id::new(input.as_ref())
+            .map(Into::into)
+            .map_err(|error| OwnedInvalidIdError {
+                input: String::from(input.as_ref()).into_boxed_str(),
+                error,
+            })
+            .map_err(TypeErrorOr::Other)
+    }
+}
 
 impl std::fmt::Debug for Id {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -135,6 +156,13 @@ impl Id {
 
         None
     }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Error)]
+#[error("TODO: OwnedInvalidIdError")]
+pub struct OwnedInvalidIdError {
+    input: Box<str>,
+    error: InvalidIdError,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Error)]
@@ -382,6 +410,32 @@ impl VendorStr {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(feature = "serde_json")]
+    #[test]
+    fn id_from_serde_json() {
+        use serde_json::Value;
+
+        let parse = |s| Box::<Id>::try_from_json(serde_json::from_str::<'_, Value>(s).unwrap());
+
+        let too_long = {
+            let mut buf = String::from('"');
+            buf.extend(['a'; 256]);
+            buf.push('"');
+            buf
+        };
+
+        assert!(parse("\"\"").is_err());
+        assert!(parse(too_long.as_str()).is_err());
+
+        assert!(parse("\"Event\"").is_ok());
+        assert!(parse("\"Group\"").is_ok());
+        assert!(parse("\"3213521675673128567312\"").is_ok());
+
+        assert!(parse("\"λ\"").is_err());
+        assert!(parse("true").is_err());
+        assert!(parse("17").is_err());
+    }
 
     #[test]
     fn implicit_json_pointer_segmentation() {
