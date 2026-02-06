@@ -8,7 +8,8 @@ use crate::{
     json::{DestructibleJsonValue, TryFromJson, TypeErrorOr},
     model::primitive::Sign,
     parser::{
-        DateTimeParseError, OwnedParseError, UtcDateTimeParseError, local_date_time, parse_full,
+        DateTimeParseError, DurationParseError, OwnedParseError, SignedDurationParseError,
+        UtcDateTimeParseError, duration, local_date_time, parse_full, signed_duration,
         utc_date_time,
     },
 };
@@ -568,6 +569,16 @@ pub enum Duration {
     Exact(ExactDuration),
 }
 
+impl TryFromJson for Duration {
+    type Error = TypeErrorOr<OwnedParseError<DurationParseError, InvalidDurationError>>;
+
+    fn try_from_json<V: DestructibleJsonValue>(value: V) -> Result<Self, Self::Error> {
+        let input = value.try_into_string()?;
+        let duration = parse_full(duration)(input.as_ref()).map_err(TypeErrorOr::Other)?;
+        Ok(duration)
+    }
+}
+
 #[derive(Debug, Clone, Copy, Error, PartialEq, Eq)]
 pub enum InvalidDurationError {
     #[error("invalid fractional second: {0}")]
@@ -579,6 +590,16 @@ pub enum InvalidDurationError {
 pub struct SignedDuration {
     pub sign: Sign,
     pub duration: Duration,
+}
+
+impl TryFromJson for SignedDuration {
+    type Error = TypeErrorOr<OwnedParseError<SignedDurationParseError, InvalidDurationError>>;
+
+    fn try_from_json<V: DestructibleJsonValue>(value: V) -> Result<Self, Self::Error> {
+        let input = value.try_into_string()?;
+        let duration = parse_full(signed_duration)(input.as_ref()).map_err(TypeErrorOr::Other)?;
+        Ok(duration)
+    }
 }
 
 impl From<Duration> for SignedDuration {
@@ -632,5 +653,32 @@ mod tests {
 
         assert!(parse("\"2025-01-01T12:00:00\"").is_ok());
         assert!(parse("\"2025-01-01T12:00:00Z\"").is_err());
+    }
+
+    #[cfg(feature = "serde_json")]
+    #[test]
+    fn duration_from_serde_json() {
+        use serde_json::Value;
+
+        let parse = |s| Duration::try_from_json(serde_json::from_str::<'_, Value>(s).unwrap());
+
+        assert!(parse("\"P15DT5H0M20S\"").is_ok());
+        assert!(parse("\"P7W\"").is_ok());
+        assert_eq!(parse("\"P5W\""), parse("\"P5W0D\""))
+    }
+
+    #[cfg(feature = "serde_json")]
+    #[test]
+    fn signed_duration_from_serde_json() {
+        use serde_json::Value;
+
+        let parse =
+            |s| SignedDuration::try_from_json(serde_json::from_str::<'_, Value>(s).unwrap());
+
+        assert!(parse("\"-P15DT5H0M20S\"").is_ok());
+        assert!(parse("\"+P7W\"").is_ok());
+        assert!(parse("\"-P7W\"").is_ok());
+        assert!(parse("\"P7W\"").is_ok());
+        assert_eq!(parse("\"+P5W\""), parse("\"P5W0D\""))
     }
 }
