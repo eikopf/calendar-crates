@@ -2,7 +2,7 @@
 
 use std::{
     borrow::{Borrow, Cow},
-    collections::HashMap,
+    collections::{HashMap, VecDeque},
     convert::Infallible,
     hash::Hash,
 };
@@ -47,7 +47,7 @@ where
             .try_into_array()
             .map_err(TypeErrorOr::from)
             .map_err(|error| DocumentError {
-                path: vec![],
+                path: VecDeque::new(),
                 error,
             })?;
 
@@ -57,7 +57,7 @@ where
             .map(|(i, elem)| {
                 T::try_from_json(elem).map_err(|error| {
                     let (error, mut path) = error.split_path();
-                    path.insert(0, PathSegment::Index(i));
+                    path.push_front(PathSegment::Index(i));
                     let error = error.split_type_error();
                     DocumentError { path, error }
                 })
@@ -65,6 +65,9 @@ where
             .collect::<Result<Vec<_>, _>>()
     }
 }
+
+// TODO: write TryFromJson impls for HashMap<K, V> and a wrapper over HashSet dealing with the
+// specific way JSCalendar encodes sets (i.e. as objects with boolean keys)
 
 pub trait TryIntoJson {
     type Error;
@@ -87,7 +90,7 @@ impl<T: IntoJson> TryIntoJson for T {
 pub trait SplitPath: Sized {
     type Residual;
 
-    fn split_path(self) -> (Self::Residual, Vec<PathSegment<Box<str>>>);
+    fn split_path(self) -> (Self::Residual, VecDeque<PathSegment<Box<str>>>);
 }
 
 macro_rules! trivial_split_path {
@@ -96,8 +99,8 @@ macro_rules! trivial_split_path {
             type Residual = $name;
 
             #[inline(always)]
-            fn split_path(self) -> (Self::Residual, Vec<PathSegment<Box<str>>>) {
-                (self, Vec::new())
+            fn split_path(self) -> (Self::Residual, VecDeque<PathSegment<Box<str>>>) {
+                (self, VecDeque::new())
             }
         }
     };
@@ -111,7 +114,7 @@ impl SplitPath for Infallible {
     type Residual = Infallible;
 
     #[inline(always)]
-    fn split_path(self) -> (Self::Residual, Vec<PathSegment<Box<str>>>) {
+    fn split_path(self) -> (Self::Residual, VecDeque<PathSegment<Box<str>>>) {
         match self {}
     }
 }
@@ -119,9 +122,9 @@ impl SplitPath for Infallible {
 impl<E: SplitPath> SplitPath for TypeErrorOr<E> {
     type Residual = TypeErrorOr<E::Residual>;
 
-    fn split_path(self) -> (Self::Residual, Vec<PathSegment<Box<str>>>) {
+    fn split_path(self) -> (Self::Residual, VecDeque<PathSegment<Box<str>>>) {
         match self {
-            TypeErrorOr::TypeError(type_error) => (type_error.into(), vec![]),
+            TypeErrorOr::TypeError(type_error) => (type_error.into(), VecDeque::new()),
             TypeErrorOr::Other(error) => {
                 let (error, path) = error.split_path();
                 (TypeErrorOr::Other(error), path)
@@ -134,7 +137,7 @@ impl<E: SplitPath> SplitPath for DocumentError<E> {
     type Residual = E;
 
     #[inline(always)]
-    fn split_path(self) -> (Self::Residual, Vec<PathSegment<Box<str>>>) {
+    fn split_path(self) -> (Self::Residual, VecDeque<PathSegment<Box<str>>>) {
         (self.error, self.path)
     }
 }
@@ -181,7 +184,7 @@ impl<E> SplitTypeError for TypeErrorOr<E> {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DocumentError<E> {
-    path: Vec<PathSegment<Box<str>>>,
+    path: VecDeque<PathSegment<Box<str>>>,
     error: E,
 }
 
@@ -793,7 +796,7 @@ mod tests {
         assert_eq!(
             Vec::<bool>::try_from_json(input),
             Err(DocumentError {
-                path: vec![PathSegment::Index(2)],
+                path: vec![PathSegment::Index(2)].into(),
                 error: TypeErrorOr::TypeError(TypeError {
                     expected: ValueType::Bool,
                     received: ValueType::String
@@ -806,7 +809,7 @@ mod tests {
         assert_eq!(
             res,
             Err(DocumentError {
-                path: vec![PathSegment::Index(2), PathSegment::Index(0)],
+                path: vec![PathSegment::Index(2), PathSegment::Index(0)].into(),
                 error: TypeErrorOr::TypeError(TypeError {
                     expected: ValueType::Number,
                     received: ValueType::Bool
@@ -822,7 +825,7 @@ mod tests {
         assert_eq!(
             res,
             Err(DocumentError {
-                path: vec![PathSegment::Index(0); 5],
+                path: vec![PathSegment::Index(0); 5].into(),
                 error: TypeErrorOr::TypeError(TypeError {
                     expected: ValueType::Bool,
                     received: ValueType::Object,
