@@ -107,6 +107,15 @@ trivial_split_path!(IntoIntError);
 trivial_split_path!(IntoUnsignedIntError);
 trivial_split_path!(TypeError);
 
+impl SplitPath for Infallible {
+    type Residual = Infallible;
+
+    #[inline(always)]
+    fn split_path(self) -> (Self::Residual, Vec<PathSegment<Box<str>>>) {
+        match self {}
+    }
+}
+
 impl<E: SplitPath> SplitPath for TypeErrorOr<E> {
     type Residual = TypeErrorOr<E::Residual>;
 
@@ -801,6 +810,22 @@ mod tests {
                 error: TypeErrorOr::TypeError(TypeError {
                     expected: ValueType::Number,
                     received: ValueType::Bool
+                })
+            })
+        );
+
+        // heavily nested to demonstrate that the type system automatically flattens the error type
+        let input = json!([[[[[{}]]]]]);
+        let res: Result<_, DocumentError<TypeErrorOr<Infallible>>> =
+            Vec::<Vec<Vec<Vec<Vec<bool>>>>>::try_from_json(input);
+
+        assert_eq!(
+            res,
+            Err(DocumentError {
+                path: vec![PathSegment::Index(0); 5],
+                error: TypeErrorOr::TypeError(TypeError {
+                    expected: ValueType::Bool,
+                    received: ValueType::Object,
                 })
             })
         );
