@@ -28,7 +28,7 @@ pub struct StringError<E> {
 pub struct Id([IdChar]);
 
 impl TryFromJson for Box<Id> {
-    type Error = TypeErrorOr<OwnedInvalidIdError>;
+    type Error = TypeErrorOr<StringError<InvalidIdError>>;
 
     fn try_from_json<V: DestructibleJsonValue>(value: V) -> Result<Self, Self::Error> {
         // NOTE: since the given `value` might be an owned string, it might be better to call
@@ -38,7 +38,7 @@ impl TryFromJson for Box<Id> {
 
         Id::new(input.as_ref())
             .map(Into::into)
-            .map_err(|error| OwnedInvalidIdError {
+            .map_err(|error| StringError {
                 input: String::from(input.as_ref()).into_boxed_str(),
                 error,
             })
@@ -162,12 +162,6 @@ impl Id {
 
         None
     }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct OwnedInvalidIdError {
-    input: Box<str>,
-    error: InvalidIdError,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Error)]
