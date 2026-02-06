@@ -560,7 +560,7 @@ pub fn date_time<'i>(
     })
 }
 
-pub fn date<'i>(input: &mut &'i str) -> ParseResult<'i, Date, DateParseError, InvalidDateError> {
+fn date<'i>(input: &mut &'i str) -> ParseResult<'i, Date, DateParseError, InvalidDateError> {
     let checkpoint = *input;
     let hyphen = separator('-', DateParseError::InvalidSeparator);
 
@@ -580,7 +580,7 @@ pub fn date<'i>(input: &mut &'i str) -> ParseResult<'i, Date, DateParseError, In
 }
 
 /// Parses a [`Year`].
-pub fn year<'i>(input: &mut &'i str) -> ParseResult<'i, Year, YearParseError, InvalidYearError> {
+fn year<'i>(input: &mut &'i str) -> ParseResult<'i, Year, YearParseError, InvalidYearError> {
     let checkpoint = *input;
     let a = digit(input).map_err(ParseError::coerce_syntax)? as u16;
     let b = digit(input).map_err(ParseError::coerce_syntax)? as u16;
@@ -598,9 +598,7 @@ pub fn year<'i>(input: &mut &'i str) -> ParseResult<'i, Year, YearParseError, In
 }
 
 /// Parses a [`Month`].
-pub fn month<'i>(
-    input: &mut &'i str,
-) -> ParseResult<'i, Month, MonthParseError, InvalidMonthError> {
+fn month<'i>(input: &mut &'i str) -> ParseResult<'i, Month, MonthParseError, InvalidMonthError> {
     let checkpoint = *input;
     let a = digit(input).map_err(ParseError::coerce_syntax)?;
     let b = digit(input).map_err(ParseError::coerce_syntax)?;
@@ -616,7 +614,7 @@ pub fn month<'i>(
 }
 
 /// Parses a [`Day`].
-pub fn day<'i>(input: &mut &'i str) -> ParseResult<'i, Day, DayParseError, InvalidDayError> {
+fn day<'i>(input: &mut &'i str) -> ParseResult<'i, Day, DayParseError, InvalidDayError> {
     let checkpoint = *input;
     let a = digit(input).map_err(ParseError::coerce_syntax)?;
     let b = digit(input).map_err(ParseError::coerce_syntax)?;
@@ -632,7 +630,7 @@ pub fn day<'i>(input: &mut &'i str) -> ParseResult<'i, Day, DayParseError, Inval
 }
 
 /// Parses a [`Time`].
-pub fn time<'i>(input: &mut &'i str) -> ParseResult<'i, Time, TimeParseError, InvalidTimeError> {
+fn time<'i>(input: &mut &'i str) -> ParseResult<'i, Time, TimeParseError, InvalidTimeError> {
     let checkpoint = *input;
     let colon = separator(':', TimeParseError::InvalidSeparator);
 
@@ -653,7 +651,7 @@ pub fn time<'i>(input: &mut &'i str) -> ParseResult<'i, Time, TimeParseError, In
 }
 
 /// Parses an [`Hour`].
-pub fn hour<'i>(input: &mut &'i str) -> ParseResult<'i, Hour, HourParseError, InvalidHourError> {
+fn hour<'i>(input: &mut &'i str) -> ParseResult<'i, Hour, HourParseError, InvalidHourError> {
     let checkpoint = *input;
     let a = digit(input).map_err(ParseError::coerce_syntax)?;
     let b = digit(input).map_err(ParseError::coerce_syntax)?;
@@ -669,7 +667,7 @@ pub fn hour<'i>(input: &mut &'i str) -> ParseResult<'i, Hour, HourParseError, In
 }
 
 /// Parses a [`Minute`].
-pub fn minute<'i>(
+fn minute<'i>(
     input: &mut &'i str,
 ) -> ParseResult<'i, Minute, MinuteParseError, InvalidMinuteError> {
     let checkpoint = *input;
@@ -687,7 +685,7 @@ pub fn minute<'i>(
 }
 
 /// Parses a [`Second`].
-pub fn second<'i>(
+fn second<'i>(
     input: &mut &'i str,
 ) -> ParseResult<'i, Second, SecondParseError, InvalidSecondError> {
     let checkpoint = *input;
@@ -705,7 +703,7 @@ pub fn second<'i>(
 }
 
 /// Parses an optional [`FractionalSecond`], including its initial `.` separator.
-pub fn fractional_second<'i>(
+fn fractional_second<'i>(
     input: &mut &'i str,
 ) -> ParseResult<
     'i,
