@@ -16,6 +16,22 @@ pub trait TryFromJson: Sized {
     fn try_from_json<V: DestructibleJsonValue>(value: V) -> Result<Self, Self::Error>;
 }
 
+impl TryFromJson for bool {
+    type Error = TypeError;
+
+    fn try_from_json<V: DestructibleJsonValue>(value: V) -> Result<Self, Self::Error> {
+        value.try_as_bool()
+    }
+}
+
+impl TryFromJson for String {
+    type Error = TypeError;
+
+    fn try_from_json<V: DestructibleJsonValue>(value: V) -> Result<Self, Self::Error> {
+        value.try_into_string().map(Into::into)
+    }
+}
+
 pub trait TryIntoJson {
     type Error;
 
