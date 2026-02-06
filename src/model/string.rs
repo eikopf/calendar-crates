@@ -1,6 +1,6 @@
 //! String data model types.
 
-use std::{borrow::Cow, num::NonZero};
+use std::{borrow::Cow, fmt::Debug, num::NonZero};
 
 use dizzy::DstNewtype;
 use thiserror::Error;
@@ -263,9 +263,46 @@ impl std::fmt::Debug for IdChar {
     }
 }
 
-// TODO: define (at a minimum) the following string types:
-// 1. TimeZoneId (RFC 8984 §1.4.8, §4.7)
-// 2. a URI type (maybe use iri-string?)
+/// A custom time zone identifier (RFC 8984 §4.7.2).
+///
+/// By *custom* we mean that the identifier does not occur in the [IANA Time Zone Database], and
+/// this property is guaranteed by requiring that the identifier starts with a forward slash. In
+/// addition, we require that the identifier is a valid `paramtext` value ([RFC 5545 §3.1]).
+///
+/// [IANA Time Zone Database]: https://www.iana.org/time-zones
+/// [RFC 5545 §3.1]: https://www.rfc-editor.org/rfc/rfc5545#section-3.1
+#[derive(PartialEq, Eq, PartialOrd, Ord, Hash, DstNewtype)]
+#[dizzy(invariant = CustomTimeZoneId::str_is_custom_time_zone_id)]
+#[dizzy(error = InvalidCustomTimeZoneIdError)]
+#[dizzy(constructor = pub new)]
+#[dizzy(derive(Debug, CloneBoxed, IntoBoxed))]
+#[repr(transparent)]
+pub struct CustomTimeZoneId(str);
+
+impl CustomTimeZoneId {
+    fn str_is_custom_time_zone_id(s: &str) -> Result<(), InvalidCustomTimeZoneIdError> {
+        let mut chars = s.chars().enumerate();
+
+        match chars.next() {
+            Some((_, '/')) => match chars.find(|(_, c)| char_is_paramtext_safe_char(*c)) {
+                Some((index, c)) => Err(InvalidCustomTimeZoneIdError::InvalidBodyChar { index, c }),
+                None => Ok(()),
+            },
+            Some(_) => Err(InvalidCustomTimeZoneIdError::MissingSlash),
+            None => Err(InvalidCustomTimeZoneIdError::EmptyString),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Error)]
+pub enum InvalidCustomTimeZoneIdError {
+    #[error("expected at least one character")]
+    EmptyString,
+    #[error("expected a forward slash")]
+    MissingSlash,
+    #[error("{c} is invalid in a TimeZoneId")]
+    InvalidBodyChar { index: usize, c: char },
+}
 
 #[derive(Debug, Clone, Copy)]
 pub enum InvalidImplicitJsonPointerError {
@@ -404,6 +441,17 @@ impl VendorStr {
     #[inline(always)]
     pub fn suffix(&self) -> &str {
         self.split_at_colon().1
+    }
+}
+
+/// Returns `true` iff `c` is a `SAFE-CHAR` as defined by RFC 5545 §3.1.
+///
+/// NB: RFC 5545 doesn't define the `WSP` rule in its grammar, as it is defined by RFC 5234 to be
+/// either the literal space (U+0020) or the horizontal tab (U+0009).
+const fn char_is_paramtext_safe_char(c: char) -> bool {
+    match c {
+        '\t' | ' ' | '!' | '#'..='+' | '-'..='9' | '<'..='~' => true,
+        _ => !c.is_ascii(),
     }
 }
 
