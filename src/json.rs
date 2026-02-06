@@ -37,10 +37,10 @@ impl<T> TryFromJson for Vec<T>
 where
     T: TryFromJson,
     T::Error: IntoDocumentError,
-    <T::Error as IntoDocumentError>::Residual: SplitTypeError,
+    <T::Error as IntoDocumentError>::Residual: LiftTypeError,
 {
     type Error = DocumentError<
-        TypeErrorOr<<<T::Error as IntoDocumentError>::Residual as SplitTypeError>::Residual>,
+        TypeErrorOr<<<T::Error as IntoDocumentError>::Residual as LiftTypeError>::Residual>,
     >;
 
     fn try_from_json<V: DestructibleJsonValue>(value: V) -> Result<Self, Self::Error> {
@@ -60,7 +60,7 @@ where
                     let mut error = error.into_document_error();
                     error.path.push_front(PathSegment::Index(i));
                     DocumentError {
-                        error: error.error.split_type_error(),
+                        error: error.error.lift_type_error(),
                         path: error.path,
                     }
                 })
@@ -150,42 +150,42 @@ impl<E: IntoDocumentError> IntoDocumentError for DocumentError<E> {
     }
 }
 
-pub trait SplitTypeError {
+pub trait LiftTypeError {
     type Residual;
 
-    fn split_type_error(self) -> TypeErrorOr<Self::Residual>;
+    fn lift_type_error(self) -> TypeErrorOr<Self::Residual>;
 }
 
-macro_rules! trivial_split_type_error {
+macro_rules! trivial_lift_type_error {
     ($name:ident) => {
-        impl SplitTypeError for $name {
+        impl LiftTypeError for $name {
             type Residual = $name;
 
             #[inline(always)]
-            fn split_type_error(self) -> TypeErrorOr<Self::Residual> {
+            fn lift_type_error(self) -> TypeErrorOr<Self::Residual> {
                 TypeErrorOr::Other(self)
             }
         }
     };
 }
 
-trivial_split_type_error!(IntoIntError);
-trivial_split_type_error!(IntoUnsignedIntError);
+trivial_lift_type_error!(IntoIntError);
+trivial_lift_type_error!(IntoUnsignedIntError);
 
-impl SplitTypeError for TypeError {
+impl LiftTypeError for TypeError {
     type Residual = Infallible;
 
     #[inline(always)]
-    fn split_type_error(self) -> TypeErrorOr<Self::Residual> {
+    fn lift_type_error(self) -> TypeErrorOr<Self::Residual> {
         self.into()
     }
 }
 
-impl<E> SplitTypeError for TypeErrorOr<E> {
+impl<E> LiftTypeError for TypeErrorOr<E> {
     type Residual = E;
 
     #[inline(always)]
-    fn split_type_error(self) -> TypeErrorOr<Self::Residual> {
+    fn lift_type_error(self) -> TypeErrorOr<Self::Residual> {
         self
     }
 }
