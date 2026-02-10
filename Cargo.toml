@@ -3,3 +3,4 @@ members = ["calendar-types","jscalendar"]
 resolver = "2"
 
 [workspace.package]
+repository = "https://github.com/eikopf/calendar-crates"
