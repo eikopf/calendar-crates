@@ -2,9 +2,13 @@
 
 use std::collections::{HashMap, HashSet};
 
-use crate::model::{set::RelationValue, string::VendorStr};
-
-use super::{primitive::UnsignedInt, string::ImplicitJsonPointer};
+use crate::{
+    json::UnsignedInt,
+    model::{
+        set::RelationValue,
+        string::{ImplicitJsonPointer, VendorStr},
+    },
+};
 
 /// A set of patches to be applied to a JSON object (RFC 8984 §1.4.9).
 #[derive(Debug, Clone, PartialEq, Default)]
