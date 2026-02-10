@@ -2,7 +2,8 @@
 name = "calendar-types"
 version = "0.1.0"
 edition = "2024"
-workspace.repository = true
+repository.workspace = true
+license.workspace = true
 
 [dependencies]
 thiserror = "2.0.18"
