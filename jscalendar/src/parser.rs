@@ -2,18 +2,17 @@
 
 use std::{cmp::Ordering, convert::Infallible};
 
-use thiserror::Error;
-
-use crate::model::{
+use calendar_types::{
+    duration::{Duration, ExactDuration, InvalidDurationError, NominalDuration, SignedDuration},
     primitive::Sign,
     time::{
-        Date, DateTime, Day, Duration, ExactDuration, FractionalSecond, Hour, InvalidDateError,
-        InvalidDateTimeError, InvalidDayError, InvalidDurationError, InvalidFractionalSecondError,
-        InvalidHourError, InvalidMinuteError, InvalidMonthError, InvalidSecondError,
-        InvalidTimeError, InvalidYearError, Local, LocalDateTime, Minute, Month, NominalDuration,
-        Second, SignedDuration, Time, Utc, UtcDateTime, Year,
+        Date, DateTime, Day, FractionalSecond, Hour, InvalidDateError, InvalidDateTimeError,
+        InvalidDayError, InvalidFractionalSecondError, InvalidHourError, InvalidMinuteError,
+        InvalidMonthError, InvalidSecondError, InvalidTimeError, InvalidYearError, Local, Minute,
+        Month, Second, Time, Utc, Year,
     },
 };
+use thiserror::Error;
 
 // # Implementation
 //
@@ -523,7 +522,7 @@ pub fn duration<'i>(
 
 pub fn utc_date_time<'i>(
     input: &mut &'i str,
-) -> ParseResult<'i, UtcDateTime, UtcDateTimeParseError, InvalidDateTimeError> {
+) -> ParseResult<'i, DateTime<Utc>, UtcDateTimeParseError, InvalidDateTimeError> {
     let DateTime { date, time, .. } = date_time(input).map_err(ParseError::coerce)?;
     let () = separator('Z', UtcDateTimeParseError::InvalidMarker)(input)?;
 
@@ -536,7 +535,7 @@ pub fn utc_date_time<'i>(
 
 pub fn local_date_time<'i>(
     input: &mut &'i str,
-) -> ParseResult<'i, LocalDateTime, DateTimeParseError, InvalidDateTimeError> {
+) -> ParseResult<'i, DateTime<Local>, DateTimeParseError, InvalidDateTimeError> {
     let DateTime { date, time, .. } = date_time(input).map_err(ParseError::coerce)?;
 
     Ok(DateTime {

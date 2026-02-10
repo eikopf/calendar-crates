@@ -12,6 +12,14 @@ pub struct Utc;
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct Local;
 
+#[derive(Debug, Clone, Copy, Error, PartialEq, Eq)]
+pub enum InvalidDateTimeError {
+    #[error("invalid date: {0}")]
+    Date(#[from] InvalidDateError),
+    #[error("invalid time: {0}")]
+    Time(#[from] InvalidTimeError),
+}
+
 /// An ISO 8601 datetime with the timezone marker `M` (RFC 3339 §5.6).
 ///
 /// This type makes no guarantees about the relationship between its fields, and in particular does

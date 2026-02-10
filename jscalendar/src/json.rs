@@ -7,9 +7,20 @@ use std::{
     hash::Hash,
 };
 
+use calendar_types::{
+    duration::{Duration, InvalidDurationError, SignedDuration},
+    time::{DateTime, InvalidDateTimeError, Local, Utc},
+};
 use thiserror::Error;
 
-use crate::model::primitive::{Int, UnsignedInt};
+use crate::{
+    model::primitive::{Int, UnsignedInt},
+    parser::{
+        DateTimeParseError, DurationParseError, OwnedParseError, SignedDurationParseError,
+        UtcDateTimeParseError, duration, local_date_time, parse_full, signed_duration,
+        utc_date_time,
+    },
+};
 
 pub trait TryFromJson: Sized {
     type Error;
@@ -30,6 +41,46 @@ impl TryFromJson for String {
 
     fn try_from_json<V: DestructibleJsonValue>(value: V) -> Result<Self, Self::Error> {
         value.try_into_string().map(Into::into)
+    }
+}
+
+impl TryFromJson for DateTime<Local> {
+    type Error = TypeErrorOr<OwnedParseError<DateTimeParseError, InvalidDateTimeError>>;
+
+    fn try_from_json<V: DestructibleJsonValue>(value: V) -> Result<Self, Self::Error> {
+        let input = value.try_into_string()?;
+        let date_time = parse_full(local_date_time)(input.as_ref()).map_err(TypeErrorOr::Other)?;
+        Ok(date_time)
+    }
+}
+
+impl TryFromJson for DateTime<Utc> {
+    type Error = TypeErrorOr<OwnedParseError<UtcDateTimeParseError, InvalidDateTimeError>>;
+
+    fn try_from_json<V: DestructibleJsonValue>(value: V) -> Result<Self, Self::Error> {
+        let input = value.try_into_string()?;
+        let date_time = parse_full(utc_date_time)(input.as_ref()).map_err(TypeErrorOr::Other)?;
+        Ok(date_time)
+    }
+}
+
+impl TryFromJson for Duration {
+    type Error = TypeErrorOr<OwnedParseError<DurationParseError, InvalidDurationError>>;
+
+    fn try_from_json<V: DestructibleJsonValue>(value: V) -> Result<Self, Self::Error> {
+        let input = value.try_into_string()?;
+        let duration = parse_full(duration)(input.as_ref()).map_err(TypeErrorOr::Other)?;
+        Ok(duration)
+    }
+}
+
+impl TryFromJson for SignedDuration {
+    type Error = TypeErrorOr<OwnedParseError<SignedDurationParseError, InvalidDurationError>>;
+
+    fn try_from_json<V: DestructibleJsonValue>(value: V) -> Result<Self, Self::Error> {
+        let input = value.try_into_string()?;
+        let duration = parse_full(signed_duration)(input.as_ref()).map_err(TypeErrorOr::Other)?;
+        Ok(duration)
     }
 }
 
@@ -838,5 +889,56 @@ mod tests {
                 })
             })
         );
+    }
+
+    #[cfg(feature = "serde_json")]
+    #[test]
+    fn utc_date_time_from_serde_json() {
+        use serde_json::Value;
+
+        let parse =
+            |s| DateTime::<Utc>::try_from_json(serde_json::from_str::<'_, Value>(s).unwrap());
+
+        assert!(parse("\"2025-01-01T12:00:00Z\"").is_ok());
+        assert!(parse("\"2025-01-01T12:00:00\"").is_err());
+    }
+
+    #[cfg(feature = "serde_json")]
+    #[test]
+    fn local_date_time_from_serde_json() {
+        use serde_json::Value;
+
+        let parse =
+            |s| DateTime::<Local>::try_from_json(serde_json::from_str::<'_, Value>(s).unwrap());
+
+        assert!(parse("\"2025-01-01T12:00:00\"").is_ok());
+        assert!(parse("\"2025-01-01T12:00:00Z\"").is_err());
+    }
+
+    #[cfg(feature = "serde_json")]
+    #[test]
+    fn duration_from_serde_json() {
+        use serde_json::Value;
+
+        let parse = |s| Duration::try_from_json(serde_json::from_str::<'_, Value>(s).unwrap());
+
+        assert!(parse("\"P15DT5H0M20S\"").is_ok());
+        assert!(parse("\"P7W\"").is_ok());
+        assert_eq!(parse("\"P5W\""), parse("\"P5W0D\""))
+    }
+
+    #[cfg(feature = "serde_json")]
+    #[test]
+    fn signed_duration_from_serde_json() {
+        use serde_json::Value;
+
+        let parse =
+            |s| SignedDuration::try_from_json(serde_json::from_str::<'_, Value>(s).unwrap());
+
+        assert!(parse("\"-P15DT5H0M20S\"").is_ok());
+        assert!(parse("\"+P7W\"").is_ok());
+        assert!(parse("\"-P7W\"").is_ok());
+        assert!(parse("\"P7W\"").is_ok());
+        assert_eq!(parse("\"+P5W\""), parse("\"P5W0D\""))
     }
 }
