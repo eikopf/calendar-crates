@@ -71,6 +71,7 @@ dependencies = [
  "calendar-types",
  "dizzy",
  "hashbrown",
+ "rfc5545-types",
  "serde",
  "serde_json",
  "thiserror",
