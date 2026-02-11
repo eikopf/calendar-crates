@@ -1,4 +1,21 @@
 //! Distinguished object types.
+//!
+//! # TODO
+//!
+//! - `Priority`: an integer in the range 0-9 (RFC 8984 §4.4.1). Used by `Property::Priority`.
+//! - `Percent`: an integer in the range 0-100 (RFC 8984 §5.2.4). Used by `Property::PercentComplete`.
+//! - `RequestStatus`: a structured request status value (RFC 8984 §4.4.7). Used by
+//!   `Property::RequestStatus`.
+//! - `RecurrenceRule`: a recurrence rule (RFC 8984 §4.3.2). Used by `Property::RecurrenceRules`
+//!   and `Property::ExcludedRecurrenceRules`.
+//! - `Location`: a physical location (RFC 8984 §4.2.5). Used by `Property::Locations`.
+//! - `VirtualLocation`: a virtual location (RFC 8984 §4.2.6). Used by `Property::VirtualLocations`.
+//! - `Participant`: a calendar participant (RFC 8984 §4.4.6). Used by `Property::Participants`.
+//! - `Alert`: a calendar alert (RFC 8984 §4.5.2). Used by `Property::Alerts`.
+//! - `TimeZone`: a time zone definition (RFC 8984 §4.7.2). Used by `Property::TimeZones`.
+//! - `AbsoluteTrigger`, `OffsetTrigger`, `UnknownTrigger`: trigger types for alerts (RFC 8984 §4.5.2).
+//! - `Event`, `Task`, `Group`: top-level JSCalendar object types (RFC 8984 §5). Used by
+//!   `Property::Entries`.
 
 use std::{
     collections::{HashMap, HashSet},
@@ -10,8 +27,10 @@ use hashbrown::HashTable;
 use crate::{
     json::{Int, UnsignedInt},
     model::{
-        set::RelationValue,
-        string::{Id, ImplicitJsonPointer, VendorStr},
+        set::{
+            EventStatus, FreeBusyStatus, Method, Privacy, RelationValue, ReplyMethod, TaskProgress,
+        },
+        string::{CalAddress, Id, ImplicitJsonPointer, Uid, Uri, VendorStr},
         time::{DateTime, Duration, Local, Utc},
     },
 };
@@ -76,13 +95,13 @@ enum Property<V> {
         value: V,
     },
     // RFC 8984 §4.1
-    Uid(String),
-    RelatedTo(HashMap<String, Relation>),
+    Uid(Box<Uid>),
+    RelatedTo(HashMap<Box<Uid>, Relation>),
     ProductId(String),
     Created(DateTime<Utc>),
     Updated(DateTime<Utc>),
     Sequence(UnsignedInt),
-    Method(String),
+    Method(Method<Box<VendorStr>>),
     // RFC 8984 §4.2
     Title(String),
     Description(String),
@@ -97,17 +116,17 @@ enum Property<V> {
     Color(String),
     // RFC 8984 §4.3
     RecurrenceId(DateTime<Local>),
-    RecurrenceIdTimeZone(String),     // optional TimeZoneId
+    RecurrenceIdTimeZone(String),
     RecurrenceRules(Vec<()>),         // Vec<RecurrenceRule>
     ExcludedRecurrenceRules(Vec<()>), // Vec<RecurrenceRule>
     RecurrenceOverrides(HashMap<DateTime<Local>, PatchObject<V>>),
     Excluded(bool),
     // RFC 8984 §4.4
     Priority(Int),
-    FreeBusyStatus(String),
-    Privacy(String),
-    ReplyTo(HashMap<String, String>),
-    SentBy(String),
+    FreeBusyStatus(FreeBusyStatus<Box<VendorStr>>),
+    Privacy(Privacy<Box<VendorStr>>),
+    ReplyTo(HashMap<ReplyMethod<Box<VendorStr>>, Box<Uri>>),
+    SentBy(Box<CalAddress>),
     Participants(HashMap<Box<Id>, ()>), // HashMap<Box<Id>, Participant>
     RequestStatus(String),
     // RFC 8984 §4.5
@@ -124,7 +143,7 @@ enum Property<V> {
     /// RFC 8984 §5.1.2
     Duration(Duration),
     /// RFC 8984 §5.1.3
-    Status(String), // essentially EventStatus from RFC 5545
+    Status(EventStatus<Box<VendorStr>>),
     /// RFC 8984 §5.2.1
     Due(DateTime<Local>),
     /// RFC 8984 §5.2.3
@@ -132,13 +151,13 @@ enum Property<V> {
     /// RFC 8984 §5.2.4
     PercentComplete(UnsignedInt),
     /// RFC 8984 §5.2.5
-    Progress(String), // essentially TodoStatus from RFC 5545
+    Progress(TaskProgress<Box<VendorStr>>),
     /// RFC 8984 §5.2.6
     ProgressUpdated(DateTime<Utc>),
     /// RFC 8984 §5.3.1
     Entries(Vec<()>), // Vec<TaskOrEvent>
     /// RFC 8984 §5.3.2
-    Source(String),
+    Source(Box<Uri>),
 }
 
 impl<V> Property<V> {
