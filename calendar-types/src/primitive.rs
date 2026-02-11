@@ -2,10 +2,11 @@
 
 /// A numeric sign, which may be either positive or negative.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
+#[repr(i8)]
 pub enum Sign {
-    Neg,
+    Neg = -1,
     #[default]
-    Pos,
+    Pos = 1,
 }
 
 impl Sign {
