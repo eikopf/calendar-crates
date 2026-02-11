@@ -114,8 +114,48 @@ where
     }
 }
 
-// TODO: write TryFromJson impls for HashMap<K, V> and a wrapper over HashSet dealing with the
-// specific way JSCalendar encodes sets (i.e. as objects with boolean keys)
+impl<K, T, S> TryFromJson for HashMap<K, T, S>
+where
+    K: Hash + Eq + From<String>,
+    T: TryFromJson,
+    T::Error: IntoDocumentError,
+    <T::Error as IntoDocumentError>::Residual: LiftTypeError,
+    S: Default + std::hash::BuildHasher,
+{
+    type Error = DocumentError<
+        TypeErrorOr<<<T::Error as IntoDocumentError>::Residual as LiftTypeError>::Residual>,
+    >;
+
+    fn try_from_json<V: DestructibleJsonValue>(value: V) -> Result<Self, Self::Error> {
+        let object = value
+            .try_into_object()
+            .map_err(TypeErrorOr::from)
+            .map_err(|error| DocumentError {
+                path: VecDeque::new(),
+                error,
+            })?;
+
+        object
+            .into_iter()
+            .map(|(key, value)| match T::try_from_json(value) {
+                Ok(value) => Ok((
+                    <V::Object as JsonObject>::key_into_string(key).into(),
+                    value,
+                )),
+                Err(error) => {
+                    let DocumentError { mut path, error } = error.into_document_error();
+                    let error = error.lift_type_error();
+                    path.push_front(PathSegment::String(
+                        <V::Object as JsonObject>::key_into_string(key).into_boxed_str(),
+                    ));
+                    Err(DocumentError { error, path })
+                }
+            })
+            .collect::<Result<HashMap<_, _, _>, _>>()
+    }
+}
+
+// TODO: write a TryFromJson impl for JSCalendar-style sets (i.e. objects sending keys to `true`)
 
 pub trait TryIntoJson {
     type Error;
@@ -519,6 +559,8 @@ pub trait JsonObject: Sized {
         Self::Key: Borrow<Q>,
         Q: ?Sized + Hash + Eq + Ord;
 
+    fn key_into_string(key: Self::Key) -> String;
+
     fn len(&self) -> usize;
     fn iter(&self) -> impl Iterator<Item = (&Self::Key, &Self::Value)>;
     fn into_iter(self) -> impl Iterator<Item = (Self::Key, Self::Value)>;
@@ -565,7 +607,7 @@ pub trait JsonArray: Sized {
     }
 }
 
-impl<K: Eq + Hash, V> JsonObject for HashMap<K, V> {
+impl<K: Eq + Hash + Into<String>, V> JsonObject for HashMap<K, V> {
     type Key = K;
     type Value = V;
 
@@ -590,6 +632,11 @@ impl<K: Eq + Hash, V> JsonObject for HashMap<K, V> {
         Q: ?Sized + Hash + Eq + Ord,
     {
         HashMap::contains_key(self, key)
+    }
+
+    #[inline(always)]
+    fn key_into_string(key: Self::Key) -> String {
+        key.into()
     }
 
     #[inline(always)]
@@ -874,6 +921,11 @@ mod serde_json_impl {
         }
 
         #[inline(always)]
+        fn key_into_string(key: Self::Key) -> String {
+            key
+        }
+
+        #[inline(always)]
         fn len(&self) -> usize {
             self.len()
         }
@@ -950,6 +1002,36 @@ mod tests {
                     expected: ValueType::Bool,
                     received: ValueType::Object,
                 })
+            })
+        );
+    }
+
+    #[cfg(feature = "serde_json")]
+    #[test]
+    fn hash_map_from_serde_json() {
+        use serde_json::json;
+
+        let input = json!({"a": true, "b": false});
+        assert_eq!(
+            HashMap::<String, bool>::try_from_json(input),
+            Ok({
+                let mut map = HashMap::new();
+                map.insert("a".into(), true);
+                map.insert("b".into(), false);
+                map
+            })
+        );
+
+        let input = json!({"a": {"b": -1}});
+        assert_eq!(
+            HashMap::<String, HashMap<Box<str>, UnsignedInt>>::try_from_json(input),
+            Err(DocumentError {
+                path: vec![
+                    PathSegment::String("a".into()),
+                    PathSegment::String("b".into())
+                ]
+                .into(),
+                error: TypeErrorOr::Other(IntoUnsignedIntError::NegativeInteger(-1)),
             })
         );
     }
