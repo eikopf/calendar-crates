@@ -28,7 +28,8 @@ use crate::{
     json::{Int, UnsignedInt},
     model::{
         set::{
-            EventStatus, FreeBusyStatus, Method, Privacy, RelationValue, ReplyMethod, TaskProgress,
+            Color, EventStatus, FreeBusyStatus, Method, Privacy, RelationValue, ReplyMethod,
+            TaskProgress,
         },
         string::{CalAddress, Id, ImplicitJsonPointer, Uid, Uri, VendorStr},
         time::{DateTime, Duration, Local, Utc},
@@ -113,7 +114,7 @@ enum Property<V> {
     Locale(String),
     Keywords(HashSet<String>),
     Categories(HashSet<String>),
-    Color(String),
+    Color(Color),
     // RFC 8984 §4.3
     RecurrenceId(DateTime<Local>),
     RecurrenceIdTimeZone(String),

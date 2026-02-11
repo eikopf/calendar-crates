@@ -1,5 +1,7 @@
 //! Types for values which appear in sets.
 
+pub use rfc5545_types::css::Css3Color;
+
 /// A value which may appear in the `relation` field of a `Relation` object (RFC 8984 §1.4.10).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 #[non_exhaustive]
@@ -73,4 +75,19 @@ pub enum ReplyMethod<S> {
     Imip,
     Web,
     Other(S),
+}
+
+/// An RGB color value.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct Rgb {
+    pub red: u8,
+    pub green: u8,
+    pub blue: u8,
+}
+
+/// A color, which may be either a CSS3 color name or an RGB value.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum Color {
+    Css(Css3Color),
+    Rgb(Rgb),
 }

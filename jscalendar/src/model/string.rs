@@ -5,7 +5,6 @@
 //! - `MediaType`: a MIME media type string (RFC 8984 §4.2.3). Used by `Property::DescriptionContentType`.
 //! - `LanguageTag`: a BCP 47 language tag (RFC 8984 §4.2.8). Used by `Property::Locale` and as the
 //!   key type for `Property::Localizations`.
-//! - `CssColor`: a CSS color value (RFC 8984 §4.2.11). Used by `Property::Color`.
 
 use std::{borrow::Cow, fmt::Debug, num::NonZero};
 
