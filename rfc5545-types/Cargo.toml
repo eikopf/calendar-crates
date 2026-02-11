@@ -6,3 +6,4 @@ repository.workspace = true
 license.workspace = true
 
 [dependencies]
+calendar-types = { version = "0.1.0", path = "../calendar-types" }
