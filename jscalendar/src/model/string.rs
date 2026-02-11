@@ -2,17 +2,10 @@
 //!
 //! # TODO
 //!
-//! - `Uid`: a globally unique identifier string (RFC 8984 §4.1.1). Used by `Property::Uid` and as
-//!   the key type for `Property::RelatedTo`.
 //! - `MediaType`: a MIME media type string (RFC 8984 §4.2.3). Used by `Property::DescriptionContentType`.
 //! - `LanguageTag`: a BCP 47 language tag (RFC 8984 §4.2.8). Used by `Property::Locale` and as the
 //!   key type for `Property::Localizations`.
 //! - `CssColor`: a CSS color value (RFC 8984 §4.2.11). Used by `Property::Color`.
-//! - `TimeZoneId`: an IANA time zone identifier (RFC 8984 §4.7.2). Used by
-//!   `Property::RecurrenceIdTimeZone`, `Property::TimeZone`, and as the key type for
-//!   `Property::TimeZones`. Note: `CustomTimeZoneId` already exists for custom (slash-prefixed) IDs.
-//! - `CalAddress`: a calendar user address, typically a `mailto:` URI (RFC 8984 §4.4.5). Used by
-//!   `Property::SentBy`.
 
 use std::{borrow::Cow, fmt::Debug, num::NonZero};
 
@@ -25,6 +18,52 @@ use crate::json::{DestructibleJsonValue, TryFromJson, TypeErrorOr};
 pub struct StringError<E> {
     input: Box<str>,
     error: E,
+}
+
+/// An error indicating that a string is not a valid UID.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Error)]
+pub enum InvalidUidError {
+    #[error("expected at least one character")]
+    EmptyString,
+}
+
+/// A globally unique identifier (RFC 8984 §4.1.1).
+///
+/// The value is an arbitrary non-empty string with no particular format required.
+/// Uniqueness is a semantic property and is not enforced by this type.
+#[derive(PartialEq, Eq, PartialOrd, Ord, Hash, DstNewtype)]
+#[dizzy(invariant = Uid::str_is_uid, error = InvalidUidError)]
+#[dizzy(constructor = pub new)]
+#[dizzy(getter = pub const as_str)]
+#[dizzy(derive(Debug, CloneBoxed, IntoBoxed))]
+#[dizzy(owned = pub UidBuf(String))]
+#[dizzy(derive_owned(Debug, IntoBoxed))]
+#[repr(transparent)]
+pub struct Uid(str);
+
+impl TryFromJson for Box<Uid> {
+    type Error = TypeErrorOr<StringError<InvalidUidError>>;
+
+    fn try_from_json<V: DestructibleJsonValue>(value: V) -> Result<Self, Self::Error> {
+        let input = value.try_into_string()?;
+
+        Uid::new(input.as_ref())
+            .map(Into::into)
+            .map_err(|error| StringError {
+                input: String::from(input.as_ref()).into(),
+                error,
+            })
+            .map_err(TypeErrorOr::Other)
+    }
+}
+
+impl Uid {
+    fn str_is_uid(s: &str) -> Result<(), InvalidUidError> {
+        if s.is_empty() {
+            return Err(InvalidUidError::EmptyString);
+        }
+        Ok(())
+    }
 }
 
 /// A string slice satisfying the regex `/[A-Za-z0-9\-\_]{1, 255}/` (RFC 8984 §1.4.1).
@@ -552,6 +591,64 @@ impl Uri {
             .split_once(':')
             .expect("a Uri must contain a colon")
             .0
+    }
+}
+
+/// An error indicating that a string is not a valid calendar address.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Error)]
+pub enum InvalidCalAddressError {
+    #[error("expected at least one character")]
+    EmptyString,
+    #[error("expected mailto: scheme")]
+    NotMailto,
+}
+
+/// A calendar user address (RFC 8984 §4.4.5).
+///
+/// This must be a `mailto:` URI.
+#[derive(PartialEq, Eq, PartialOrd, Ord, Hash, DstNewtype)]
+#[dizzy(invariant = CalAddress::str_is_cal_address, error = InvalidCalAddressError)]
+#[dizzy(constructor = pub new)]
+#[dizzy(getter = pub const as_str)]
+#[dizzy(derive(Debug, CloneBoxed, IntoBoxed))]
+#[dizzy(owned = pub CalAddressBuf(String))]
+#[dizzy(derive_owned(Debug, IntoBoxed))]
+#[repr(transparent)]
+pub struct CalAddress(str);
+
+impl TryFromJson for Box<CalAddress> {
+    type Error = TypeErrorOr<StringError<InvalidCalAddressError>>;
+
+    fn try_from_json<V: DestructibleJsonValue>(value: V) -> Result<Self, Self::Error> {
+        let input = value.try_into_string()?;
+
+        CalAddress::new(input.as_ref())
+            .map(Into::into)
+            .map_err(|error| StringError {
+                input: String::from(input.as_ref()).into(),
+                error,
+            })
+            .map_err(TypeErrorOr::Other)
+    }
+}
+
+impl CalAddress {
+    fn str_is_cal_address(s: &str) -> Result<(), InvalidCalAddressError> {
+        if s.is_empty() {
+            return Err(InvalidCalAddressError::EmptyString);
+        }
+        if !s.starts_with("mailto:") {
+            return Err(InvalidCalAddressError::NotMailto);
+        }
+        Ok(())
+    }
+
+    /// Returns the email address portion (after `mailto:`).
+    #[inline(always)]
+    pub fn email(&self) -> &str {
+        self.as_str()
+            .strip_prefix("mailto:")
+            .expect("a CalAddress must start with mailto:")
     }
 }
 
