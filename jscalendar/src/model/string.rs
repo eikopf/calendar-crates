@@ -1,4 +1,18 @@
 //! String data model types.
+//!
+//! # TODO
+//!
+//! - `Uid`: a globally unique identifier string (RFC 8984 §4.1.1). Used by `Property::Uid` and as
+//!   the key type for `Property::RelatedTo`.
+//! - `MediaType`: a MIME media type string (RFC 8984 §4.2.3). Used by `Property::DescriptionContentType`.
+//! - `LanguageTag`: a BCP 47 language tag (RFC 8984 §4.2.8). Used by `Property::Locale` and as the
+//!   key type for `Property::Localizations`.
+//! - `CssColor`: a CSS color value (RFC 8984 §4.2.11). Used by `Property::Color`.
+//! - `TimeZoneId`: an IANA time zone identifier (RFC 8984 §4.7.2). Used by
+//!   `Property::RecurrenceIdTimeZone`, `Property::TimeZone`, and as the key type for
+//!   `Property::TimeZones`. Note: `CustomTimeZoneId` already exists for custom (slash-prefixed) IDs.
+//! - `CalAddress`: a calendar user address, typically a `mailto:` URI (RFC 8984 §4.4.5). Used by
+//!   `Property::SentBy`.
 
 use std::{borrow::Cow, fmt::Debug, num::NonZero};
 
@@ -456,6 +470,88 @@ impl VendorStr {
     #[inline(always)]
     pub fn suffix(&self) -> &str {
         self.split_at_colon().1
+    }
+}
+
+/// An error indicating that a string is not a valid URI.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Error)]
+pub enum InvalidUriError {
+    #[error("expected at least one character")]
+    EmptyString,
+    #[error("missing colon after scheme")]
+    MissingColon,
+    #[error("scheme must start with a letter")]
+    SchemeStartsWithNonLetter,
+    #[error("invalid character in scheme: {c}")]
+    InvalidSchemeChar { index: usize, c: char },
+}
+
+/// A URI string (RFC 3986).
+///
+/// # Invariants
+/// 1. The underlying string is not empty.
+/// 2. The string contains a colon separating the scheme from the rest.
+/// 3. The scheme starts with a letter and contains only letters, digits, `+`, `-`, or `.`.
+#[derive(PartialEq, Eq, PartialOrd, Ord, Hash, DstNewtype)]
+#[dizzy(invariant = Uri::str_is_uri, error = InvalidUriError)]
+#[dizzy(constructor = pub new)]
+#[dizzy(getter = pub const as_str)]
+#[dizzy(derive(Debug, CloneBoxed, IntoBoxed))]
+#[dizzy(owned = pub UriBuf(String))]
+#[dizzy(derive_owned(Debug, IntoBoxed))]
+#[repr(transparent)]
+pub struct Uri(str);
+
+impl TryFromJson for Box<Uri> {
+    type Error = TypeErrorOr<StringError<InvalidUriError>>;
+
+    fn try_from_json<V: DestructibleJsonValue>(value: V) -> Result<Self, Self::Error> {
+        let input = value.try_into_string()?;
+
+        Uri::new(input.as_ref())
+            .map(Into::into)
+            .map_err(|error| StringError {
+                input: String::from(input.as_ref()).into(),
+                error,
+            })
+            .map_err(TypeErrorOr::Other)
+    }
+}
+
+impl Uri {
+    fn str_is_uri(s: &str) -> Result<(), InvalidUriError> {
+        let (scheme, _rest) = s.split_once(':').ok_or(if s.is_empty() {
+            InvalidUriError::EmptyString
+        } else {
+            InvalidUriError::MissingColon
+        })?;
+
+        let mut chars = scheme.chars().enumerate();
+
+        match chars.next() {
+            None => return Err(InvalidUriError::MissingColon),
+            Some((_, c)) if !c.is_ascii_alphabetic() => {
+                return Err(InvalidUriError::SchemeStartsWithNonLetter);
+            }
+            Some(_) => {}
+        }
+
+        for (index, c) in chars {
+            if !c.is_ascii_alphanumeric() && c != '+' && c != '-' && c != '.' {
+                return Err(InvalidUriError::InvalidSchemeChar { index, c });
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Returns the scheme portion of the URI (before the first colon).
+    #[inline(always)]
+    pub fn scheme(&self) -> &str {
+        self.as_str()
+            .split_once(':')
+            .expect("a Uri must contain a colon")
+            .0
     }
 }
 
