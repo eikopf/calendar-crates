@@ -8,37 +8,14 @@
 
 use std::{borrow::Cow, fmt::Debug, num::NonZero};
 
+pub use calendar_types::string::{InvalidUidError, InvalidUriError, Uid, UidBuf, Uri, UriBuf};
 use dizzy::DstNewtype;
+use rfc5545_types::string::ParamText;
 use thiserror::Error;
 
 use crate::json::{DestructibleJsonValue, TryFromJson, TypeErrorOr};
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct StringError<E> {
-    input: Box<str>,
-    error: E,
-}
-
-/// An error indicating that a string is not a valid UID.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Error)]
-pub enum InvalidUidError {
-    #[error("expected at least one character")]
-    EmptyString,
-}
-
-/// A globally unique identifier (RFC 8984 §4.1.1).
-///
-/// The value is an arbitrary non-empty string with no particular format required.
-/// Uniqueness is a semantic property and is not enforced by this type.
-#[derive(PartialEq, Eq, PartialOrd, Ord, Hash, DstNewtype)]
-#[dizzy(invariant = Uid::str_is_uid, error = InvalidUidError)]
-#[dizzy(constructor = pub new)]
-#[dizzy(getter = pub const as_str)]
-#[dizzy(derive(Debug, CloneBoxed, IntoBoxed))]
-#[dizzy(owned = pub UidBuf(String))]
-#[dizzy(derive_owned(Debug, IntoBoxed))]
-#[repr(transparent)]
-pub struct Uid(str);
+// TryFromJson impls for reexported string types
 
 impl TryFromJson for Box<Uid> {
     type Error = TypeErrorOr<StringError<InvalidUidError>>;
@@ -56,13 +33,26 @@ impl TryFromJson for Box<Uid> {
     }
 }
 
-impl Uid {
-    fn str_is_uid(s: &str) -> Result<(), InvalidUidError> {
-        if s.is_empty() {
-            return Err(InvalidUidError::EmptyString);
-        }
-        Ok(())
+impl TryFromJson for Box<Uri> {
+    type Error = TypeErrorOr<StringError<InvalidUriError>>;
+
+    fn try_from_json<V: DestructibleJsonValue>(value: V) -> Result<Self, Self::Error> {
+        let input = value.try_into_string()?;
+
+        Uri::new(input.as_ref())
+            .map(Into::into)
+            .map_err(|error| StringError {
+                input: String::from(input.as_ref()).into(),
+                error,
+            })
+            .map_err(TypeErrorOr::Other)
     }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct StringError<E> {
+    input: Box<str>,
+    error: E,
 }
 
 /// A string slice satisfying the regex `/[A-Za-z0-9\-\_]{1, 255}/` (RFC 8984 §1.4.1).
@@ -348,16 +338,19 @@ impl TryFromJson for Box<CustomTimeZoneId> {
 
 impl CustomTimeZoneId {
     fn str_is_custom_time_zone_id(s: &str) -> Result<(), InvalidCustomTimeZoneIdError> {
-        let mut chars = s.chars().enumerate();
+        let body = s.strip_prefix('/').ok_or(if s.is_empty() {
+            InvalidCustomTimeZoneIdError::EmptyString
+        } else {
+            InvalidCustomTimeZoneIdError::MissingSlash
+        })?;
 
-        match chars.next() {
-            Some((_, '/')) => match chars.find(|(_, c)| char_is_paramtext_safe_char(*c)) {
-                Some((index, c)) => Err(InvalidCustomTimeZoneIdError::InvalidBodyChar { index, c }),
-                None => Ok(()),
-            },
-            Some(_) => Err(InvalidCustomTimeZoneIdError::MissingSlash),
-            None => Err(InvalidCustomTimeZoneIdError::EmptyString),
-        }
+        ParamText::new(body).map_err(|e| InvalidCustomTimeZoneIdError::InvalidBodyChar {
+            // Adjust index to account for the leading '/'
+            index: e.index + 1,
+            c: e.c,
+        })?;
+
+        Ok(())
     }
 }
 
@@ -511,88 +504,6 @@ impl VendorStr {
     }
 }
 
-/// An error indicating that a string is not a valid URI.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Error)]
-pub enum InvalidUriError {
-    #[error("expected at least one character")]
-    EmptyString,
-    #[error("missing colon after scheme")]
-    MissingColon,
-    #[error("scheme must start with a letter")]
-    SchemeStartsWithNonLetter,
-    #[error("invalid character in scheme: {c}")]
-    InvalidSchemeChar { index: usize, c: char },
-}
-
-/// A URI string (RFC 3986).
-///
-/// # Invariants
-/// 1. The underlying string is not empty.
-/// 2. The string contains a colon separating the scheme from the rest.
-/// 3. The scheme starts with a letter and contains only letters, digits, `+`, `-`, or `.`.
-#[derive(PartialEq, Eq, PartialOrd, Ord, Hash, DstNewtype)]
-#[dizzy(invariant = Uri::str_is_uri, error = InvalidUriError)]
-#[dizzy(constructor = pub new)]
-#[dizzy(getter = pub const as_str)]
-#[dizzy(derive(Debug, CloneBoxed, IntoBoxed))]
-#[dizzy(owned = pub UriBuf(String))]
-#[dizzy(derive_owned(Debug, IntoBoxed))]
-#[repr(transparent)]
-pub struct Uri(str);
-
-impl TryFromJson for Box<Uri> {
-    type Error = TypeErrorOr<StringError<InvalidUriError>>;
-
-    fn try_from_json<V: DestructibleJsonValue>(value: V) -> Result<Self, Self::Error> {
-        let input = value.try_into_string()?;
-
-        Uri::new(input.as_ref())
-            .map(Into::into)
-            .map_err(|error| StringError {
-                input: String::from(input.as_ref()).into(),
-                error,
-            })
-            .map_err(TypeErrorOr::Other)
-    }
-}
-
-impl Uri {
-    fn str_is_uri(s: &str) -> Result<(), InvalidUriError> {
-        let (scheme, _rest) = s.split_once(':').ok_or(if s.is_empty() {
-            InvalidUriError::EmptyString
-        } else {
-            InvalidUriError::MissingColon
-        })?;
-
-        let mut chars = scheme.chars().enumerate();
-
-        match chars.next() {
-            None => return Err(InvalidUriError::MissingColon),
-            Some((_, c)) if !c.is_ascii_alphabetic() => {
-                return Err(InvalidUriError::SchemeStartsWithNonLetter);
-            }
-            Some(_) => {}
-        }
-
-        for (index, c) in chars {
-            if !c.is_ascii_alphanumeric() && c != '+' && c != '-' && c != '.' {
-                return Err(InvalidUriError::InvalidSchemeChar { index, c });
-            }
-        }
-
-        Ok(())
-    }
-
-    /// Returns the scheme portion of the URI (before the first colon).
-    #[inline(always)]
-    pub fn scheme(&self) -> &str {
-        self.as_str()
-            .split_once(':')
-            .expect("a Uri must contain a colon")
-            .0
-    }
-}
-
 /// An error indicating that a string is not a valid calendar address.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Error)]
 pub enum InvalidCalAddressError {
@@ -648,17 +559,6 @@ impl CalAddress {
         self.as_str()
             .strip_prefix("mailto:")
             .expect("a CalAddress must start with mailto:")
-    }
-}
-
-/// Returns `true` iff `c` is a `SAFE-CHAR` as defined by RFC 5545 §3.1.
-///
-/// NB: RFC 5545 doesn't define the `WSP` rule in its grammar, as it is defined by RFC 5234 to be
-/// either the literal space (U+0020) or the horizontal tab (U+0009).
-const fn char_is_paramtext_safe_char(c: char) -> bool {
-    match c {
-        '\t' | ' ' | '!' | '#'..='+' | '-'..='9' | '<'..='~' => true,
-        _ => !c.is_ascii(),
     }
 }
 
