@@ -31,7 +31,7 @@ use crate::{
             Color, EventStatus, FreeBusyStatus, Method, Privacy, RelationValue, ReplyMethod,
             TaskProgress,
         },
-        string::{CalAddress, Id, ImplicitJsonPointer, Uid, Uri, VendorStr},
+        string::{CalAddress, Id, ImplicitJsonPointer, LanguageTag, Uid, Uri, VendorStr},
         time::{DateTime, Duration, Local, Utc},
     },
 };
@@ -111,7 +111,7 @@ enum Property<V> {
     Locations(HashMap<Box<Id>, ()>), // HashMap<Box<Id>, Location>
     VirtualLocations(HashMap<Box<Id>, ()>), // HashMap<Box<Id>, VirtualLocation>
     Links(HashMap<Box<Id>, Link>),
-    Locale(String),
+    Locale(LanguageTag),
     Keywords(HashSet<String>),
     Categories(HashSet<String>),
     Color(Color),
@@ -134,7 +134,7 @@ enum Property<V> {
     UseDefaultAlerts(bool),
     Alerts(HashMap<Box<Id>, ()>), // HashMap<Box<Id>, Alert>
     // RFC 8984 §4.6
-    Localizations(HashMap<String, PatchObject<V>>),
+    Localizations(HashMap<LanguageTag, PatchObject<V>>),
     // RFC 8984 §4.7
     TimeZone(String),               // optional TimeZoneId
     TimeZones(HashMap<String, ()>), // HashMap<TimeZoneId, TimeZone>
