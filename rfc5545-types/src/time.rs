@@ -1,6 +1,6 @@
 //! Basic time types.
 
-pub use calendar_types::{duration::*, time::*};
+use calendar_types::time::{Date, DateTime};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DateTimeOrDate<M> {

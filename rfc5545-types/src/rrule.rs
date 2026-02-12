@@ -4,10 +4,12 @@ use std::{collections::BTreeSet, fmt::Debug, num::NonZero};
 
 use weekday_num_set::WeekdayNumSet;
 
-use crate::{
+use calendar_types::{
     primitive::Sign,
-    time::{DateTimeOrDate, IsoWeek, Local, Month, Weekday},
+    time::{IsoWeek, Local, Month, Weekday},
 };
+
+use crate::time::DateTimeOrDate;
 
 // TODO: implement another mixed representation set module for
 // year_day_num

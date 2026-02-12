@@ -2,7 +2,7 @@
 
 use std::{collections::BTreeSet, num::NonZero};
 
-use crate::{
+use calendar_types::{
     primitive::Sign,
     time::{IsoWeek, Weekday},
 };
