@@ -1,5 +1,6 @@
 pub mod css;
 pub mod rrule;
+pub mod string;
 pub mod time;
 
 pub mod primitive {

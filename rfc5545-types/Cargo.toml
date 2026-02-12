@@ -7,3 +7,4 @@ license.workspace = true
 
 [dependencies]
 calendar-types = { version = "0.1.0", path = "../calendar-types" }
+dizzy = "0.2.0"
