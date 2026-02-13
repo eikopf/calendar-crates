@@ -2,8 +2,6 @@
 //!
 //! # TODO
 //!
-//! - `Priority`: an integer in the range 0-9 (RFC 8984 §4.4.1). Used by `Property::Priority`.
-//! - `Percent`: an integer in the range 0-100 (RFC 8984 §5.2.4). Used by `Property::PercentComplete`.
 //! - `RequestStatus`: a structured request status value (RFC 8984 §4.4.7). Used by
 //!   `Property::RequestStatus`.
 //! - `RecurrenceRule`: a recurrence rule (RFC 8984 §4.3.2). Used by `Property::RecurrenceRules`
@@ -25,11 +23,11 @@ use std::{
 use hashbrown::HashTable;
 
 use crate::{
-    json::{Int, UnsignedInt},
+    json::UnsignedInt,
     model::{
         set::{
-            Color, EventStatus, FreeBusyStatus, Method, Privacy, RelationValue, ReplyMethod,
-            TaskProgress,
+            Color, EventStatus, FreeBusyStatus, Method, Percent, Priority, Privacy, RelationValue,
+            ReplyMethod, TaskProgress,
         },
         string::{CalAddress, Id, ImplicitJsonPointer, LanguageTag, Uid, Uri, VendorStr},
         time::{DateTime, Duration, Local, Utc},
@@ -123,7 +121,7 @@ enum Property<V> {
     RecurrenceOverrides(HashMap<DateTime<Local>, PatchObject<V>>),
     Excluded(bool),
     // RFC 8984 §4.4
-    Priority(Int),
+    Priority(Priority),
     FreeBusyStatus(FreeBusyStatus<Box<VendorStr>>),
     Privacy(Privacy<Box<VendorStr>>),
     ReplyTo(HashMap<ReplyMethod<Box<VendorStr>>, Box<Uri>>),
@@ -150,7 +148,7 @@ enum Property<V> {
     /// RFC 8984 §5.2.3
     EstimatedDuration(Duration),
     /// RFC 8984 §5.2.4
-    PercentComplete(UnsignedInt),
+    PercentComplete(Percent),
     /// RFC 8984 §5.2.5
     Progress(TaskProgress<Box<VendorStr>>),
     /// RFC 8984 §5.2.6
