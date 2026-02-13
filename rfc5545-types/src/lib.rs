@@ -1,4 +1,5 @@
 pub mod rrule;
+pub mod set;
 pub mod string;
 pub mod time;
 
