@@ -4,8 +4,6 @@
 //!
 //! - `RequestStatus`: a structured request status value (RFC 8984 §4.4.7). Used by
 //!   `Property::RequestStatus`.
-//! - `RecurrenceRule`: a recurrence rule (RFC 8984 §4.3.2). Used by `Property::RecurrenceRules`
-//!   and `Property::ExcludedRecurrenceRules`.
 //! - `Location`: a physical location (RFC 8984 §4.2.5). Used by `Property::Locations`.
 //! - `VirtualLocation`: a virtual location (RFC 8984 §4.2.6). Used by `Property::VirtualLocations`.
 //! - `Participant`: a calendar participant (RFC 8984 §4.4.6). Used by `Property::Participants`.
@@ -25,6 +23,7 @@ use hashbrown::HashTable;
 use crate::{
     json::UnsignedInt,
     model::{
+        rrule::RRule,
         set::{
             Color, EventStatus, FreeBusyStatus, Method, Percent, Priority, Privacy, RelationValue,
             ReplyMethod, TaskProgress,
@@ -116,8 +115,8 @@ enum Property<V> {
     // RFC 8984 §4.3
     RecurrenceId(DateTime<Local>),
     RecurrenceIdTimeZone(String),
-    RecurrenceRules(Vec<()>),         // Vec<RecurrenceRule>
-    ExcludedRecurrenceRules(Vec<()>), // Vec<RecurrenceRule>
+    RecurrenceRules(Vec<RRule>),
+    ExcludedRecurrenceRules(Vec<RRule>),
     RecurrenceOverrides(HashMap<DateTime<Local>, PatchObject<V>>),
     Excluded(bool),
     // RFC 8984 §4.4
