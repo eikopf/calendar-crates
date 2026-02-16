@@ -15,10 +15,8 @@
 
 use std::{
     collections::{HashMap, HashSet},
-    hash::{BuildHasher, Hash, RandomState},
+    hash::Hash,
 };
-
-use hashbrown::HashTable;
 
 use crate::{
     json::UnsignedInt,
@@ -53,35 +51,6 @@ pub struct Link {
     relation: Option<String>,
     display: Option<String>,
     title: Option<String>,
-}
-
-struct JsCalendarObject<V, S = RandomState> {
-    properties: HashTable<Property<V>>,
-    hasher: S,
-}
-
-impl<V, S: BuildHasher> JsCalendarObject<V, S> {
-    fn hash_key<K: Hash + ?Sized>(hasher: &S, key: &K) -> u64 {
-        hasher.hash_one(key)
-    }
-
-    fn get(&self, key: PropertyName<&VendorStr>) -> Option<&Property<V>> {
-        let hash = Self::hash_key(&self.hasher, &key);
-        self.properties.find(hash, |p| p.as_name() == key)
-    }
-
-    fn get_mut(&mut self, key: PropertyName<&VendorStr>) -> Option<&mut Property<V>> {
-        let hash = Self::hash_key(&self.hasher, &key);
-        self.properties.find_mut(hash, |p| p.as_name() == key)
-    }
-
-    fn remove(&mut self, key: PropertyName<&VendorStr>) -> Option<Property<V>> {
-        let hash = Self::hash_key(&self.hasher, &key);
-        match self.properties.find_entry(hash, |p| p.as_name() == key) {
-            Ok(entry) => Some(entry.remove().0),
-            Err(_) => None,
-        }
-    }
 }
 
 /// A JSCalendar property, excluding `@type`.
