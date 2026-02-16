@@ -133,18 +133,18 @@ dependencies = [
 
 [[package]]
 name = "structible"
-version = "0.1.0"
+version = "0.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "bfa8a0a42afd8a15e4556516abfcc04b283b4c458af10cb39d2a0d5e8bd1872d"
+checksum = "9112a6f706f5c7dae0239be064b3d68263aa96663ea0860255af3af4233de1f4"
 dependencies = [
  "structible-macros",
 ]
 
 [[package]]
 name = "structible-macros"
-version = "0.1.0"
+version = "0.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "20fbc8de05cc422b601fc7e51f57a64195751270bcb231e035947951a9d28003"
+checksum = "f52bb551634c3cf307c569df7261756c6aac530fa80f8fad49683232a09b98b1"
 dependencies = [
  "proc-macro2",
  "quote",
