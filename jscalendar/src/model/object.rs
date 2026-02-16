@@ -56,11 +56,11 @@ pub struct Link {
 
 #[structible]
 pub struct Group<V> {
-    // group properties (RFC 8984 §5.3)
+    // Group Properties (RFC 8984 §5.3)
     pub entries: Vec<TaskOrEvent<V>>,
     pub source: Option<Box<Uri>>,
 
-    // common properties (RFC 8984 §4)
+    // Common Properties (RFC 8984 §4)
     pub uid: Box<Uid>,
     pub prod_id: Option<String>,
     pub created: Option<DateTime<Utc>>,
@@ -74,6 +74,10 @@ pub struct Group<V> {
     pub categories: Option<HashSet<String>>,
     pub color: Option<Color>,
     pub time_zones: Option<HashMap<Box<CustomTimeZoneId>, ()>>, // HashMap<_, TimeZone>
+
+    // Custom vendor properties (RFC 8984 §3.3)
+    #[structible(key = Box<VendorStr>)]
+    pub vendor_property: Option<V>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -90,7 +94,6 @@ pub struct Event<V> {
     pub status: Option<EventStatus<Box<VendorStr>>>,
 
     // Metadata Properties (RFC 8984 §4.1)
-    pub at_type: String,
     pub uid: Box<Uid>,
     pub related_to: Option<HashMap<Box<Uid>, Relation>>,
     pub prod_id: Option<String>,
@@ -156,7 +159,6 @@ pub struct Task<V> {
     pub progress_updated: Option<DateTime<Utc>>,
 
     // Metadata Properties (RFC 8984 §4.1)
-    pub at_type: String,
     pub uid: Box<Uid>,
     pub related_to: Option<HashMap<Box<Uid>, Relation>>,
     pub prod_id: Option<String>,
