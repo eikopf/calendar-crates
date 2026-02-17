@@ -1,12 +1,14 @@
 //! Types for describing request statuses.
 
 /// A value of the REQUEST-STATUS property (RFC 5545 §3.8.8.3).
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct RequestStatus {
     pub code: StatusCode,
     pub description: Box<str>,
     pub exception_data: Option<Box<str>>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct StatusCode {
     pub class: Class,
     pub major: u8,
