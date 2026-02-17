@@ -22,7 +22,8 @@ use crate::{
             ReplyMethod, TaskProgress,
         },
         string::{
-            CalAddress, CustomTimeZoneId, Id, ImplicitJsonPointer, LanguageTag, Uid, Uri, VendorStr,
+            AlphaNumeric, CalAddress, CustomTimeZoneId, Id, ImplicitJsonPointer, LanguageTag, Uid,
+            Uri, VendorStr,
         },
         time::{DateTime, Duration, Local, Utc, UtcOffset},
     },
@@ -305,9 +306,6 @@ pub struct TaskParticipant {
     pub percent_complete: Option<Percent>,
 }
 
-// TODO: define a string type whose characters are exclusively ASCII alphanumeric to use as the
-// other key type in SendToParticpant
-
 /// The type of the sendTo property on [`Participant`] (RFC 8984, §4.4.6).
 #[structible]
 pub struct SendToParticipant {
@@ -320,7 +318,7 @@ pub struct SendToParticipant {
     /// If any other `sendTo` method is present, the participant is considered to be identified by
     /// the corresponding [`Uri`], but the method for submitting invitations and updates is
     /// undefined.
-    #[structible(key = Box<str>)]
+    #[structible(key = Box<AlphaNumeric>)]
     pub other: Option<Box<Uri>>,
 }
 
