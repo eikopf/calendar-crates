@@ -54,4 +54,3 @@ const fn char_is_safe_char(c: char) -> bool {
         _ => !c.is_ascii(),
     }
 }
-
