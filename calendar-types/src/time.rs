@@ -624,6 +624,101 @@ impl Second {
 #[error("expected an integer between 0 and 60 but received {0}")]
 pub struct InvalidSecondError(NonZero<u8>);
 
+/// One of the 60 seconds in a minute which are not leap seconds.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
+#[repr(u8)]
+pub enum NonLeapSecond {
+    #[default]
+    S00,
+    S01,
+    S02,
+    S03,
+    S04,
+    S05,
+    S06,
+    S07,
+    S08,
+    S09,
+    S10,
+    S11,
+    S12,
+    S13,
+    S14,
+    S15,
+    S16,
+    S17,
+    S18,
+    S19,
+    S20,
+    S21,
+    S22,
+    S23,
+    S24,
+    S25,
+    S26,
+    S27,
+    S28,
+    S29,
+    S30,
+    S31,
+    S32,
+    S33,
+    S34,
+    S35,
+    S36,
+    S37,
+    S38,
+    S39,
+    S40,
+    S41,
+    S42,
+    S43,
+    S44,
+    S45,
+    S46,
+    S47,
+    S48,
+    S49,
+    S50,
+    S51,
+    S52,
+    S53,
+    S54,
+    S55,
+    S56,
+    S57,
+    S58,
+    S59,
+}
+
+impl NonLeapSecond {
+    pub const fn new(value: u8) -> Result<Self, InvalidNonLeapSecondError> {
+        match NonZero::new(value) {
+            None => Ok(Self::S00),
+            Some(value) => match value.get() < 60 {
+                false => Err(InvalidNonLeapSecondError(value)),
+                true => Ok({
+                    // SAFETY: `value` must be less than 60 in this branch, so it is a valid second
+                    // and not a leap second, and NonLeapSecond is repr(u8)
+                    unsafe { std::mem::transmute::<u8, NonLeapSecond>(value.get()) }
+                }),
+            },
+        }
+    }
+
+    #[inline(always)]
+    pub const fn to_second(self) -> Second {
+        match Second::new(self as u8) {
+            Ok(second) => second,
+            Err(_) => unreachable!(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, Error, PartialEq, Eq)]
+#[error("expected an integer between 0 and 59 but received {0}")]
+pub struct InvalidNonLeapSecondError(NonZero<u8>);
+
 /// A non-zero fractional second, represented as an integer multiple of nanoseconds. This
 /// guarantees nine digits of decimal precision and a maximum error of 10^-9.
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
