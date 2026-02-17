@@ -78,6 +78,52 @@ pub enum ReplyMethod<S> {
     Other(S),
 }
 
+/// The kind of a participant (RFC 8984 §4.4.6).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[non_exhaustive]
+pub enum ParticipantKind<S> {
+    Individual,
+    Group,
+    Location,
+    Resource,
+    Other(S),
+}
+
+/// The role of a participant (RFC 8984 §4.4.6).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[non_exhaustive]
+pub enum ParticipantRole<S> {
+    Owner,
+    Attendee,
+    Optional,
+    Informational,
+    Chair,
+    Contact,
+    Other(S),
+}
+
+/// The status of a participant (RFC 8984 §4.4.6).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[non_exhaustive]
+pub enum ParticipationStatus<S> {
+    NeedsAction,
+    Accepted,
+    Declined,
+    Tentative,
+    Delegated,
+    Other(S),
+}
+
+/// The agent responsible for sending scheduling messages to a participant (RFC 8984 §4.4.6).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[non_exhaustive]
+pub enum ScheduleAgent<S> {
+    Server,
+    Client,
+    None,
+    Other(S),
+}
+
 /// An RGB color value.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct Rgb {
