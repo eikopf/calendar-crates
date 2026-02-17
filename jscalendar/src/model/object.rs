@@ -2,7 +2,6 @@
 //!
 //! # TODO
 //!
-//! - `Participant`: a calendar participant (RFC 8984 §4.4.6).
 //! - `Alert`: a calendar alert (RFC 8984 §4.5.2).
 //! - `AbsoluteTrigger`, `OffsetTrigger`, `UnknownTrigger`: trigger types for alerts (RFC 8984 §4.5.2).
 
@@ -16,7 +15,7 @@ use structible::structible;
 use crate::{
     json::UnsignedInt,
     model::{
-        request_status::RequestStatus,
+        request_status::{RequestStatus, StatusCode},
         rrule::RRule,
         set::{
             Color, EventStatus, FreeBusyStatus, Method, Percent, Priority, Privacy, RelationValue,
@@ -104,7 +103,7 @@ pub struct Event<V> {
     pub privacy: Option<Privacy<Box<VendorStr>>>,
     pub reply_to: Option<HashMap<ReplyMethod<Box<VendorStr>>, Box<Uri>>>,
     pub sent_by: Option<Box<CalAddress>>,
-    pub participants: Option<HashMap<Box<Id>, ()>>, // HashMap<Box<Id>, Participant>
+    pub participants: Option<HashMap<Box<Id>, Participant>>,
     pub request_status: Option<RequestStatus>,
 
     // Alerts Properties (RFC 8984 §4.5)
@@ -169,7 +168,7 @@ pub struct Task<V> {
     pub privacy: Option<Privacy<Box<VendorStr>>>,
     pub reply_to: Option<HashMap<ReplyMethod<Box<VendorStr>>, Box<Uri>>>,
     pub sent_by: Option<Box<CalAddress>>,
-    pub participants: Option<HashMap<Box<Id>, ()>>, // HashMap<Box<Id>, Participant>
+    pub participants: Option<HashMap<Box<Id>, TaskParticipant>>,
     pub request_status: Option<RequestStatus>,
 
     // Alerts Properties (RFC 8984 §4.5)
@@ -244,6 +243,66 @@ pub struct TimeZoneRule<V> {
     pub recurrence_overrides: Option<HashMap<DateTime<Local>, PatchObject<V>>>,
     pub names: Option<HashSet<String>>, // RFC 5545, TZNAME
     pub comments: Option<Vec<String>>,  // RFC 5545, COMMENT
+}
+
+/// A description of a participant (RFC 8984 §4.4.6).
+#[structible]
+pub struct Participant {
+    pub name: Option<String>,
+    pub email: Option<String>, // Box<EmailAddr> (RFC 5322, §3.4.1)
+    pub description: Option<String>,
+    pub send_to: Option<HashMap<String, Box<Uri>>>, // HashMap<SendMethod, _>
+    pub kind: Option<String>,                       // EntityKind<_>
+    pub roles: Option<HashSet<String>>,             // ParticipantRole<_>
+    pub location_id: Option<Box<Id>>,
+    pub language: Option<LanguageTag>,
+    pub participation_status: Option<String>, // ParticipationStatus<_>
+    pub participation_comment: Option<String>,
+    pub expect_reply: Option<bool>,
+    pub schedule_agent: Option<String>, // ScheduleAgent<_>
+    pub schedule_force_send: Option<bool>,
+    pub schedule_sequence: Option<UnsignedInt>,
+    pub schedule_status: Option<Vec<StatusCode>>,
+    pub schedule_updated: Option<DateTime<Utc>>,
+    pub sent_by: Option<String>, // Box<EmailAddr> (RFC 5322, §3.4.1)
+    pub invited_by: Option<Box<Id>>,
+    pub delegated_to: Option<HashSet<Box<Id>>>,
+    pub delegated_from: Option<HashSet<Box<Id>>>,
+    pub member_of: Option<HashSet<Box<Id>>>,
+    pub links: Option<HashMap<Box<Id>, Link>>,
+}
+
+/// A description of a participant which may occur in a [`Task`] (RFC 8984 §4.4.6).
+#[structible]
+pub struct TaskParticipant {
+    // general participant fields
+    pub name: Option<String>,
+    pub email: Option<String>, // Box<EmailAddr> (RFC 5322, §3.4.1)
+    pub description: Option<String>,
+    pub send_to: Option<HashMap<String, Box<Uri>>>, // HashMap<SendMethod, _>
+    pub kind: Option<String>,                       // EntityKind<_>
+    pub roles: Option<HashSet<String>>,             // ParticipantRole<_>
+    pub location_id: Option<Box<Id>>,
+    pub language: Option<LanguageTag>,
+    pub participation_status: Option<String>, // ParticipationStatus<_>
+    pub participation_comment: Option<String>,
+    pub expect_reply: Option<bool>,
+    pub schedule_agent: Option<String>, // ScheduleAgent<_>
+    pub schedule_force_send: Option<bool>,
+    pub schedule_sequence: Option<UnsignedInt>,
+    pub schedule_status: Option<Vec<StatusCode>>,
+    pub schedule_updated: Option<DateTime<Utc>>,
+    pub sent_by: Option<String>, // Box<EmailAddr> (RFC 5322, §3.4.1)
+    pub invited_by: Option<Box<Id>>,
+    pub delegated_to: Option<HashSet<Box<Id>>>,
+    pub delegated_from: Option<HashSet<Box<Id>>>,
+    pub member_of: Option<HashSet<Box<Id>>>,
+    pub links: Option<HashMap<Box<Id>, Link>>,
+
+    // task-specific fields
+    pub progress: Option<TaskProgress<Box<VendorStr>>>,
+    pub progress_updated: Option<DateTime<Utc>>,
+    pub percent_complete: Option<Percent>,
 }
 
 /// A set of patches to be applied to a JSON object (RFC 8984 §1.4.9).
