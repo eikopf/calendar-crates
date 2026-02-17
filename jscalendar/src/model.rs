@@ -4,6 +4,8 @@ pub mod object;
 pub mod set;
 pub mod string;
 
+pub use rfc5545_types::request_status;
+
 /// Recurrence rule types.
 pub mod rrule {
     pub use rfc5545_types::rrule::*;
