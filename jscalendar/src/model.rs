@@ -12,4 +12,5 @@ pub mod rrule {
 /// Date and time types.
 pub mod time {
     pub use calendar_types::{duration::*, primitive::*, time::*};
+    pub use rfc5545_types::time::UtcOffset;
 }

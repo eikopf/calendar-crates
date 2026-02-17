@@ -25,7 +25,7 @@ use crate::{
         string::{
             CalAddress, CustomTimeZoneId, Id, ImplicitJsonPointer, LanguageTag, Uid, Uri, VendorStr,
         },
-        time::{DateTime, Duration, Local, Utc},
+        time::{DateTime, Duration, Local, Utc, UtcOffset},
     },
 };
 
@@ -238,8 +238,8 @@ pub struct TimeZone<V> {
 #[structible]
 pub struct TimeZoneRule<V> {
     pub start: DateTime<Local>,
-    pub offset_from: String, // UtcOffset (RFC 5545, TZOFFSETFROM)
-    pub offset_to: String,   // UtcOffset (RFC 5545, TZOFFSETFROM)
+    pub offset_from: UtcOffset,
+    pub offset_to: UtcOffset,
     pub recurrence_rules: Option<Vec<RRule>>,
     pub recurrence_overrides: Option<HashMap<DateTime<Local>, PatchObject<V>>>,
     pub names: Option<HashSet<String>>, // RFC 5545, TZNAME
