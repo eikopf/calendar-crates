@@ -124,6 +124,24 @@ pub enum ScheduleAgent<S> {
     Other(S),
 }
 
+/// The time property that an alert is relative to (RFC 8984 §4.5.2).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[non_exhaustive]
+pub enum AlertRelativeTo<S> {
+    Start,
+    End,
+    Other(S),
+}
+
+/// The action by which an alert is conveyed (RFC 8984 §4.5.2).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[non_exhaustive]
+pub enum AlertAction<S> {
+    Display,
+    Email,
+    Other(S),
+}
+
 /// An RGB color value.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct Rgb {

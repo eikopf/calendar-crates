@@ -1,9 +1,4 @@
 //! Distinguished object types.
-//!
-//! # TODO
-//!
-//! - `Alert`: a calendar alert (RFC 8984 §4.5.2).
-//! - `AbsoluteTrigger`, `OffsetTrigger`, `UnknownTrigger`: trigger types for alerts (RFC 8984 §4.5.2).
 
 use std::{
     collections::{HashMap, HashSet},
@@ -18,15 +13,15 @@ use crate::{
         request_status::{RequestStatus, StatusCode},
         rrule::RRule,
         set::{
-            Color, EventStatus, FreeBusyStatus, Method, ParticipantKind, ParticipantRole,
-            ParticipationStatus, Percent, Priority, Privacy, RelationValue, ReplyMethod,
-            ScheduleAgent, TaskProgress,
+            AlertAction, AlertRelativeTo, Color, EventStatus, FreeBusyStatus, Method,
+            ParticipantKind, ParticipantRole, ParticipationStatus, Percent, Priority, Privacy,
+            RelationValue, ReplyMethod, ScheduleAgent, TaskProgress,
         },
         string::{
             AlphaNumeric, CalAddress, CustomTimeZoneId, Id, ImplicitJsonPointer, LanguageTag, Uid,
             Uri, VendorStr,
         },
-        time::{DateTime, Duration, Local, Utc, UtcOffset},
+        time::{DateTime, Duration, Local, SignedDuration, Utc, UtcOffset},
     },
 };
 
@@ -321,6 +316,36 @@ pub struct SendToParticipant {
     /// undefined.
     #[structible(key = Box<AlphaNumeric>)]
     pub other: Option<Box<Uri>>,
+}
+
+/// A representation of an alert or a reminder (RFC 8984 §4.5.2).
+#[structible]
+pub struct Alert<V> {
+    pub trigger: Trigger<V>,
+    pub acknowledged: Option<DateTime<Utc>>,
+    pub related_to: Option<HashMap<Box<str>, Relation>>,
+    pub action: Option<AlertAction<Box<str>>>,
+}
+
+/// The trigger of an [`Alert`].
+#[derive(Debug, Clone, PartialEq)]
+pub enum Trigger<V> {
+    Offset(OffsetTrigger),
+    Absolute(AbsoluteTrigger),
+    Unknown(V), // technically this should be a V::Object
+}
+
+/// A trigger defined relative to a time property (RFC 8984 §4.5.2).
+#[structible]
+pub struct OffsetTrigger {
+    pub offset: SignedDuration,
+    pub relative_to: Option<AlertRelativeTo<Box<VendorStr>>>,
+}
+
+/// A trigger defined at an absolute time (RFC 8984 §4.5.2).
+#[structible]
+pub struct AbsoluteTrigger {
+    pub when: DateTime<Utc>,
 }
 
 /// A set of patches to be applied to a JSON object (RFC 8984 §1.4.9).
