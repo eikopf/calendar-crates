@@ -18,8 +18,9 @@ use crate::{
         request_status::{RequestStatus, StatusCode},
         rrule::RRule,
         set::{
-            Color, EventStatus, FreeBusyStatus, Method, Percent, Priority, Privacy, RelationValue,
-            ReplyMethod, TaskProgress,
+            Color, EventStatus, FreeBusyStatus, Method, ParticipantKind, ParticipantRole,
+            ParticipationStatus, Percent, Priority, Privacy, RelationValue, ReplyMethod,
+            ScheduleAgent, TaskProgress,
         },
         string::{
             AlphaNumeric, CalAddress, CustomTimeZoneId, Id, ImplicitJsonPointer, LanguageTag, Uid,
@@ -253,14 +254,14 @@ pub struct Participant {
     pub email: Option<String>, // Box<EmailAddr> (RFC 5322, §3.4.1)
     pub description: Option<String>,
     pub send_to: Option<SendToParticipant>,
-    pub kind: Option<String>,           // EntityKind<_>
-    pub roles: Option<HashSet<String>>, // ParticipantRole<_>
+    pub kind: Option<ParticipantKind<Box<VendorStr>>>,
+    pub roles: Option<HashSet<ParticipantRole<Box<VendorStr>>>>,
     pub location_id: Option<Box<Id>>,
     pub language: Option<LanguageTag>,
-    pub participation_status: Option<String>, // ParticipationStatus<_>
+    pub participation_status: Option<ParticipationStatus<Box<VendorStr>>>,
     pub participation_comment: Option<String>,
     pub expect_reply: Option<bool>,
-    pub schedule_agent: Option<String>, // ScheduleAgent<_>
+    pub schedule_agent: Option<ScheduleAgent<Box<VendorStr>>>,
     pub schedule_force_send: Option<bool>,
     pub schedule_sequence: Option<UnsignedInt>,
     pub schedule_status: Option<Vec<StatusCode>>,
@@ -281,14 +282,14 @@ pub struct TaskParticipant {
     pub email: Option<String>, // Box<EmailAddr> (RFC 5322, §3.4.1)
     pub description: Option<String>,
     pub send_to: Option<SendToParticipant>,
-    pub kind: Option<String>,           // EntityKind<_>
-    pub roles: Option<HashSet<String>>, // ParticipantRole<_>
+    pub kind: Option<ParticipantKind<Box<VendorStr>>>,
+    pub roles: Option<HashSet<ParticipantRole<Box<VendorStr>>>>,
     pub location_id: Option<Box<Id>>,
     pub language: Option<LanguageTag>,
-    pub participation_status: Option<String>, // ParticipationStatus<_>
+    pub participation_status: Option<ParticipationStatus<Box<VendorStr>>>,
     pub participation_comment: Option<String>,
     pub expect_reply: Option<bool>,
-    pub schedule_agent: Option<String>, // ScheduleAgent<_>
+    pub schedule_agent: Option<ScheduleAgent<Box<VendorStr>>>,
     pub schedule_force_send: Option<bool>,
     pub schedule_sequence: Option<UnsignedInt>,
     pub schedule_status: Option<Vec<StatusCode>>,
