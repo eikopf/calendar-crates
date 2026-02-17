@@ -2,7 +2,6 @@
 //!
 //! # TODO
 //!
-//! - `RequestStatus`: a structured request status value (RFC 8984 §4.4.7).
 //! - `Participant`: a calendar participant (RFC 8984 §4.4.6).
 //! - `Alert`: a calendar alert (RFC 8984 §4.5.2).
 //! - `AbsoluteTrigger`, `OffsetTrigger`, `UnknownTrigger`: trigger types for alerts (RFC 8984 §4.5.2).
@@ -17,6 +16,7 @@ use structible::structible;
 use crate::{
     json::UnsignedInt,
     model::{
+        request_status::RequestStatus,
         rrule::RRule,
         set::{
             Color, EventStatus, FreeBusyStatus, Method, Percent, Priority, Privacy, RelationValue,
@@ -105,7 +105,7 @@ pub struct Event<V> {
     pub reply_to: Option<HashMap<ReplyMethod<Box<VendorStr>>, Box<Uri>>>,
     pub sent_by: Option<Box<CalAddress>>,
     pub participants: Option<HashMap<Box<Id>, ()>>, // HashMap<Box<Id>, Participant>
-    pub request_status: Option<String>,
+    pub request_status: Option<RequestStatus>,
 
     // Alerts Properties (RFC 8984 §4.5)
     pub use_default_alerts: Option<bool>,
@@ -170,7 +170,7 @@ pub struct Task<V> {
     pub reply_to: Option<HashMap<ReplyMethod<Box<VendorStr>>, Box<Uri>>>,
     pub sent_by: Option<Box<CalAddress>>,
     pub participants: Option<HashMap<Box<Id>, ()>>, // HashMap<Box<Id>, Participant>
-    pub request_status: Option<String>,
+    pub request_status: Option<RequestStatus>,
 
     // Alerts Properties (RFC 8984 §4.5)
     pub use_default_alerts: Option<bool>,
