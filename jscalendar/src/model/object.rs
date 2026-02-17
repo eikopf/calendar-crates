@@ -251,9 +251,9 @@ pub struct Participant {
     pub name: Option<String>,
     pub email: Option<String>, // Box<EmailAddr> (RFC 5322, §3.4.1)
     pub description: Option<String>,
-    pub send_to: Option<HashMap<String, Box<Uri>>>, // HashMap<SendMethod, _>
-    pub kind: Option<String>,                       // EntityKind<_>
-    pub roles: Option<HashSet<String>>,             // ParticipantRole<_>
+    pub send_to: Option<SendToParticipant>,
+    pub kind: Option<String>,           // EntityKind<_>
+    pub roles: Option<HashSet<String>>, // ParticipantRole<_>
     pub location_id: Option<Box<Id>>,
     pub language: Option<LanguageTag>,
     pub participation_status: Option<String>, // ParticipationStatus<_>
@@ -279,9 +279,9 @@ pub struct TaskParticipant {
     pub name: Option<String>,
     pub email: Option<String>, // Box<EmailAddr> (RFC 5322, §3.4.1)
     pub description: Option<String>,
-    pub send_to: Option<HashMap<String, Box<Uri>>>, // HashMap<SendMethod, _>
-    pub kind: Option<String>,                       // EntityKind<_>
-    pub roles: Option<HashSet<String>>,             // ParticipantRole<_>
+    pub send_to: Option<SendToParticipant>,
+    pub kind: Option<String>,           // EntityKind<_>
+    pub roles: Option<HashSet<String>>, // ParticipantRole<_>
     pub location_id: Option<Box<Id>>,
     pub language: Option<LanguageTag>,
     pub participation_status: Option<String>, // ParticipationStatus<_>
@@ -303,6 +303,25 @@ pub struct TaskParticipant {
     pub progress: Option<TaskProgress<Box<VendorStr>>>,
     pub progress_updated: Option<DateTime<Utc>>,
     pub percent_complete: Option<Percent>,
+}
+
+// TODO: define a string type whose characters are exclusively ASCII alphanumeric to use as the
+// other key type in SendToParticpant
+
+/// The type of the sendTo property on [`Participant`] (RFC 8984, §4.4.6).
+#[structible]
+pub struct SendToParticipant {
+    /// If the `imip` field is defined, then the participant accepts an iMIP (RFC 6047) request at
+    /// the corresponding email address. The email address may be different from the [`email`]
+    /// property on the [`Participant`].
+    ///
+    /// [`email`]: Participant::email
+    pub imip: Option<Box<CalAddress>>,
+    /// If any other `sendTo` method is present, the participant is considered to be identified by
+    /// the corresponding [`Uri`], but the method for submitting invitations and updates is
+    /// undefined.
+    #[structible(key = Box<str>)]
+    pub other: Option<Box<Uri>>,
 }
 
 /// A set of patches to be applied to a JSON object (RFC 8984 §1.4.9).
