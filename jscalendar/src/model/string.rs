@@ -599,6 +599,31 @@ impl CalAddress {
     }
 }
 
+/// A string slice where every character is ASCII alphanumeric.
+#[derive(PartialEq, Eq, PartialOrd, Ord, Hash, DstNewtype)]
+#[dizzy(invariant = AlphaNumeric::str_is_alphanumeric, error = InvalidAlphaNumericError)]
+#[dizzy(constructor = pub new)]
+#[dizzy(getter = pub const as_str)]
+#[dizzy(derive(Debug, CloneBoxed, IntoBoxed))]
+#[repr(transparent)]
+pub struct AlphaNumeric(str);
+
+impl AlphaNumeric {
+    pub fn str_is_alphanumeric(s: &str) -> Result<(), InvalidAlphaNumericError> {
+        match s.char_indices().find(|(_, c)| !c.is_ascii_alphanumeric()) {
+            Some((index, c)) => Err(InvalidAlphaNumericError { c, index }),
+            None => Ok(()),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, Error)]
+#[error("encountered the non-alphanumeric character {c} at index {index}")]
+pub struct InvalidAlphaNumericError {
+    c: char,
+    index: usize,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
