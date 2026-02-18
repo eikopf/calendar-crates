@@ -4,7 +4,7 @@ pub use calendar_types::{
     css::Css3Color,
     set::{LinkRelation, LocationType},
 };
-pub use rfc5545_types::set::{Percent, Priority};
+pub use rfc5545_types::set::{Method, Percent, Priority};
 
 /// A value which may appear in the `relation` field of a `Relation` object (RFC 8984 §1.4.10).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -25,21 +25,6 @@ pub enum DisplayPurpose<S> {
     Graphic,
     FullSize,
     Thumbnail,
-    Other(S),
-}
-
-/// An iCalendar method (RFC 8984 §4.1.7).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-#[non_exhaustive]
-pub enum Method<S> {
-    Publish,
-    Request,
-    Reply,
-    Add,
-    Cancel,
-    Refresh,
-    Counter,
-    DeclineCounter,
     Other(S),
 }
 

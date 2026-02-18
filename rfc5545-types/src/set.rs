@@ -1,5 +1,20 @@
 //! Types representing the members of finite sets.
 
+/// An iTIP method (RFC 5546 §1.4).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[non_exhaustive]
+pub enum Method<S> {
+    Publish,
+    Request,
+    Reply,
+    Add,
+    Cancel,
+    Refresh,
+    Counter,
+    DeclineCounter,
+    Other(S),
+}
+
 /// An unsigned integer in the range `0..=100` (RFC 5545 §3.8.1.8).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub struct Percent(u8);
