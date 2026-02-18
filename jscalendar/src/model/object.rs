@@ -105,7 +105,7 @@ pub struct Event<V> {
 
     // Alerts Properties (RFC 8984 §4.5)
     pub use_default_alerts: Option<bool>,
-    pub alerts: Option<HashMap<Box<Id>, ()>>, // HashMap<Box<Id>, Alert>
+    pub alerts: Option<HashMap<Box<Id>, Alert<V>>>,
 
     // Multilingual Properties (RFC 8984 §4.6)
     pub localizations: Option<HashMap<LanguageTag, PatchObject<V>>>,
@@ -170,7 +170,7 @@ pub struct Task<V> {
 
     // Alerts Properties (RFC 8984 §4.5)
     pub use_default_alerts: Option<bool>,
-    pub alerts: Option<HashMap<Box<Id>, ()>>, // HashMap<Box<Id>, Alert>
+    pub alerts: Option<HashMap<Box<Id>, Alert<V>>>,
 
     // Multilingual Properties (RFC 8984 §4.6)
     pub localizations: Option<HashMap<LanguageTag, PatchObject<V>>>,
