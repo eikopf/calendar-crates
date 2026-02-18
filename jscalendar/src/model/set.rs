@@ -1,6 +1,6 @@
 //! Types for values which appear in sets.
 
-pub use calendar_types::css::Css3Color;
+pub use calendar_types::{css::Css3Color, set::LocationType};
 pub use rfc5545_types::set::{Percent, Priority};
 
 /// A value which may appear in the `relation` field of a `Relation` object (RFC 8984 §1.4.10).
@@ -11,6 +11,17 @@ pub enum RelationValue<S> {
     Next,
     Child,
     Parent,
+    Other(S),
+}
+
+/// The intended purpose of a link to an image (RFC 8984 §1.4.11).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[non_exhaustive]
+pub enum DisplayPurpose<S> {
+    Badge,
+    Graphic,
+    FullSize,
+    Thumbnail,
     Other(S),
 }
 
@@ -66,6 +77,20 @@ pub enum TaskProgress<S> {
     InProcess,
     Completed,
     Cancelled,
+    Other(S),
+}
+
+/// A feature supported by a virutal location (RFC 8984 §4.2.6).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[non_exhaustive]
+pub enum VirtualLocationFeature<S> {
+    Audio,
+    Chat,
+    Feed,
+    Moderator,
+    Phone,
+    Screen,
+    Video,
     Other(S),
 }
 
