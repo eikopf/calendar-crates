@@ -60,6 +60,7 @@ dependencies = [
  "serde",
  "serde_json",
  "structible",
+ "strum",
  "thiserror",
 ]
 
@@ -142,6 +143,7 @@ version = "0.1.0"
 dependencies = [
  "calendar-types",
  "dizzy",
+ "strum",
 ]
 
 [[package]]

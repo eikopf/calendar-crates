@@ -5,3 +5,7 @@ resolver = "2"
 [workspace.package]
 repository = "https://github.com/eikopf/calendar-crates"
 license = "MIT"
+
+[workspace.dependencies]
+dizzy = "0.2.0"
+strum = { version = "0.27.2", features = ["derive", "phf"] }
