@@ -464,12 +464,15 @@ pub enum IntoUnsignedIntError {
     OutsideRange(u64),
 }
 
-/// A type representing a JSON value that can be converted into Rust values.
-pub trait DestructibleJsonValue: Sized {
+/// A type representing a JSON value.
+pub trait JsonValue {
     type String: AsRef<str> + Into<String>;
     type Array: JsonArray<Elem = Self>;
     type Object: JsonObject<Value = Self>;
+}
 
+/// A type representing a JSON value that can be converted into Rust values.
+pub trait DestructibleJsonValue: Sized + JsonValue {
     // TYPE CHECKS
 
     fn value_type(&self) -> ValueType;
@@ -533,10 +536,7 @@ pub trait DestructibleJsonValue: Sized {
 }
 
 /// A type representing a JSON value that can be built from Rust values.
-pub trait ConstructibleJsonValue: Sized {
-    type Array: JsonArray;
-    type Object: JsonObject;
-
+pub trait ConstructibleJsonValue: Sized + JsonValue {
     // CONSTRUCTORS
 
     fn null() -> Self;
@@ -704,14 +704,16 @@ mod serde_json_impl {
 
     use super::{
         ConstructibleJsonValue, DestructibleJsonValue, Int, IntoIntError, IntoUnsignedIntError,
-        JsonObject, TypeError, TypeErrorOr, UnsignedInt, ValueType,
+        JsonObject, JsonValue, TypeError, TypeErrorOr, UnsignedInt, ValueType,
     };
 
-    impl DestructibleJsonValue for Value {
+    impl JsonValue for Value {
         type String = String;
         type Array = Vec<Value>;
         type Object = Map<String, Value>;
+    }
 
+    impl DestructibleJsonValue for Value {
         #[inline(always)]
         fn value_type(&self) -> ValueType {
             match self {
@@ -743,7 +745,7 @@ mod serde_json_impl {
         }
 
         #[inline(always)]
-        fn try_as_string(&self) -> Result<&<Self as DestructibleJsonValue>::String, TypeError> {
+        fn try_as_string(&self) -> Result<&<Self as JsonValue>::String, TypeError> {
             match self {
                 Value::String(s) => Ok(s),
                 _ => Err(TypeError {
@@ -754,7 +756,7 @@ mod serde_json_impl {
         }
 
         #[inline(always)]
-        fn try_as_array(&self) -> Result<&<Self as DestructibleJsonValue>::Array, TypeError> {
+        fn try_as_array(&self) -> Result<&<Self as JsonValue>::Array, TypeError> {
             self.as_array().ok_or_else(|| TypeError {
                 expected: ValueType::Array,
                 received: self.value_type(),
@@ -762,7 +764,7 @@ mod serde_json_impl {
         }
 
         #[inline(always)]
-        fn try_as_object(&self) -> Result<&<Self as DestructibleJsonValue>::Object, TypeError> {
+        fn try_as_object(&self) -> Result<&<Self as JsonValue>::Object, TypeError> {
             self.as_object().ok_or_else(|| TypeError {
                 expected: ValueType::Object,
                 received: self.value_type(),
@@ -817,7 +819,7 @@ mod serde_json_impl {
         }
 
         #[inline(always)]
-        fn try_into_string(self) -> Result<<Self as DestructibleJsonValue>::String, TypeError> {
+        fn try_into_string(self) -> Result<<Self as JsonValue>::String, TypeError> {
             match self {
                 Value::String(s) => Ok(s),
                 _ => Err(TypeError {
@@ -828,7 +830,7 @@ mod serde_json_impl {
         }
 
         #[inline(always)]
-        fn try_into_array(self) -> Result<<Self as DestructibleJsonValue>::Array, TypeError> {
+        fn try_into_array(self) -> Result<<Self as JsonValue>::Array, TypeError> {
             match self {
                 Value::Array(array) => Ok(array),
                 _ => Err(TypeError {
@@ -839,7 +841,7 @@ mod serde_json_impl {
         }
 
         #[inline(always)]
-        fn try_into_object(self) -> Result<<Self as DestructibleJsonValue>::Object, TypeError> {
+        fn try_into_object(self) -> Result<<Self as JsonValue>::Object, TypeError> {
             match self {
                 Value::Object(object) => Ok(object),
                 _ => Err(TypeError {
@@ -851,9 +853,6 @@ mod serde_json_impl {
     }
 
     impl ConstructibleJsonValue for Value {
-        type Array = Vec<Self>;
-        type Object = Map<String, Self>;
-
         #[inline(always)]
         fn null() -> Self {
             Self::Null
@@ -895,12 +894,12 @@ mod serde_json_impl {
         }
 
         #[inline(always)]
-        fn array(value: <Self as ConstructibleJsonValue>::Array) -> Self {
+        fn array(value: <Self as JsonValue>::Array) -> Self {
             Value::Array(value)
         }
 
         #[inline(always)]
-        fn object(value: <Self as ConstructibleJsonValue>::Object) -> Self {
+        fn object(value: <Self as JsonValue>::Object) -> Self {
             Value::Object(value)
         }
     }
