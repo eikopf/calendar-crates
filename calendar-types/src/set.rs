@@ -1,6 +1,38 @@
-//! Types for finite, extensible set values.
+//! Types for finite set values.
+
+use std::str::FromStr;
 
 use strum::EnumString;
+
+/// A token which may be a statically [`Known`] value of type `T` or else an unknown value of type
+/// `S`.
+///
+/// The principal use of this type is to allow finite enums to be extended with arbitrary values,
+/// most commonly some unknown string which is permissible but statically unknowable.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum Token<T, S> {
+    Known(T),
+    Unknown(S),
+}
+
+impl<T: Default, S> Default for Token<T, S> {
+    fn default() -> Self {
+        Self::Known(Default::default())
+    }
+}
+
+impl<T, S> Token<T, S> {
+    pub fn try_from_str<'a>(s: &'a str) -> Result<Self, <&'a str as TryInto<S>>::Error>
+    where
+        T: FromStr,
+        &'a str: TryInto<S>,
+    {
+        match T::from_str(s) {
+            Ok(value) => Ok(Token::Known(value)),
+            Err(_) => s.try_into().map(Token::Unknown),
+        }
+    }
+}
 
 /// A link relation from the [IANA Link Relations Registry].
 ///
@@ -989,20 +1021,44 @@ mod tests {
 
     #[test]
     fn link_relation_from_str_lowercase() {
-        assert_eq!(LinkRelation::from_str("about").unwrap(), LinkRelation::About);
-        assert_eq!(LinkRelation::from_str("api-catalog").unwrap(), LinkRelation::ApiCatalog);
+        assert_eq!(
+            LinkRelation::from_str("about").unwrap(),
+            LinkRelation::About
+        );
+        assert_eq!(
+            LinkRelation::from_str("api-catalog").unwrap(),
+            LinkRelation::ApiCatalog
+        );
         assert_eq!(LinkRelation::from_str("self").unwrap(), LinkRelation::Self_);
-        assert_eq!(LinkRelation::from_str("openid2.provider").unwrap(), LinkRelation::OpenId2Provider);
+        assert_eq!(
+            LinkRelation::from_str("openid2.provider").unwrap(),
+            LinkRelation::OpenId2Provider
+        );
     }
 
     #[test]
     fn link_relation_from_str_case_insensitive() {
-        assert_eq!(LinkRelation::from_str("ABOUT").unwrap(), LinkRelation::About);
-        assert_eq!(LinkRelation::from_str("About").unwrap(), LinkRelation::About);
-        assert_eq!(LinkRelation::from_str("API-CATALOG").unwrap(), LinkRelation::ApiCatalog);
-        assert_eq!(LinkRelation::from_str("Api-Catalog").unwrap(), LinkRelation::ApiCatalog);
+        assert_eq!(
+            LinkRelation::from_str("ABOUT").unwrap(),
+            LinkRelation::About
+        );
+        assert_eq!(
+            LinkRelation::from_str("About").unwrap(),
+            LinkRelation::About
+        );
+        assert_eq!(
+            LinkRelation::from_str("API-CATALOG").unwrap(),
+            LinkRelation::ApiCatalog
+        );
+        assert_eq!(
+            LinkRelation::from_str("Api-Catalog").unwrap(),
+            LinkRelation::ApiCatalog
+        );
         assert_eq!(LinkRelation::from_str("SELF").unwrap(), LinkRelation::Self_);
-        assert_eq!(LinkRelation::from_str("OPENID2.PROVIDER").unwrap(), LinkRelation::OpenId2Provider);
+        assert_eq!(
+            LinkRelation::from_str("OPENID2.PROVIDER").unwrap(),
+            LinkRelation::OpenId2Provider
+        );
     }
 
     #[test]
@@ -1033,21 +1089,51 @@ mod tests {
 
     #[test]
     fn location_type_from_str_lowercase() {
-        assert_eq!(LocationType::from_str("aircraft").unwrap(), LocationType::Aircraft);
-        assert_eq!(LocationType::from_str("bus-station").unwrap(), LocationType::BusStation);
-        assert_eq!(LocationType::from_str("place-of-worship").unwrap(), LocationType::PlaceOfWorship);
+        assert_eq!(
+            LocationType::from_str("aircraft").unwrap(),
+            LocationType::Aircraft
+        );
+        assert_eq!(
+            LocationType::from_str("bus-station").unwrap(),
+            LocationType::BusStation
+        );
+        assert_eq!(
+            LocationType::from_str("place-of-worship").unwrap(),
+            LocationType::PlaceOfWorship
+        );
         // Note: "utilitybox" has no hyphen per IANA registry
-        assert_eq!(LocationType::from_str("utilitybox").unwrap(), LocationType::UtilityBox);
+        assert_eq!(
+            LocationType::from_str("utilitybox").unwrap(),
+            LocationType::UtilityBox
+        );
     }
 
     #[test]
     fn location_type_from_str_case_insensitive() {
-        assert_eq!(LocationType::from_str("AIRCRAFT").unwrap(), LocationType::Aircraft);
-        assert_eq!(LocationType::from_str("Aircraft").unwrap(), LocationType::Aircraft);
-        assert_eq!(LocationType::from_str("BUS-STATION").unwrap(), LocationType::BusStation);
-        assert_eq!(LocationType::from_str("Bus-Station").unwrap(), LocationType::BusStation);
-        assert_eq!(LocationType::from_str("PLACE-OF-WORSHIP").unwrap(), LocationType::PlaceOfWorship);
-        assert_eq!(LocationType::from_str("UTILITYBOX").unwrap(), LocationType::UtilityBox);
+        assert_eq!(
+            LocationType::from_str("AIRCRAFT").unwrap(),
+            LocationType::Aircraft
+        );
+        assert_eq!(
+            LocationType::from_str("Aircraft").unwrap(),
+            LocationType::Aircraft
+        );
+        assert_eq!(
+            LocationType::from_str("BUS-STATION").unwrap(),
+            LocationType::BusStation
+        );
+        assert_eq!(
+            LocationType::from_str("Bus-Station").unwrap(),
+            LocationType::BusStation
+        );
+        assert_eq!(
+            LocationType::from_str("PLACE-OF-WORSHIP").unwrap(),
+            LocationType::PlaceOfWorship
+        );
+        assert_eq!(
+            LocationType::from_str("UTILITYBOX").unwrap(),
+            LocationType::UtilityBox
+        );
     }
 
     #[test]
