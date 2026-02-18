@@ -13,9 +13,10 @@ use crate::{
         request_status::{RequestStatus, StatusCode},
         rrule::RRule,
         set::{
-            AlertAction, AlertRelativeTo, Color, EventStatus, FreeBusyStatus, Method,
-            ParticipantKind, ParticipantRole, ParticipationStatus, Percent, Priority, Privacy,
-            RelationValue, ReplyMethod, ScheduleAgent, TaskProgress,
+            AlertAction, AlertRelativeTo, Color, DisplayPurpose, EventStatus, FreeBusyStatus,
+            LocationType, Method, ParticipantKind, ParticipantRole, ParticipationStatus, Percent,
+            Priority, Privacy, RelationValue, ReplyMethod, ScheduleAgent, TaskProgress,
+            VirtualLocationFeature,
         },
         string::{
             AlphaNumeric, CalAddress, CustomTimeZoneId, Id, ImplicitJsonPointer, LanguageTag, Uid,
@@ -204,7 +205,7 @@ pub struct Task<V> {
 pub struct Location {
     pub name: Option<String>,
     pub description: Option<String>,
-    pub location_types: Option<HashSet<String>>, // HashSet<LocationType<_>> (RFC 4589)
+    pub location_types: Option<HashSet<LocationType>>,
     pub relative_to: Option<RelationValue<Box<VendorStr>>>,
     pub time_zone: Option<String>,
     pub coordinates: Option<String>, // Box<GeoUri> (RFC 5870)
@@ -217,7 +218,7 @@ pub struct VirtualLocation {
     pub name: Option<String>,
     pub description: Option<String>,
     pub uri: Box<Uri>,
-    pub features: Option<HashSet<String>>, // HashSet<VirtualLocationFeature<_>>
+    pub features: Option<HashSet<VirtualLocationFeature<Box<VendorStr>>>>,
 }
 
 /// A link to an external resource (RFC 8984 §1.4.11).
@@ -228,7 +229,7 @@ pub struct Link {
     pub media_type: Option<String>, // MediaType (RFC 6838)
     pub size: Option<UnsignedInt>,
     pub relation: Option<String>, // RelationType<_> (RFC 8288)
-    pub display: Option<String>,  // DisplayValue<_>
+    pub display: Option<DisplayPurpose<Box<str>>>,
     pub title: Option<String>,
 }
 
