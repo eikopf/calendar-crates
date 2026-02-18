@@ -14,9 +14,9 @@ use crate::{
         rrule::RRule,
         set::{
             AlertAction, AlertRelativeTo, Color, DisplayPurpose, EventStatus, FreeBusyStatus,
-            LocationType, Method, ParticipantKind, ParticipantRole, ParticipationStatus, Percent,
-            Priority, Privacy, RelationValue, ReplyMethod, ScheduleAgent, TaskProgress,
-            VirtualLocationFeature,
+            LinkRelation, LocationType, Method, ParticipantKind, ParticipantRole,
+            ParticipationStatus, Percent, Priority, Privacy, RelationValue, ReplyMethod,
+            ScheduleAgent, TaskProgress, VirtualLocationFeature,
         },
         string::{
             AlphaNumeric, CalAddress, CustomTimeZoneId, Id, ImplicitJsonPointer, LanguageTag, Uid,
@@ -228,7 +228,7 @@ pub struct Link {
     pub content_id: Option<String>, // Box<ContentId> (RFC 2392 §2)
     pub media_type: Option<String>, // MediaType (RFC 6838)
     pub size: Option<UnsignedInt>,
-    pub relation: Option<String>, // RelationType<_> (RFC 8288)
+    pub relation: Option<LinkRelation>,
     pub display: Option<DisplayPurpose<Box<str>>>,
     pub title: Option<String>,
 }

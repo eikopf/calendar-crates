@@ -1,6 +1,9 @@
 //! Types for values which appear in sets.
 
-pub use calendar_types::{css::Css3Color, set::LocationType};
+pub use calendar_types::{
+    css::Css3Color,
+    set::{LinkRelation, LocationType},
+};
 pub use rfc5545_types::set::{Percent, Priority};
 
 /// A value which may appear in the `relation` field of a `Relation` object (RFC 8984 §1.4.10).
