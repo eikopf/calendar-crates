@@ -19,8 +19,8 @@ use crate::{
             ScheduleAgent, TaskProgress, VirtualLocationFeature,
         },
         string::{
-            AlphaNumeric, CalAddress, CustomTimeZoneId, Id, ImplicitJsonPointer, LanguageTag, Uid,
-            Uri, VendorStr,
+            AlphaNumeric, CalAddress, ContentId, CustomTimeZoneId, EmailAddr, GeoUri, Id,
+            ImplicitJsonPointer, LanguageTag, MediaType, Uid, Uri, VendorStr,
         },
         time::{DateTime, Duration, Local, SignedDuration, Utc, UtcOffset},
     },
@@ -44,7 +44,7 @@ pub struct Group<V> {
     pub title: Option<String>,
     pub description: Option<String>,
     pub description_content_type: Option<String>,
-    pub links: Option<HashMap<Box<Id>, Link>>,
+    pub links: Option<HashMap<Box<Id>, Link<V>>>,
     pub locale: Option<LanguageTag>,
     pub keywords: Option<HashSet<String>>,
     pub categories: Option<HashSet<String>>,
@@ -77,7 +77,7 @@ pub struct Event<V> {
 
     // Metadata Properties (RFC 8984 §4.1)
     pub uid: Box<Uid>,
-    pub related_to: Option<HashMap<Box<Uid>, Relation>>,
+    pub related_to: Option<HashMap<Box<Uid>, Relation<V>>>,
     pub prod_id: Option<String>,
     pub created: Option<DateTime<Utc>>,
     pub updated: Option<DateTime<Utc>>,
@@ -89,9 +89,9 @@ pub struct Event<V> {
     pub description: Option<String>,
     pub description_content_type: Option<String>,
     pub show_without_time: Option<bool>,
-    pub locations: Option<HashMap<Box<Id>, Location>>,
-    pub virtual_locations: Option<HashMap<Box<Id>, VirtualLocation>>,
-    pub links: Option<HashMap<Box<Id>, Link>>,
+    pub locations: Option<HashMap<Box<Id>, Location<V>>>,
+    pub virtual_locations: Option<HashMap<Box<Id>, VirtualLocation<V>>>,
+    pub links: Option<HashMap<Box<Id>, Link<V>>>,
     pub locale: Option<LanguageTag>,
     pub keywords: Option<HashSet<String>>,
     pub categories: Option<HashSet<String>>,
@@ -111,7 +111,7 @@ pub struct Event<V> {
     pub privacy: Option<Privacy<Box<VendorStr>>>,
     pub reply_to: Option<HashMap<ReplyMethod<Box<VendorStr>>, Box<Uri>>>,
     pub sent_by: Option<Box<CalAddress>>,
-    pub participants: Option<HashMap<Box<Id>, Participant>>,
+    pub participants: Option<HashMap<Box<Id>, Participant<V>>>,
     pub request_status: Option<RequestStatus>,
 
     // Alerts Properties (RFC 8984 §4.5)
@@ -147,7 +147,7 @@ pub struct Task<V> {
 
     // Metadata Properties (RFC 8984 §4.1)
     pub uid: Box<Uid>,
-    pub related_to: Option<HashMap<Box<Uid>, Relation>>,
+    pub related_to: Option<HashMap<Box<Uid>, Relation<V>>>,
     pub prod_id: Option<String>,
     pub created: Option<DateTime<Utc>>,
     pub updated: Option<DateTime<Utc>>,
@@ -159,9 +159,9 @@ pub struct Task<V> {
     pub description: Option<String>,
     pub description_content_type: Option<String>,
     pub show_without_time: Option<bool>,
-    pub locations: Option<HashMap<Box<Id>, Location>>,
-    pub virtual_locations: Option<HashMap<Box<Id>, VirtualLocation>>,
-    pub links: Option<HashMap<Box<Id>, Link>>,
+    pub locations: Option<HashMap<Box<Id>, Location<V>>>,
+    pub virtual_locations: Option<HashMap<Box<Id>, VirtualLocation<V>>>,
+    pub links: Option<HashMap<Box<Id>, Link<V>>>,
     pub locale: Option<LanguageTag>,
     pub keywords: Option<HashSet<String>>,
     pub categories: Option<HashSet<String>>,
@@ -181,7 +181,7 @@ pub struct Task<V> {
     pub privacy: Option<Privacy<Box<VendorStr>>>,
     pub reply_to: Option<HashMap<ReplyMethod<Box<VendorStr>>, Box<Uri>>>,
     pub sent_by: Option<Box<CalAddress>>,
-    pub participants: Option<HashMap<Box<Id>, TaskParticipant>>,
+    pub participants: Option<HashMap<Box<Id>, TaskParticipant<V>>>,
     pub request_status: Option<RequestStatus>,
 
     // Alerts Properties (RFC 8984 §4.5)
@@ -202,47 +202,59 @@ pub struct Task<V> {
 
 /// A description of a physical location (RFC 8984 §4.2.5).
 #[structible]
-pub struct Location {
+pub struct Location<V> {
     pub name: Option<String>,
     pub description: Option<String>,
     pub location_types: Option<HashSet<LocationType>>,
     pub relative_to: Option<RelationValue<Box<VendorStr>>>,
     pub time_zone: Option<String>,
-    pub coordinates: Option<String>, // Box<GeoUri> (RFC 5870)
-    pub links: Option<HashMap<Box<Id>, Link>>,
+    pub coordinates: Option<Box<GeoUri>>,
+    pub links: Option<HashMap<Box<Id>, Link<V>>>,
+
+    #[structible(key = Box<VendorStr>)]
+    pub vendor_property: Option<V>,
 }
 
-/// A description of a virutal location (RFC 8984 §4.2.6).
+/// A description of a virtual location (RFC 8984 §4.2.6).
 #[structible]
-pub struct VirtualLocation {
+pub struct VirtualLocation<V> {
     pub name: Option<String>,
     pub description: Option<String>,
     pub uri: Box<Uri>,
     pub features: Option<HashSet<VirtualLocationFeature<Box<VendorStr>>>>,
+
+    #[structible(key = Box<VendorStr>)]
+    pub vendor_property: Option<V>,
 }
 
 /// A link to an external resource (RFC 8984 §1.4.11).
 #[structible]
-pub struct Link {
+pub struct Link<V> {
     pub href: Box<Uri>,
-    pub content_id: Option<String>, // Box<ContentId> (RFC 2392 §2)
-    pub media_type: Option<String>, // MediaType (RFC 6838)
+    pub content_id: Option<Box<ContentId>>,
+    pub media_type: Option<Box<MediaType>>,
     pub size: Option<UnsignedInt>,
     pub relation: Option<LinkRelation>,
     pub display: Option<DisplayPurpose<Box<str>>>,
     pub title: Option<String>,
+
+    #[structible(key = Box<VendorStr>)]
+    pub vendor_property: Option<V>,
 }
 
 /// A description of a time zone (RFC 8984 §4.7.2).
 #[structible]
 pub struct TimeZone<V> {
-    pub tz_id: String, // Box<ParamText> (RFC 5545 §3.1)
+    pub tz_id: String,
     pub updated: Option<DateTime<Utc>>,
     pub url: Option<Box<Uri>>,
     pub valid_until: Option<DateTime<Utc>>,
-    pub aliases: Option<HashSet<String>>, // TZID-ALIAS-OF (RFC 7808)
+    pub aliases: Option<HashSet<Box<str>>>,
     pub standard: Option<Vec<TimeZoneRule<V>>>,
     pub daylight: Option<Vec<TimeZoneRule<V>>>,
+
+    #[structible(key = Box<VendorStr>)]
+    pub vendor_property: Option<V>,
 }
 
 /// A rule belonging to a [`TimeZone`], which may describe a period of either standard or daylight
@@ -254,15 +266,18 @@ pub struct TimeZoneRule<V> {
     pub offset_to: UtcOffset,
     pub recurrence_rules: Option<Vec<RRule>>,
     pub recurrence_overrides: Option<HashMap<DateTime<Local>, PatchObject<V>>>,
-    pub names: Option<HashSet<String>>, // RFC 5545, TZNAME
-    pub comments: Option<Vec<String>>,  // RFC 5545, COMMENT
+    pub names: Option<HashSet<String>>,
+    pub comments: Option<Vec<String>>,
+
+    #[structible(key = Box<VendorStr>)]
+    pub vendor_property: Option<V>,
 }
 
 /// A description of a participant (RFC 8984 §4.4.6).
 #[structible]
-pub struct Participant {
+pub struct Participant<V> {
     pub name: Option<String>,
-    pub email: Option<String>, // Box<EmailAddr> (RFC 5322, §3.4.1)
+    pub email: Option<Box<EmailAddr>>,
     pub description: Option<String>,
     pub send_to: Option<SendToParticipant>,
     pub kind: Option<ParticipantKind<Box<VendorStr>>>,
@@ -277,20 +292,23 @@ pub struct Participant {
     pub schedule_sequence: Option<UnsignedInt>,
     pub schedule_status: Option<Vec<StatusCode>>,
     pub schedule_updated: Option<DateTime<Utc>>,
-    pub sent_by: Option<String>, // Box<EmailAddr> (RFC 5322, §3.4.1)
+    pub sent_by: Option<Box<EmailAddr>>,
     pub invited_by: Option<Box<Id>>,
     pub delegated_to: Option<HashSet<Box<Id>>>,
     pub delegated_from: Option<HashSet<Box<Id>>>,
     pub member_of: Option<HashSet<Box<Id>>>,
-    pub links: Option<HashMap<Box<Id>, Link>>,
+    pub links: Option<HashMap<Box<Id>, Link<V>>>,
+
+    #[structible(key = Box<VendorStr>)]
+    pub vendor_property: Option<V>,
 }
 
 /// A description of a participant which may occur in a [`Task`] (RFC 8984 §4.4.6).
 #[structible]
-pub struct TaskParticipant {
+pub struct TaskParticipant<V> {
     // general participant fields
     pub name: Option<String>,
-    pub email: Option<String>, // Box<EmailAddr> (RFC 5322, §3.4.1)
+    pub email: Option<Box<EmailAddr>>,
     pub description: Option<String>,
     pub send_to: Option<SendToParticipant>,
     pub kind: Option<ParticipantKind<Box<VendorStr>>>,
@@ -305,20 +323,26 @@ pub struct TaskParticipant {
     pub schedule_sequence: Option<UnsignedInt>,
     pub schedule_status: Option<Vec<StatusCode>>,
     pub schedule_updated: Option<DateTime<Utc>>,
-    pub sent_by: Option<String>, // Box<EmailAddr> (RFC 5322, §3.4.1)
+    pub sent_by: Option<Box<EmailAddr>>,
     pub invited_by: Option<Box<Id>>,
     pub delegated_to: Option<HashSet<Box<Id>>>,
     pub delegated_from: Option<HashSet<Box<Id>>>,
     pub member_of: Option<HashSet<Box<Id>>>,
-    pub links: Option<HashMap<Box<Id>, Link>>,
+    pub links: Option<HashMap<Box<Id>, Link<V>>>,
 
     // task-specific fields
     pub progress: Option<TaskProgress<Box<VendorStr>>>,
     pub progress_updated: Option<DateTime<Utc>>,
     pub percent_complete: Option<Percent>,
+
+    #[structible(key = Box<VendorStr>)]
+    pub vendor_property: Option<V>,
 }
 
 /// The type of the sendTo property on [`Participant`] (RFC 8984, §4.4.6).
+///
+/// Note: This type does not have a separate vendor_property field because the `other` field
+/// already captures all unknown method names (including vendor-prefixed ones) as a catch-all.
 #[structible]
 pub struct SendToParticipant {
     /// If the `imip` field is defined, then the participant accepts an iMIP (RFC 6047) request at
@@ -329,7 +353,7 @@ pub struct SendToParticipant {
     pub imip: Option<Box<CalAddress>>,
     /// If any other `sendTo` method is present, the participant is considered to be identified by
     /// the corresponding [`Uri`], but the method for submitting invitations and updates is
-    /// undefined.
+    /// undefined. This includes vendor-prefixed method names.
     #[structible(key = Box<AlphaNumeric>)]
     pub other: Option<Box<Uri>>,
 }
@@ -339,29 +363,38 @@ pub struct SendToParticipant {
 pub struct Alert<V> {
     pub trigger: Trigger<V>,
     pub acknowledged: Option<DateTime<Utc>>,
-    pub related_to: Option<HashMap<Box<str>, Relation>>,
+    pub related_to: Option<HashMap<Box<str>, Relation<V>>>,
     pub action: Option<AlertAction<Box<str>>>,
+
+    #[structible(key = Box<VendorStr>)]
+    pub vendor_property: Option<V>,
 }
 
 /// The trigger of an [`Alert`].
 #[derive(Debug, Clone, PartialEq)]
 pub enum Trigger<V> {
-    Offset(OffsetTrigger),
-    Absolute(AbsoluteTrigger),
-    Unknown(V), // technically this should be a V::Object
+    Offset(OffsetTrigger<V>),
+    Absolute(AbsoluteTrigger<V>),
+    Unknown(V),
 }
 
 /// A trigger defined relative to a time property (RFC 8984 §4.5.2).
 #[structible]
-pub struct OffsetTrigger {
+pub struct OffsetTrigger<V> {
     pub offset: SignedDuration,
     pub relative_to: Option<AlertRelativeTo<Box<VendorStr>>>,
+
+    #[structible(key = Box<VendorStr>)]
+    pub vendor_property: Option<V>,
 }
 
 /// A trigger defined at an absolute time (RFC 8984 §4.5.2).
 #[structible]
-pub struct AbsoluteTrigger {
+pub struct AbsoluteTrigger<V> {
     pub when: DateTime<Utc>,
+
+    #[structible(key = Box<VendorStr>)]
+    pub vendor_property: Option<V>,
 }
 
 /// A set of patches to be applied to a JSON object (RFC 8984 §1.4.9).
@@ -369,7 +402,8 @@ pub struct AbsoluteTrigger {
 pub struct PatchObject<V>(HashMap<Box<ImplicitJsonPointer>, V>);
 
 /// A set of relationship types (RFC 8984 §1.4.10).
-#[derive(Debug, Clone, PartialEq, Default)]
-pub struct Relation {
+#[derive(Debug, Clone, PartialEq)]
+pub struct Relation<V> {
     relations: HashSet<RelationValue<Box<VendorStr>>>,
+    vendor_property: Option<V>,
 }
