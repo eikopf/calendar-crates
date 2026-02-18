@@ -1,8 +1,4 @@
 //! String data model types.
-//!
-//! # TODO
-//!
-//! - `MediaType`: a MIME media type string (RFC 8984 §4.2.3). Used by `Property::DescriptionContentType`.
 
 use std::{borrow::Cow, fmt::Debug, num::NonZero};
 
@@ -596,6 +592,301 @@ impl CalAddress {
         self.as_str()
             .strip_prefix("mailto:")
             .expect("a CalAddress must start with mailto:")
+    }
+}
+
+/// An error indicating that a string is not a valid email address.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Error)]
+pub enum InvalidEmailAddrError {
+    #[error("expected at least one character")]
+    EmptyString,
+    #[error("expected exactly one '@' character")]
+    InvalidAtSign,
+    #[error("empty local part before '@'")]
+    EmptyLocalPart,
+    #[error("empty domain part after '@'")]
+    EmptyDomainPart,
+}
+
+/// An email address (RFC 5322 §3.4.1).
+///
+/// This performs minimal validation: the string must be non-empty,
+/// contain exactly one `@` character, and have non-empty local and domain parts.
+#[derive(PartialEq, Eq, PartialOrd, Ord, Hash, DstNewtype)]
+#[dizzy(invariant = EmailAddr::str_is_email_addr, error = InvalidEmailAddrError)]
+#[dizzy(constructor = pub new)]
+#[dizzy(getter = pub const as_str)]
+#[dizzy(derive(Debug, CloneBoxed, IntoBoxed))]
+#[repr(transparent)]
+pub struct EmailAddr(str);
+
+impl<V: DestructibleJsonValue> TryFromJson<V> for Box<EmailAddr> {
+    type Error = TypeErrorOr<StringError<InvalidEmailAddrError>>;
+
+    fn try_from_json(value: V) -> Result<Self, Self::Error> {
+        let input = value.try_into_string()?;
+
+        EmailAddr::new(input.as_ref())
+            .map(Into::into)
+            .map_err(|error| StringError {
+                input: String::from(input.as_ref()).into(),
+                error,
+            })
+            .map_err(TypeErrorOr::Other)
+    }
+}
+
+impl EmailAddr {
+    fn str_is_email_addr(s: &str) -> Result<(), InvalidEmailAddrError> {
+        if s.is_empty() {
+            return Err(InvalidEmailAddrError::EmptyString);
+        }
+
+        let (local, domain) = s
+            .split_once('@')
+            .ok_or(InvalidEmailAddrError::InvalidAtSign)?;
+
+        if domain.contains('@') {
+            return Err(InvalidEmailAddrError::InvalidAtSign);
+        }
+        if local.is_empty() {
+            return Err(InvalidEmailAddrError::EmptyLocalPart);
+        }
+        if domain.is_empty() {
+            return Err(InvalidEmailAddrError::EmptyDomainPart);
+        }
+
+        Ok(())
+    }
+
+    /// Returns the local part (before `@`).
+    #[inline(always)]
+    pub fn local_part(&self) -> &str {
+        self.as_str()
+            .split_once('@')
+            .expect("an EmailAddr must contain @")
+            .0
+    }
+
+    /// Returns the domain part (after `@`).
+    #[inline(always)]
+    pub fn domain(&self) -> &str {
+        self.as_str()
+            .split_once('@')
+            .expect("an EmailAddr must contain @")
+            .1
+    }
+}
+
+/// An error indicating that a string is not a valid geo URI.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Error)]
+pub enum InvalidGeoUriError {
+    #[error("expected at least one character")]
+    EmptyString,
+    #[error("expected 'geo:' scheme")]
+    NotGeoScheme,
+    #[error("missing latitude value")]
+    MissingLatitude,
+    #[error("missing longitude value")]
+    MissingLongitude,
+    #[error("invalid latitude value")]
+    InvalidLatitude,
+    #[error("invalid longitude value")]
+    InvalidLongitude,
+}
+
+/// A geographic URI (RFC 5870).
+///
+/// Format: `geo:latitude,longitude[,altitude][;parameters]`
+#[derive(PartialEq, Eq, PartialOrd, Ord, Hash, DstNewtype)]
+#[dizzy(invariant = GeoUri::str_is_geo_uri, error = InvalidGeoUriError)]
+#[dizzy(constructor = pub new)]
+#[dizzy(getter = pub const as_str)]
+#[dizzy(derive(Debug, CloneBoxed, IntoBoxed))]
+#[repr(transparent)]
+pub struct GeoUri(str);
+
+impl<V: DestructibleJsonValue> TryFromJson<V> for Box<GeoUri> {
+    type Error = TypeErrorOr<StringError<InvalidGeoUriError>>;
+
+    fn try_from_json(value: V) -> Result<Self, Self::Error> {
+        let input = value.try_into_string()?;
+
+        GeoUri::new(input.as_ref())
+            .map(Into::into)
+            .map_err(|error| StringError {
+                input: String::from(input.as_ref()).into(),
+                error,
+            })
+            .map_err(TypeErrorOr::Other)
+    }
+}
+
+impl GeoUri {
+    fn str_is_geo_uri(s: &str) -> Result<(), InvalidGeoUriError> {
+        if s.is_empty() {
+            return Err(InvalidGeoUriError::EmptyString);
+        }
+
+        let body = s
+            .strip_prefix("geo:")
+            .ok_or(InvalidGeoUriError::NotGeoScheme)?;
+
+        // Split off parameters (after `;`)
+        let coords = body.split(';').next().unwrap_or(body);
+
+        let mut parts = coords.split(',');
+
+        let lat_str = parts.next().ok_or(InvalidGeoUriError::MissingLatitude)?;
+        if lat_str.is_empty() {
+            return Err(InvalidGeoUriError::MissingLatitude);
+        }
+        lat_str
+            .parse::<f64>()
+            .map_err(|_| InvalidGeoUriError::InvalidLatitude)?;
+
+        let lon_str = parts.next().ok_or(InvalidGeoUriError::MissingLongitude)?;
+        if lon_str.is_empty() {
+            return Err(InvalidGeoUriError::MissingLongitude);
+        }
+        lon_str
+            .parse::<f64>()
+            .map_err(|_| InvalidGeoUriError::InvalidLongitude)?;
+
+        // Altitude is optional, we don't validate it strictly
+        Ok(())
+    }
+}
+
+/// An error indicating that a string is not a valid Content-ID.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Error)]
+pub enum InvalidContentIdError {
+    #[error("expected at least one character")]
+    EmptyString,
+}
+
+/// A Content-ID reference (RFC 2392 §2).
+///
+/// This is a minimal validation: the string must be non-empty.
+/// Full Content-ID validation is complex; we defer to usage context.
+#[derive(PartialEq, Eq, PartialOrd, Ord, Hash, DstNewtype)]
+#[dizzy(invariant = ContentId::str_is_content_id, error = InvalidContentIdError)]
+#[dizzy(constructor = pub new)]
+#[dizzy(getter = pub const as_str)]
+#[dizzy(derive(Debug, CloneBoxed, IntoBoxed))]
+#[repr(transparent)]
+pub struct ContentId(str);
+
+impl<V: DestructibleJsonValue> TryFromJson<V> for Box<ContentId> {
+    type Error = TypeErrorOr<StringError<InvalidContentIdError>>;
+
+    fn try_from_json(value: V) -> Result<Self, Self::Error> {
+        let input = value.try_into_string()?;
+
+        ContentId::new(input.as_ref())
+            .map(Into::into)
+            .map_err(|error| StringError {
+                input: String::from(input.as_ref()).into(),
+                error,
+            })
+            .map_err(TypeErrorOr::Other)
+    }
+}
+
+impl ContentId {
+    fn str_is_content_id(s: &str) -> Result<(), InvalidContentIdError> {
+        if s.is_empty() {
+            return Err(InvalidContentIdError::EmptyString);
+        }
+        Ok(())
+    }
+}
+
+/// An error indicating that a string is not a valid media type.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Error)]
+pub enum InvalidMediaTypeError {
+    #[error("expected at least one character")]
+    EmptyString,
+    #[error("expected '/' separator between type and subtype")]
+    MissingSlash,
+    #[error("empty type part before '/'")]
+    EmptyType,
+    #[error("empty subtype part after '/'")]
+    EmptySubtype,
+}
+
+/// A MIME media type (RFC 6838).
+///
+/// Format: `type/subtype[;parameters]`
+#[derive(PartialEq, Eq, PartialOrd, Ord, Hash, DstNewtype)]
+#[dizzy(invariant = MediaType::str_is_media_type, error = InvalidMediaTypeError)]
+#[dizzy(constructor = pub new)]
+#[dizzy(getter = pub const as_str)]
+#[dizzy(derive(Debug, CloneBoxed, IntoBoxed))]
+#[repr(transparent)]
+pub struct MediaType(str);
+
+impl<V: DestructibleJsonValue> TryFromJson<V> for Box<MediaType> {
+    type Error = TypeErrorOr<StringError<InvalidMediaTypeError>>;
+
+    fn try_from_json(value: V) -> Result<Self, Self::Error> {
+        let input = value.try_into_string()?;
+
+        MediaType::new(input.as_ref())
+            .map(Into::into)
+            .map_err(|error| StringError {
+                input: String::from(input.as_ref()).into(),
+                error,
+            })
+            .map_err(TypeErrorOr::Other)
+    }
+}
+
+impl MediaType {
+    fn str_is_media_type(s: &str) -> Result<(), InvalidMediaTypeError> {
+        if s.is_empty() {
+            return Err(InvalidMediaTypeError::EmptyString);
+        }
+
+        // Split off parameters (after `;`)
+        let type_subtype = s.split(';').next().unwrap_or(s);
+
+        let (type_part, subtype) = type_subtype
+            .split_once('/')
+            .ok_or(InvalidMediaTypeError::MissingSlash)?;
+
+        if type_part.is_empty() {
+            return Err(InvalidMediaTypeError::EmptyType);
+        }
+        if subtype.is_empty() {
+            return Err(InvalidMediaTypeError::EmptySubtype);
+        }
+
+        Ok(())
+    }
+
+    /// Returns the type part (before `/`).
+    #[inline(always)]
+    pub fn type_part(&self) -> &str {
+        self.as_str()
+            .split(';')
+            .next()
+            .unwrap()
+            .split_once('/')
+            .expect("a MediaType must contain /")
+            .0
+    }
+
+    /// Returns the subtype part (after `/`, before parameters).
+    #[inline(always)]
+    pub fn subtype(&self) -> &str {
+        self.as_str()
+            .split(';')
+            .next()
+            .unwrap()
+            .split_once('/')
+            .expect("a MediaType must contain /")
+            .1
     }
 }
 
