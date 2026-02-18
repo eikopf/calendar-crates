@@ -25,6 +25,10 @@ use crate::{
     },
 };
 
+/// A JSCalendar group opject (RFC 8984 §2.3).
+///
+/// A group is a collection of [`Event`] and [`Task`] objects. Typically, objects are grouped by
+/// topic (e.g. by keywords) or calendar membership.
 #[structible]
 pub struct Group<V> {
     // Group Properties (RFC 8984 §5.3)
@@ -51,12 +55,18 @@ pub struct Group<V> {
     pub vendor_property: Option<V>,
 }
 
+/// A [`Task`] or an [`Event`].
 #[derive(Debug, Clone, PartialEq)]
 pub enum TaskOrEvent<V> {
     Task(Task<V>),
     Event(Event<V>),
 }
 
+/// A JSCalendar event object (RFC 8984 §2.1).
+///
+/// An event represents a scheduled amount of time on a calendar, typically a meeting, appointment,
+/// reminder, or anniversary. It is required to start at a certain point in time and typically has
+/// a non-zero duration. Multiple participants may partake in the event at multiple locations.
 #[structible]
 pub struct Event<V> {
     // Event Properties (RFC 8984 §5.1)
@@ -119,6 +129,11 @@ pub struct Event<V> {
     pub vendor_property: Option<V>,
 }
 
+/// A JSCalendar task object (RFC 8984 §2.2).
+///
+/// A task represents an action item, assignment, to-do item, or work item. It may start and be due
+/// at certain points in time, take some estimated time to complete, and recur, none of which is
+/// required.
 #[structible]
 pub struct Task<V> {
     // Task Properties (RFC 8984 §5.2)
