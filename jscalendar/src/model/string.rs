@@ -54,10 +54,10 @@ use crate::json::{DestructibleJsonValue, TryFromJson, TypeErrorOr};
 
 // TryFromJson impls for reexported string types
 
-impl TryFromJson for Box<Uid> {
+impl<V: DestructibleJsonValue> TryFromJson<V> for Box<Uid> {
     type Error = TypeErrorOr<StringError<InvalidUidError>>;
 
-    fn try_from_json<V: DestructibleJsonValue>(value: V) -> Result<Self, Self::Error> {
+    fn try_from_json(value: V) -> Result<Self, Self::Error> {
         let input = value.try_into_string()?;
 
         Uid::new(input.as_ref())
@@ -70,10 +70,10 @@ impl TryFromJson for Box<Uid> {
     }
 }
 
-impl TryFromJson for Box<Uri> {
+impl<V: DestructibleJsonValue> TryFromJson<V> for Box<Uri> {
     type Error = TypeErrorOr<StringError<InvalidUriError>>;
 
-    fn try_from_json<V: DestructibleJsonValue>(value: V) -> Result<Self, Self::Error> {
+    fn try_from_json(value: V) -> Result<Self, Self::Error> {
         let input = value.try_into_string()?;
 
         Uri::new(input.as_ref())
@@ -106,10 +106,10 @@ pub struct StringError<E> {
 #[repr(transparent)]
 pub struct Id([IdChar]);
 
-impl TryFromJson for Box<Id> {
+impl<V: DestructibleJsonValue> TryFromJson<V> for Box<Id> {
     type Error = TypeErrorOr<StringError<InvalidIdError>>;
 
-    fn try_from_json<V: DestructibleJsonValue>(value: V) -> Result<Self, Self::Error> {
+    fn try_from_json(value: V) -> Result<Self, Self::Error> {
         // NOTE: since the given `value` might be an owned string, it might be better to call
         // `.into()` to get a String without copying and then try to convert that into a Box<Id>
 
@@ -357,10 +357,10 @@ impl std::fmt::Debug for IdChar {
 #[repr(transparent)]
 pub struct CustomTimeZoneId(str);
 
-impl TryFromJson for Box<CustomTimeZoneId> {
+impl<V: DestructibleJsonValue> TryFromJson<V> for Box<CustomTimeZoneId> {
     type Error = TypeErrorOr<StringError<InvalidCustomTimeZoneIdError>>;
 
-    fn try_from_json<V: DestructibleJsonValue>(value: V) -> Result<Self, Self::Error> {
+    fn try_from_json(value: V) -> Result<Self, Self::Error> {
         let input = value.try_into_string()?;
 
         CustomTimeZoneId::new(input.as_ref())
@@ -563,10 +563,10 @@ pub enum InvalidCalAddressError {
 #[repr(transparent)]
 pub struct CalAddress(str);
 
-impl TryFromJson for Box<CalAddress> {
+impl<V: DestructibleJsonValue> TryFromJson<V> for Box<CalAddress> {
     type Error = TypeErrorOr<StringError<InvalidCalAddressError>>;
 
-    fn try_from_json<V: DestructibleJsonValue>(value: V) -> Result<Self, Self::Error> {
+    fn try_from_json(value: V) -> Result<Self, Self::Error> {
         let input = value.try_into_string()?;
 
         CalAddress::new(input.as_ref())

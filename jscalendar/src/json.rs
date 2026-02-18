@@ -18,79 +18,84 @@ use crate::parser::{
     UtcDateTimeParseError, duration, local_date_time, parse_full, signed_duration, utc_date_time,
 };
 
-pub trait TryFromJson: Sized {
+pub trait TryFromJson<V>
+where
+    Self: Sized,
+    V: DestructibleJsonValue,
+{
     type Error;
 
-    fn try_from_json<V: DestructibleJsonValue>(value: V) -> Result<Self, Self::Error>;
+    fn try_from_json(value: V) -> Result<Self, Self::Error>;
 }
 
-impl TryFromJson for bool {
+impl<V: DestructibleJsonValue> TryFromJson<V> for bool {
     type Error = TypeError;
 
-    fn try_from_json<V: DestructibleJsonValue>(value: V) -> Result<Self, Self::Error> {
+    fn try_from_json(value: V) -> Result<Self, Self::Error> {
         value.try_as_bool()
     }
 }
 
-impl TryFromJson for String {
+impl<V: DestructibleJsonValue> TryFromJson<V> for String {
     type Error = TypeError;
 
-    fn try_from_json<V: DestructibleJsonValue>(value: V) -> Result<Self, Self::Error> {
+    fn try_from_json(value: V) -> Result<Self, Self::Error> {
         value.try_into_string().map(Into::into)
     }
 }
 
-impl TryFromJson for DateTime<Local> {
+impl<V: DestructibleJsonValue> TryFromJson<V> for DateTime<Local> {
     type Error = TypeErrorOr<OwnedParseError<DateTimeParseError, InvalidDateTimeError>>;
 
-    fn try_from_json<V: DestructibleJsonValue>(value: V) -> Result<Self, Self::Error> {
+    fn try_from_json(value: V) -> Result<Self, Self::Error> {
         let input = value.try_into_string()?;
         let date_time = parse_full(local_date_time)(input.as_ref()).map_err(TypeErrorOr::Other)?;
         Ok(date_time)
     }
 }
 
-impl TryFromJson for DateTime<Utc> {
+impl<V: DestructibleJsonValue> TryFromJson<V> for DateTime<Utc> {
     type Error = TypeErrorOr<OwnedParseError<UtcDateTimeParseError, InvalidDateTimeError>>;
 
-    fn try_from_json<V: DestructibleJsonValue>(value: V) -> Result<Self, Self::Error> {
+    fn try_from_json(value: V) -> Result<Self, Self::Error> {
         let input = value.try_into_string()?;
         let date_time = parse_full(utc_date_time)(input.as_ref()).map_err(TypeErrorOr::Other)?;
         Ok(date_time)
     }
 }
 
-impl TryFromJson for Duration {
+impl<V: DestructibleJsonValue> TryFromJson<V> for Duration {
     type Error = TypeErrorOr<OwnedParseError<DurationParseError, InvalidDurationError>>;
 
-    fn try_from_json<V: DestructibleJsonValue>(value: V) -> Result<Self, Self::Error> {
+    fn try_from_json(value: V) -> Result<Self, Self::Error> {
         let input = value.try_into_string()?;
         let duration = parse_full(duration)(input.as_ref()).map_err(TypeErrorOr::Other)?;
         Ok(duration)
     }
 }
 
-impl TryFromJson for SignedDuration {
+impl<V: DestructibleJsonValue> TryFromJson<V> for SignedDuration {
     type Error = TypeErrorOr<OwnedParseError<SignedDurationParseError, InvalidDurationError>>;
 
-    fn try_from_json<V: DestructibleJsonValue>(value: V) -> Result<Self, Self::Error> {
+    fn try_from_json(value: V) -> Result<Self, Self::Error> {
         let input = value.try_into_string()?;
         let duration = parse_full(signed_duration)(input.as_ref()).map_err(TypeErrorOr::Other)?;
         Ok(duration)
     }
 }
 
-impl<T> TryFromJson for Vec<T>
+impl<T, V> TryFromJson<V> for Vec<T>
 where
-    T: TryFromJson,
+    T: TryFromJson<V>,
     T::Error: IntoDocumentError,
     <T::Error as IntoDocumentError>::Residual: LiftTypeError,
+    V: DestructibleJsonValue,
 {
     type Error = DocumentError<
         TypeErrorOr<<<T::Error as IntoDocumentError>::Residual as LiftTypeError>::Residual>,
     >;
 
-    fn try_from_json<V: DestructibleJsonValue>(value: V) -> Result<Self, Self::Error> {
+    fn try_from_json(value: V) -> Result<Self, Self::Error> {
         let array = value
             .try_into_array()
             .map_err(TypeErrorOr::from)
@@ -114,19 +119,20 @@ where
     }
 }
 
-impl<K, T, S> TryFromJson for HashMap<K, T, S>
+impl<K, T, V, S> TryFromJson<V> for HashMap<K, T, S>
 where
     K: Hash + Eq + From<String>,
-    T: TryFromJson,
+    T: TryFromJson<V>,
     T::Error: IntoDocumentError,
     <T::Error as IntoDocumentError>::Residual: LiftTypeError,
+    V: DestructibleJsonValue,
     S: Default + std::hash::BuildHasher,
 {
     type Error = DocumentError<
         TypeErrorOr<<<T::Error as IntoDocumentError>::Residual as LiftTypeError>::Residual>,
     >;
 
-    fn try_from_json<V: DestructibleJsonValue>(value: V) -> Result<Self, Self::Error> {
+    fn try_from_json(value: V) -> Result<Self, Self::Error> {
         let object = value
             .try_into_object()
             .map_err(TypeErrorOr::from)
@@ -157,20 +163,26 @@ where
 
 // TODO: write a TryFromJson impl for JSCalendar-style sets (i.e. objects sending keys to `true`)
 
-pub trait TryIntoJson {
+pub trait TryIntoJson<V>
+where
+    V: ConstructibleJsonValue,
+{
     type Error;
 
-    fn try_into_json<V: ConstructibleJsonValue>(self) -> Result<V, Self::Error>;
+    fn try_into_json(self) -> Result<V, Self::Error>;
 }
 
-pub trait IntoJson {
-    fn into_json<V: ConstructibleJsonValue>(self) -> V;
+pub trait IntoJson<V>
+where
+    V: ConstructibleJsonValue,
+{
+    fn into_json(self) -> V;
 }
 
-impl<T: IntoJson> TryIntoJson for T {
+impl<T: IntoJson<V>, V: ConstructibleJsonValue> TryIntoJson<V> for T {
     type Error = std::convert::Infallible;
 
-    fn try_into_json<V: ConstructibleJsonValue>(self) -> Result<V, Self::Error> {
+    fn try_into_json(self) -> Result<V, Self::Error> {
         Ok(self.into_json())
     }
 }
@@ -343,16 +355,16 @@ impl Int {
     }
 }
 
-impl IntoJson for Int {
-    fn into_json<V: ConstructibleJsonValue>(self) -> V {
+impl<V: ConstructibleJsonValue> IntoJson<V> for Int {
+    fn into_json(self) -> V {
         V::int(self)
     }
 }
 
-impl TryFromJson for Int {
+impl<V: DestructibleJsonValue> TryFromJson<V> for Int {
     type Error = TypeErrorOr<IntoIntError>;
 
-    fn try_from_json<V: DestructibleJsonValue>(value: V) -> Result<Self, Self::Error> {
+    fn try_from_json(value: V) -> Result<Self, Self::Error> {
         value.try_as_int()
     }
 }
@@ -379,16 +391,16 @@ impl UnsignedInt {
     }
 }
 
-impl IntoJson for UnsignedInt {
-    fn into_json<V: ConstructibleJsonValue>(self) -> V {
+impl<V: ConstructibleJsonValue> IntoJson<V> for UnsignedInt {
+    fn into_json(self) -> V {
         V::unsigned_int(self)
     }
 }
 
-impl TryFromJson for UnsignedInt {
+impl<V: DestructibleJsonValue> TryFromJson<V> for UnsignedInt {
     type Error = TypeErrorOr<IntoUnsignedIntError>;
 
-    fn try_from_json<V: DestructibleJsonValue>(value: V) -> Result<Self, Self::Error> {
+    fn try_from_json(value: V) -> Result<Self, Self::Error> {
         value.try_as_unsigned_int()
     }
 }
