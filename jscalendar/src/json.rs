@@ -254,7 +254,7 @@ pub trait LiftTypeError {
 }
 
 macro_rules! trivial_lift_type_error {
-    ($name:ident) => {
+    ($name:path) => {
         impl LiftTypeError for $name {
             type Residual = $name;
 
@@ -268,6 +268,7 @@ macro_rules! trivial_lift_type_error {
 
 trivial_lift_type_error!(IntoIntError);
 trivial_lift_type_error!(IntoUnsignedIntError);
+trivial_lift_type_error!(crate::model::object::InvalidPatchObjectError);
 
 impl LiftTypeError for TypeError {
     type Residual = Infallible;
@@ -289,8 +290,8 @@ impl<E> LiftTypeError for TypeErrorOr<E> {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DocumentError<E> {
-    path: VecDeque<PathSegment<Box<str>>>,
-    error: E,
+    pub(crate) path: VecDeque<PathSegment<Box<str>>>,
+    pub(crate) error: E,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

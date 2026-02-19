@@ -84,8 +84,8 @@ impl<V: DestructibleJsonValue> TryFromJson<V> for Box<Uri> {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct StringError<E> {
-    input: Box<str>,
-    error: E,
+    pub(crate) input: Box<str>,
+    pub(crate) error: E,
 }
 
 /// A string slice satisfying the regex `/[A-Za-z0-9\-\_]{1, 255}/` (RFC 8984 §1.4.1).
@@ -397,10 +397,13 @@ pub enum InvalidCustomTimeZoneIdError {
     InvalidBodyChar { index: usize, c: char },
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Error)]
 pub enum InvalidImplicitJsonPointerError {
     /// A tilde (`~`) occurred without being immediately followed by `0` or `1` at this index.
+    #[error("a tilde ocurred without being immediately followed by `0` or `1` at index {index}")]
     BareTilde { index: usize },
+    #[error("a forward slash occurred at the start of the pointer")]
+    Explicit,
 }
 
 /// An implicit unevaluated JSON pointer (RFC 8984 §1.4.9).
@@ -417,6 +420,12 @@ pub struct ImplicitJsonPointer(str);
 impl ImplicitJsonPointer {
     fn str_is_implicit_json_pointer(s: &str) -> Result<(), InvalidImplicitJsonPointerError> {
         let mut iter = s.char_indices().peekable();
+
+        // if the string starts with a forward slash, it's invalid
+        if let Some(&(_, '/')) = iter.peek() {
+            return Err(InvalidImplicitJsonPointerError::Explicit);
+        }
+
         while let Some((index, c)) = iter.next() {
             if c == '~' && iter.peek().is_none_or(|(_, c)| c != &'0' && c != &'1') {
                 return Err(InvalidImplicitJsonPointerError::BareTilde { index });

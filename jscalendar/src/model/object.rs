@@ -1,14 +1,18 @@
 //! Distinguished object types.
 
 use std::{
-    collections::{HashMap, HashSet},
+    collections::{HashMap, HashSet, VecDeque},
     hash::Hash,
 };
 
 use structible::structible;
+use thiserror::Error;
 
 use crate::{
-    json::{JsonValue, UnsignedInt},
+    json::{
+        DestructibleJsonValue, DocumentError, IntoDocumentError, JsonObject, JsonValue,
+        PathSegment, TryFromJson, TypeErrorOr, UnsignedInt,
+    },
     model::{
         request_status::{RequestStatus, StatusCode},
         rrule::RRule,
@@ -20,7 +24,8 @@ use crate::{
         },
         string::{
             AlphaNumeric, CalAddress, ContentId, CustomTimeZoneId, EmailAddr, GeoUri, Id,
-            ImplicitJsonPointer, LanguageTag, MediaType, Uid, Uri, VendorStr,
+            ImplicitJsonPointer, InvalidImplicitJsonPointerError, LanguageTag, MediaType, Uid, Uri,
+            VendorStr,
         },
         time::{DateTime, Duration, Local, SignedDuration, Utc, UtcOffset},
     },
@@ -494,3 +499,94 @@ pub struct Relation<V> {
 /// A set of patches to be applied to a JSON object (RFC 8984 §1.4.9).
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct PatchObject<V>(HashMap<Box<ImplicitJsonPointer>, V>);
+
+#[derive(Debug, Clone, PartialEq, Error)]
+#[error("the key {key} is not an implicit JSON pointer")]
+pub struct InvalidPatchObjectError {
+    key: Box<str>,
+    error: InvalidImplicitJsonPointerError,
+}
+
+impl IntoDocumentError for InvalidPatchObjectError {
+    type Residual = InvalidImplicitJsonPointerError;
+
+    fn into_document_error(self) -> DocumentError<Self::Residual> {
+        let mut path = VecDeque::with_capacity(1);
+        path.push_front(PathSegment::String(self.key));
+
+        DocumentError {
+            path,
+            error: self.error,
+        }
+    }
+}
+
+impl<V: DestructibleJsonValue> TryFromJson<V> for PatchObject<V> {
+    type Error = TypeErrorOr<InvalidPatchObjectError>;
+
+    fn try_from_json(value: V) -> Result<Self, Self::Error> {
+        value
+            .try_into_object()?
+            .into_iter()
+            .map(|(key, value)| {
+                let k = <V as JsonValue>::Object::key_into_string(key);
+
+                match ImplicitJsonPointer::new(&k) {
+                    Ok(ptr) => Ok((ptr.into(), value)),
+                    Err(error) => Err(InvalidPatchObjectError {
+                        key: k.into_boxed_str(),
+                        error,
+                    }),
+                }
+            })
+            .collect::<Result<HashMap<_, _>, _>>()
+            .map(PatchObject)
+            .map_err(TypeErrorOr::Other)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[cfg(feature = "serde_json")]
+    #[test]
+    fn path_object_from_serde_json() {
+        use serde_json::{Value, json};
+
+        let input = json!({
+            "foo/bar" : null,
+            "baz/12/bar" : {},
+        });
+
+        assert!(PatchObject::<Value>::try_from_json(input).is_ok());
+
+        let input = json!({
+            "foo/bar" : null,
+            "baz/12/bar" : {},
+            "/foo" : true, // invalid because this pointer begins with a forward slash
+        });
+
+        assert_eq!(
+            PatchObject::try_from_json(input),
+            Err(TypeErrorOr::Other(InvalidPatchObjectError {
+                key: "/foo".into(),
+                error: InvalidImplicitJsonPointerError::Explicit
+            }))
+        );
+
+        let input = json!({
+            "foo/bar" : null,
+            "baz/12/bar" : {},
+            "abc~" : true, // invalid because this contains a bare tilde
+        });
+
+        assert_eq!(
+            PatchObject::try_from_json(input),
+            Err(TypeErrorOr::Other(InvalidPatchObjectError {
+                key: "abc~".into(),
+                error: InvalidImplicitJsonPointerError::BareTilde { index: 3 }
+            }))
+        );
+    }
+}
