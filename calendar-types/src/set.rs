@@ -1,6 +1,6 @@
 //! Types for finite set values.
 
-use std::str::FromStr;
+use std::{convert::Infallible, str::FromStr};
 
 use strum::EnumString;
 
@@ -18,6 +18,21 @@ pub enum Token<T, S> {
 impl<T: Default, S> Default for Token<T, S> {
     fn default() -> Self {
         Self::Known(Default::default())
+    }
+}
+
+impl<T, S> FromStr for Token<T, S>
+where
+    T: FromStr,
+    for<'a> &'a str: Into<S>,
+{
+    type Err = Infallible;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match T::from_str(s) {
+            Ok(value) => Ok(Token::Known(value)),
+            Err(_) => Ok(Token::Unknown(s.into())),
+        }
     }
 }
 
