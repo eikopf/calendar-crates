@@ -2792,372 +2792,367 @@ impl<V: DestructibleJsonValue> TryFromJson<V> for Event<V> {
             .map_err(TypeErrorOr::from)
             .map_err(DocumentError::root)?;
 
-        event_from_fields(obj)
-    }
-}
 
-fn event_from_fields<V: DestructibleJsonValue>(
-    fields: V::Object,
-) -> Result<Event<V>, ObjErr> {
-    let mut start_val: Option<DateTime<Local>> = None;
-    let mut duration_val: Option<Duration> = None;
-    let mut status_val: Option<Token<EventStatus>> = None;
-    let mut uid_val: Option<Box<Uid>> = None;
-    let mut related_to_val: Option<HashMap<Box<Uid>, Relation<V>>> = None;
-    let mut prod_id_val: Option<String> = None;
-    let mut created_val: Option<DateTime<Utc>> = None;
-    let mut updated_val: Option<DateTime<Utc>> = None;
-    let mut sequence_val: Option<UnsignedInt> = None;
-    let mut method_val: Option<Token<Method>> = None;
-    let mut title_val: Option<String> = None;
-    let mut description_val: Option<String> = None;
-    let mut description_content_type_val: Option<String> = None;
-    let mut show_without_time_val: Option<bool> = None;
-    let mut locations_val: Option<HashMap<Box<Id>, Location<V>>> = None;
-    let mut virtual_locations_val: Option<HashMap<Box<Id>, VirtualLocation<V>>> = None;
-    let mut links_val: Option<HashMap<Box<Id>, Link<V>>> = None;
-    let mut locale_val: Option<LanguageTag> = None;
-    let mut keywords_val: Option<HashSet<String>> = None;
-    let mut categories_val: Option<HashSet<String>> = None;
-    let mut color_val: Option<Color> = None;
-    let mut recurrence_id_val: Option<DateTime<Local>> = None;
-    let mut recurrence_id_time_zone_val: Option<String> = None;
-    let mut recurrence_rules_val: Option<Vec<RRule>> = None;
-    let mut excluded_recurrence_rules_val: Option<Vec<RRule>> = None;
-    let mut recurrence_overrides_val: Option<HashMap<DateTime<Local>, PatchObject<V>>> = None;
-    let mut excluded_val: Option<bool> = None;
-    let mut priority_val: Option<Priority> = None;
-    let mut free_busy_status_val: Option<Token<FreeBusyStatus>> = None;
-    let mut privacy_val: Option<Token<Privacy>> = None;
-    let mut reply_to_val: Option<ReplyTo> = None;
-    let mut sent_by_val: Option<Box<CalAddress>> = None;
-    let mut participants_val: Option<HashMap<Box<Id>, Participant<V>>> = None;
-    let mut request_status_val: Option<RequestStatus> = None;
-    let mut use_default_alerts_val: Option<bool> = None;
-    let mut alerts_val: Option<HashMap<Box<Id>, Alert<V>>> = None;
-    let mut localizations_val: Option<HashMap<LanguageTag, PatchObject<V>>> = None;
-    let mut time_zone_val: Option<String> = None;
-    let mut time_zones_val: Option<HashMap<Box<CustomTimeZoneId>, TimeZone<V>>> = None;
-    let mut vendor_parts: Vec<(Box<str>, V)> = Vec::new();
+            let mut start_val: Option<DateTime<Local>> = None;
+            let mut duration_val: Option<Duration> = None;
+            let mut status_val: Option<Token<EventStatus>> = None;
+            let mut uid_val: Option<Box<Uid>> = None;
+            let mut related_to_val: Option<HashMap<Box<Uid>, Relation<V>>> = None;
+            let mut prod_id_val: Option<String> = None;
+            let mut created_val: Option<DateTime<Utc>> = None;
+            let mut updated_val: Option<DateTime<Utc>> = None;
+            let mut sequence_val: Option<UnsignedInt> = None;
+            let mut method_val: Option<Token<Method>> = None;
+            let mut title_val: Option<String> = None;
+            let mut description_val: Option<String> = None;
+            let mut description_content_type_val: Option<String> = None;
+            let mut show_without_time_val: Option<bool> = None;
+            let mut locations_val: Option<HashMap<Box<Id>, Location<V>>> = None;
+            let mut virtual_locations_val: Option<HashMap<Box<Id>, VirtualLocation<V>>> = None;
+            let mut links_val: Option<HashMap<Box<Id>, Link<V>>> = None;
+            let mut locale_val: Option<LanguageTag> = None;
+            let mut keywords_val: Option<HashSet<String>> = None;
+            let mut categories_val: Option<HashSet<String>> = None;
+            let mut color_val: Option<Color> = None;
+            let mut recurrence_id_val: Option<DateTime<Local>> = None;
+            let mut recurrence_id_time_zone_val: Option<String> = None;
+            let mut recurrence_rules_val: Option<Vec<RRule>> = None;
+            let mut excluded_recurrence_rules_val: Option<Vec<RRule>> = None;
+            let mut recurrence_overrides_val: Option<HashMap<DateTime<Local>, PatchObject<V>>> = None;
+            let mut excluded_val: Option<bool> = None;
+            let mut priority_val: Option<Priority> = None;
+            let mut free_busy_status_val: Option<Token<FreeBusyStatus>> = None;
+            let mut privacy_val: Option<Token<Privacy>> = None;
+            let mut reply_to_val: Option<ReplyTo> = None;
+            let mut sent_by_val: Option<Box<CalAddress>> = None;
+            let mut participants_val: Option<HashMap<Box<Id>, Participant<V>>> = None;
+            let mut request_status_val: Option<RequestStatus> = None;
+            let mut use_default_alerts_val: Option<bool> = None;
+            let mut alerts_val: Option<HashMap<Box<Id>, Alert<V>>> = None;
+            let mut localizations_val: Option<HashMap<LanguageTag, PatchObject<V>>> = None;
+            let mut time_zone_val: Option<String> = None;
+            let mut time_zones_val: Option<HashMap<Box<CustomTimeZoneId>, TimeZone<V>>> = None;
+            let mut vendor_parts: Vec<(Box<str>, V)> = Vec::new();
 
-    for (key, val) in fields.into_iter() {
-        let k = <V::Object as JsonObject>::key_into_string(key);
-        match k.as_str() {
-            "@type" => {}
-            "start" => {
-                start_val =
-                    Some(DateTime::<Local>::try_from_json(val).map_err(|e| field_err("start", e))?);
+            for (key, val) in obj.into_iter() {
+                let k = <V::Object as JsonObject>::key_into_string(key);
+                match k.as_str() {
+                    "@type" => {}
+                    "start" => {
+                        start_val =
+                            Some(DateTime::<Local>::try_from_json(val).map_err(|e| field_err("start", e))?);
+                    }
+                    "duration" => {
+                        duration_val =
+                            Some(Duration::try_from_json(val).map_err(|e| field_err("duration", e))?);
+                    }
+                    "status" => {
+                        status_val = Some(
+                            Token::<EventStatus>::try_from_json(val)
+                                .map_err(|e| type_field_err("status", e))?,
+                        );
+                    }
+                    "uid" => {
+                        uid_val = Some(Box::<Uid>::try_from_json(val).map_err(|e| field_err("uid", e))?);
+                    }
+                    "relatedTo" => {
+                        related_to_val = Some(
+                            parse_uid_map(val, Relation::try_from_json)
+                                .map_err(|e| prepend("relatedTo", e))?,
+                        );
+                    }
+                    "prodId" => {
+                        prod_id_val =
+                            Some(String::try_from_json(val).map_err(|e| type_field_err("prodId", e))?);
+                    }
+                    "created" => {
+                        created_val =
+                            Some(DateTime::<Utc>::try_from_json(val).map_err(|e| field_err("created", e))?);
+                    }
+                    "updated" => {
+                        updated_val =
+                            Some(DateTime::<Utc>::try_from_json(val).map_err(|e| field_err("updated", e))?);
+                    }
+                    "sequence" => {
+                        sequence_val =
+                            Some(UnsignedInt::try_from_json(val).map_err(|e| field_err("sequence", e))?);
+                    }
+                    "method" => {
+                        method_val = Some(
+                            Token::<Method>::try_from_json(val).map_err(|e| type_field_err("method", e))?,
+                        );
+                    }
+                    "title" => {
+                        title_val =
+                            Some(String::try_from_json(val).map_err(|e| type_field_err("title", e))?);
+                    }
+                    "description" => {
+                        description_val =
+                            Some(String::try_from_json(val).map_err(|e| type_field_err("description", e))?);
+                    }
+                    "descriptionContentType" => {
+                        description_content_type_val = Some(
+                            String::try_from_json(val)
+                                .map_err(|e| type_field_err("descriptionContentType", e))?,
+                        );
+                    }
+                    "showWithoutTime" => {
+                        show_without_time_val = Some(
+                            bool::try_from_json(val).map_err(|e| type_field_err("showWithoutTime", e))?,
+                        );
+                    }
+                    "locations" => {
+                        locations_val = Some(
+                            parse_id_map(val, Location::try_from_json)
+                                .map_err(|e| prepend("locations", e))?,
+                        );
+                    }
+                    "virtualLocations" => {
+                        virtual_locations_val = Some(
+                            parse_id_map(val, VirtualLocation::try_from_json)
+                                .map_err(|e| prepend("virtualLocations", e))?,
+                        );
+                    }
+                    "links" => {
+                        links_val =
+                            Some(parse_id_map(val, Link::try_from_json).map_err(|e| prepend("links", e))?);
+                    }
+                    "locale" => {
+                        locale_val =
+                            Some(LanguageTag::try_from_json(val).map_err(|e| field_err("locale", e))?);
+                    }
+                    "keywords" => {
+                        keywords_val = Some(
+                            HashSet::<String>::try_from_json(val)
+                                .map_err(|e| doc_field_err("keywords", e))?,
+                        );
+                    }
+                    "categories" => {
+                        categories_val = Some(
+                            HashSet::<String>::try_from_json(val)
+                                .map_err(|e| doc_field_err("categories", e))?,
+                        );
+                    }
+                    "color" => {
+                        color_val = Some(Color::try_from_json(val).map_err(|e| field_err("color", e))?);
+                    }
+                    "recurrenceId" => {
+                        recurrence_id_val = Some(
+                            DateTime::<Local>::try_from_json(val)
+                                .map_err(|e| field_err("recurrenceId", e))?,
+                        );
+                    }
+                    "recurrenceIdTimeZone" => {
+                        recurrence_id_time_zone_val = Some(
+                            String::try_from_json(val)
+                                .map_err(|e| type_field_err("recurrenceIdTimeZone", e))?,
+                        );
+                    }
+                    "recurrenceRules" => {
+                        recurrence_rules_val =
+                            Some(rrule_vec(val).map_err(|e| prepend("recurrenceRules", e))?);
+                    }
+                    "excludedRecurrenceRules" => {
+                        excluded_recurrence_rules_val =
+                            Some(rrule_vec(val).map_err(|e| prepend("excludedRecurrenceRules", e))?);
+                    }
+                    "recurrenceOverrides" => {
+                        recurrence_overrides_val = Some(
+                            parse_dt_local_map(val, patch_object_from_json)
+                                .map_err(|e| prepend("recurrenceOverrides", e))?,
+                        );
+                    }
+                    "excluded" => {
+                        excluded_val =
+                            Some(bool::try_from_json(val).map_err(|e| type_field_err("excluded", e))?);
+                    }
+                    "priority" => {
+                        priority_val =
+                            Some(Priority::try_from_json(val).map_err(|e| field_err("priority", e))?);
+                    }
+                    "freeBusyStatus" => {
+                        free_busy_status_val = Some(
+                            Token::<FreeBusyStatus>::try_from_json(val)
+                                .map_err(|e| type_field_err("freeBusyStatus", e))?,
+                        );
+                    }
+                    "privacy" => {
+                        privacy_val = Some(
+                            Token::<Privacy>::try_from_json(val)
+                                .map_err(|e| type_field_err("privacy", e))?,
+                        );
+                    }
+                    "replyTo" => {
+                        reply_to_val =
+                            Some(ReplyTo::try_from_json(val).map_err(|e| prepend("replyTo", e))?);
+                    }
+                    "sentBy" => {
+                        sent_by_val = Some(
+                            Box::<CalAddress>::try_from_json(val).map_err(|e| field_err("sentBy", e))?,
+                        );
+                    }
+                    "participants" => {
+                        participants_val = Some(
+                            parse_id_map(val, Participant::try_from_json)
+                                .map_err(|e| prepend("participants", e))?,
+                        );
+                    }
+                    "requestStatus" => {
+                        request_status_val = Some(
+                            RequestStatus::try_from_json(val).map_err(|e| field_err("requestStatus", e))?,
+                        );
+                    }
+                    "useDefaultAlerts" => {
+                        use_default_alerts_val = Some(
+                            bool::try_from_json(val).map_err(|e| type_field_err("useDefaultAlerts", e))?,
+                        );
+                    }
+                    "alerts" => {
+                        alerts_val = Some(
+                            parse_id_map(val, Alert::try_from_json).map_err(|e| prepend("alerts", e))?,
+                        );
+                    }
+                    "localizations" => {
+                        localizations_val = Some(
+                            parse_lang_map(val, patch_object_from_json)
+                                .map_err(|e| prepend("localizations", e))?,
+                        );
+                    }
+                    "timeZone" => {
+                        time_zone_val =
+                            Some(String::try_from_json(val).map_err(|e| type_field_err("timeZone", e))?);
+                    }
+                    "timeZones" => {
+                        time_zones_val = Some(
+                            parse_tz_map(val, TimeZone::try_from_json)
+                                .map_err(|e| prepend("timeZones", e))?,
+                        );
+                    }
+                    _ => vendor_parts.push((k.into_boxed_str(), val)),
+                }
             }
-            "duration" => {
-                duration_val =
-                    Some(Duration::try_from_json(val).map_err(|e| field_err("duration", e))?);
-            }
-            "status" => {
-                status_val = Some(
-                    Token::<EventStatus>::try_from_json(val)
-                        .map_err(|e| type_field_err("status", e))?,
-                );
-            }
-            "uid" => {
-                uid_val = Some(Box::<Uid>::try_from_json(val).map_err(|e| field_err("uid", e))?);
-            }
-            "relatedTo" => {
-                related_to_val = Some(
-                    parse_uid_map(val, Relation::try_from_json)
-                        .map_err(|e| prepend("relatedTo", e))?,
-                );
-            }
-            "prodId" => {
-                prod_id_val =
-                    Some(String::try_from_json(val).map_err(|e| type_field_err("prodId", e))?);
-            }
-            "created" => {
-                created_val =
-                    Some(DateTime::<Utc>::try_from_json(val).map_err(|e| field_err("created", e))?);
-            }
-            "updated" => {
-                updated_val =
-                    Some(DateTime::<Utc>::try_from_json(val).map_err(|e| field_err("updated", e))?);
-            }
-            "sequence" => {
-                sequence_val =
-                    Some(UnsignedInt::try_from_json(val).map_err(|e| field_err("sequence", e))?);
-            }
-            "method" => {
-                method_val = Some(
-                    Token::<Method>::try_from_json(val).map_err(|e| type_field_err("method", e))?,
-                );
-            }
-            "title" => {
-                title_val =
-                    Some(String::try_from_json(val).map_err(|e| type_field_err("title", e))?);
-            }
-            "description" => {
-                description_val =
-                    Some(String::try_from_json(val).map_err(|e| type_field_err("description", e))?);
-            }
-            "descriptionContentType" => {
-                description_content_type_val = Some(
-                    String::try_from_json(val)
-                        .map_err(|e| type_field_err("descriptionContentType", e))?,
-                );
-            }
-            "showWithoutTime" => {
-                show_without_time_val = Some(
-                    bool::try_from_json(val).map_err(|e| type_field_err("showWithoutTime", e))?,
-                );
-            }
-            "locations" => {
-                locations_val = Some(
-                    parse_id_map(val, Location::try_from_json)
-                        .map_err(|e| prepend("locations", e))?,
-                );
-            }
-            "virtualLocations" => {
-                virtual_locations_val = Some(
-                    parse_id_map(val, VirtualLocation::try_from_json)
-                        .map_err(|e| prepend("virtualLocations", e))?,
-                );
-            }
-            "links" => {
-                links_val =
-                    Some(parse_id_map(val, Link::try_from_json).map_err(|e| prepend("links", e))?);
-            }
-            "locale" => {
-                locale_val =
-                    Some(LanguageTag::try_from_json(val).map_err(|e| field_err("locale", e))?);
-            }
-            "keywords" => {
-                keywords_val = Some(
-                    HashSet::<String>::try_from_json(val)
-                        .map_err(|e| doc_field_err("keywords", e))?,
-                );
-            }
-            "categories" => {
-                categories_val = Some(
-                    HashSet::<String>::try_from_json(val)
-                        .map_err(|e| doc_field_err("categories", e))?,
-                );
-            }
-            "color" => {
-                color_val = Some(Color::try_from_json(val).map_err(|e| field_err("color", e))?);
-            }
-            "recurrenceId" => {
-                recurrence_id_val = Some(
-                    DateTime::<Local>::try_from_json(val)
-                        .map_err(|e| field_err("recurrenceId", e))?,
-                );
-            }
-            "recurrenceIdTimeZone" => {
-                recurrence_id_time_zone_val = Some(
-                    String::try_from_json(val)
-                        .map_err(|e| type_field_err("recurrenceIdTimeZone", e))?,
-                );
-            }
-            "recurrenceRules" => {
-                recurrence_rules_val =
-                    Some(rrule_vec(val).map_err(|e| prepend("recurrenceRules", e))?);
-            }
-            "excludedRecurrenceRules" => {
-                excluded_recurrence_rules_val =
-                    Some(rrule_vec(val).map_err(|e| prepend("excludedRecurrenceRules", e))?);
-            }
-            "recurrenceOverrides" => {
-                recurrence_overrides_val = Some(
-                    parse_dt_local_map(val, patch_object_from_json)
-                        .map_err(|e| prepend("recurrenceOverrides", e))?,
-                );
-            }
-            "excluded" => {
-                excluded_val =
-                    Some(bool::try_from_json(val).map_err(|e| type_field_err("excluded", e))?);
-            }
-            "priority" => {
-                priority_val =
-                    Some(Priority::try_from_json(val).map_err(|e| field_err("priority", e))?);
-            }
-            "freeBusyStatus" => {
-                free_busy_status_val = Some(
-                    Token::<FreeBusyStatus>::try_from_json(val)
-                        .map_err(|e| type_field_err("freeBusyStatus", e))?,
-                );
-            }
-            "privacy" => {
-                privacy_val = Some(
-                    Token::<Privacy>::try_from_json(val)
-                        .map_err(|e| type_field_err("privacy", e))?,
-                );
-            }
-            "replyTo" => {
-                reply_to_val =
-                    Some(ReplyTo::try_from_json(val).map_err(|e| prepend("replyTo", e))?);
-            }
-            "sentBy" => {
-                sent_by_val = Some(
-                    Box::<CalAddress>::try_from_json(val).map_err(|e| field_err("sentBy", e))?,
-                );
-            }
-            "participants" => {
-                participants_val = Some(
-                    parse_id_map(val, Participant::try_from_json)
-                        .map_err(|e| prepend("participants", e))?,
-                );
-            }
-            "requestStatus" => {
-                request_status_val = Some(
-                    RequestStatus::try_from_json(val).map_err(|e| field_err("requestStatus", e))?,
-                );
-            }
-            "useDefaultAlerts" => {
-                use_default_alerts_val = Some(
-                    bool::try_from_json(val).map_err(|e| type_field_err("useDefaultAlerts", e))?,
-                );
-            }
-            "alerts" => {
-                alerts_val = Some(
-                    parse_id_map(val, Alert::try_from_json).map_err(|e| prepend("alerts", e))?,
-                );
-            }
-            "localizations" => {
-                localizations_val = Some(
-                    parse_lang_map(val, patch_object_from_json)
-                        .map_err(|e| prepend("localizations", e))?,
-                );
-            }
-            "timeZone" => {
-                time_zone_val =
-                    Some(String::try_from_json(val).map_err(|e| type_field_err("timeZone", e))?);
-            }
-            "timeZones" => {
-                time_zones_val = Some(
-                    parse_tz_map(val, TimeZone::try_from_json)
-                        .map_err(|e| prepend("timeZones", e))?,
-                );
-            }
-            _ => vendor_parts.push((k.into_boxed_str(), val)),
-        }
-    }
 
-    let start = start_val.ok_or_else(|| missing("start"))?;
-    let uid = uid_val.ok_or_else(|| missing("uid"))?;
-    let mut result = Event::new(start, uid);
-    if let Some(v) = duration_val {
-        result.set_duration(v);
+            let start = start_val.ok_or_else(|| missing("start"))?;
+            let uid = uid_val.ok_or_else(|| missing("uid"))?;
+            let mut result = Event::new(start, uid);
+            if let Some(v) = duration_val {
+                result.set_duration(v);
+            }
+            if let Some(v) = status_val {
+                result.set_status(v);
+            }
+            if let Some(v) = related_to_val {
+                result.set_related_to(v);
+            }
+            if let Some(v) = prod_id_val {
+                result.set_prod_id(v);
+            }
+            if let Some(v) = created_val {
+                result.set_created(v);
+            }
+            if let Some(v) = updated_val {
+                result.set_updated(v);
+            }
+            if let Some(v) = sequence_val {
+                result.set_sequence(v);
+            }
+            if let Some(v) = method_val {
+                result.set_method(v);
+            }
+            if let Some(v) = title_val {
+                result.set_title(v);
+            }
+            if let Some(v) = description_val {
+                result.set_description(v);
+            }
+            if let Some(v) = description_content_type_val {
+                result.set_description_content_type(v);
+            }
+            if let Some(v) = show_without_time_val {
+                result.set_show_without_time(v);
+            }
+            if let Some(v) = locations_val {
+                result.set_locations(v);
+            }
+            if let Some(v) = virtual_locations_val {
+                result.set_virtual_locations(v);
+            }
+            if let Some(v) = links_val {
+                result.set_links(v);
+            }
+            if let Some(v) = locale_val {
+                result.set_locale(v);
+            }
+            if let Some(v) = keywords_val {
+                result.set_keywords(v);
+            }
+            if let Some(v) = categories_val {
+                result.set_categories(v);
+            }
+            if let Some(v) = color_val {
+                result.set_color(v);
+            }
+            if let Some(v) = recurrence_id_val {
+                result.set_recurrence_id(v);
+            }
+            if let Some(v) = recurrence_id_time_zone_val {
+                result.set_recurrence_id_time_zone(v);
+            }
+            if let Some(v) = recurrence_rules_val {
+                result.set_recurrence_rules(v);
+            }
+            if let Some(v) = excluded_recurrence_rules_val {
+                result.set_excluded_recurrence_rules(v);
+            }
+            if let Some(v) = recurrence_overrides_val {
+                result.set_recurrence_overrides(v);
+            }
+            if let Some(v) = excluded_val {
+                result.set_excluded(v);
+            }
+            if let Some(v) = priority_val {
+                result.set_priority(v);
+            }
+            if let Some(v) = free_busy_status_val {
+                result.set_free_busy_status(v);
+            }
+            if let Some(v) = privacy_val {
+                result.set_privacy(v);
+            }
+            if let Some(v) = reply_to_val {
+                result.set_reply_to(v);
+            }
+            if let Some(v) = sent_by_val {
+                result.set_sent_by(v);
+            }
+            if let Some(v) = participants_val {
+                result.set_participants(v);
+            }
+            if let Some(v) = request_status_val {
+                result.set_request_status(v);
+            }
+            if let Some(v) = use_default_alerts_val {
+                result.set_use_default_alerts(v);
+            }
+            if let Some(v) = alerts_val {
+                result.set_alerts(v);
+            }
+            if let Some(v) = localizations_val {
+                result.set_localizations(v);
+            }
+            if let Some(v) = time_zone_val {
+                result.set_time_zone(v);
+            }
+            if let Some(v) = time_zones_val {
+                result.set_time_zones(v);
+            }
+            for (k, v) in vendor_parts {
+                if let Ok(vk) = VendorStr::new(k.as_ref()) {
+                    result.insert_vendor_property(vk.into(), v);
+                }
+            }
+            Ok(result)
     }
-    if let Some(v) = status_val {
-        result.set_status(v);
-    }
-    if let Some(v) = related_to_val {
-        result.set_related_to(v);
-    }
-    if let Some(v) = prod_id_val {
-        result.set_prod_id(v);
-    }
-    if let Some(v) = created_val {
-        result.set_created(v);
-    }
-    if let Some(v) = updated_val {
-        result.set_updated(v);
-    }
-    if let Some(v) = sequence_val {
-        result.set_sequence(v);
-    }
-    if let Some(v) = method_val {
-        result.set_method(v);
-    }
-    if let Some(v) = title_val {
-        result.set_title(v);
-    }
-    if let Some(v) = description_val {
-        result.set_description(v);
-    }
-    if let Some(v) = description_content_type_val {
-        result.set_description_content_type(v);
-    }
-    if let Some(v) = show_without_time_val {
-        result.set_show_without_time(v);
-    }
-    if let Some(v) = locations_val {
-        result.set_locations(v);
-    }
-    if let Some(v) = virtual_locations_val {
-        result.set_virtual_locations(v);
-    }
-    if let Some(v) = links_val {
-        result.set_links(v);
-    }
-    if let Some(v) = locale_val {
-        result.set_locale(v);
-    }
-    if let Some(v) = keywords_val {
-        result.set_keywords(v);
-    }
-    if let Some(v) = categories_val {
-        result.set_categories(v);
-    }
-    if let Some(v) = color_val {
-        result.set_color(v);
-    }
-    if let Some(v) = recurrence_id_val {
-        result.set_recurrence_id(v);
-    }
-    if let Some(v) = recurrence_id_time_zone_val {
-        result.set_recurrence_id_time_zone(v);
-    }
-    if let Some(v) = recurrence_rules_val {
-        result.set_recurrence_rules(v);
-    }
-    if let Some(v) = excluded_recurrence_rules_val {
-        result.set_excluded_recurrence_rules(v);
-    }
-    if let Some(v) = recurrence_overrides_val {
-        result.set_recurrence_overrides(v);
-    }
-    if let Some(v) = excluded_val {
-        result.set_excluded(v);
-    }
-    if let Some(v) = priority_val {
-        result.set_priority(v);
-    }
-    if let Some(v) = free_busy_status_val {
-        result.set_free_busy_status(v);
-    }
-    if let Some(v) = privacy_val {
-        result.set_privacy(v);
-    }
-    if let Some(v) = reply_to_val {
-        result.set_reply_to(v);
-    }
-    if let Some(v) = sent_by_val {
-        result.set_sent_by(v);
-    }
-    if let Some(v) = participants_val {
-        result.set_participants(v);
-    }
-    if let Some(v) = request_status_val {
-        result.set_request_status(v);
-    }
-    if let Some(v) = use_default_alerts_val {
-        result.set_use_default_alerts(v);
-    }
-    if let Some(v) = alerts_val {
-        result.set_alerts(v);
-    }
-    if let Some(v) = localizations_val {
-        result.set_localizations(v);
-    }
-    if let Some(v) = time_zone_val {
-        result.set_time_zone(v);
-    }
-    if let Some(v) = time_zones_val {
-        result.set_time_zones(v);
-    }
-    for (k, v) in vendor_parts {
-        if let Ok(vk) = VendorStr::new(k.as_ref()) {
-            result.insert_vendor_property(vk.into(), v);
-        }
-    }
-    Ok(result)
 }
 
 // ============================================================================
