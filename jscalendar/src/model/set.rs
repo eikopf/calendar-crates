@@ -178,8 +178,7 @@ impl<V: DestructibleJsonValue> TryFromJson<V> for Color {
     fn try_from_json(value: V) -> Result<Self, Self::Error> {
         let s = value.try_into_string()?;
         // Try CSS3 name first (case-insensitive)
-        let s_lower = s.as_ref().to_lowercase();
-        if let Some(css) = Css3Color::iter().find(|c| c.as_str() == s_lower.as_str()) {
+        if let Ok(css) = s.as_ref().parse::<Css3Color>() {
             return Ok(Color::Css(css));
         }
         // Try #RRGGBB
