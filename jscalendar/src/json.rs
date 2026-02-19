@@ -2,9 +2,10 @@
 
 use std::{
     borrow::{Borrow, Cow},
-    collections::{HashMap, VecDeque},
+    collections::{HashMap, HashSet, VecDeque},
     convert::Infallible,
     hash::Hash,
+    str::FromStr,
 };
 
 use calendar_types::{
@@ -161,7 +162,49 @@ where
     }
 }
 
-// TODO: write a TryFromJson impl for JSCalendar-style sets (i.e. objects sending keys to `true`)
+#[derive(Debug, Clone, Copy, PartialEq, Error)]
+pub enum HashSetTryFromJsonError<E> {
+    #[error("encountered `false` as a value in a set")]
+    UnexpectedFalseValue,
+    #[error(transparent)]
+    FromStr(E),
+}
+
+impl<T, V, S> TryFromJson<V> for HashSet<T, S>
+where
+    T: FromStr + Eq + Hash,
+    V: DestructibleJsonValue,
+    S: Default + std::hash::BuildHasher,
+{
+    type Error = DocumentError<TypeErrorOr<HashSetTryFromJsonError<T::Err>>>;
+
+    fn try_from_json(value: V) -> Result<Self, Self::Error> {
+        value
+            .try_into_object()
+            .map_err(TypeErrorOr::from)
+            .map_err(DocumentError::root)?
+            .into_iter()
+            .map(|(key, value)| {
+                let s = V::Object::key_into_string(key);
+
+                match value.try_as_bool() {
+                    Ok(true) => T::from_str(&s).map_err(|error| DocumentError {
+                        path: vec![PathSegment::String(s.into_boxed_str())].into(),
+                        error: TypeErrorOr::Other(HashSetTryFromJsonError::FromStr(error)),
+                    }),
+                    Ok(false) => Err(DocumentError {
+                        path: vec![PathSegment::String(s.into_boxed_str())].into(),
+                        error: TypeErrorOr::Other(HashSetTryFromJsonError::UnexpectedFalseValue),
+                    }),
+                    Err(error) => Err(DocumentError {
+                        path: vec![PathSegment::String(s.into_boxed_str())].into(),
+                        error: TypeErrorOr::from(error),
+                    }),
+                }
+            })
+            .collect::<Result<HashSet<T, S>, _>>()
+    }
+}
 
 pub trait TryIntoJson<V>
 where
@@ -292,6 +335,15 @@ impl<E> LiftTypeError for TypeErrorOr<E> {
 pub struct DocumentError<E> {
     pub(crate) path: VecDeque<PathSegment<Box<str>>>,
     pub(crate) error: E,
+}
+
+impl<E> DocumentError<E> {
+    pub const fn root(error: E) -> Self {
+        DocumentError {
+            path: VecDeque::new(),
+            error,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -1046,6 +1098,30 @@ mod tests {
                 error: TypeErrorOr::Other(IntoUnsignedIntError::NegativeInteger(-1)),
             })
         );
+    }
+
+    #[cfg(feature = "serde_json")]
+    #[test]
+    fn hash_set_from_serde_json() {
+        use serde_json::json;
+
+        let input = json!({
+            "a" : true,
+            "a" : true,
+            "b" : true,
+        });
+
+        assert_eq!(
+            HashSet::<String>::try_from_json(input),
+            Ok(HashSet::<String>::from(["a".into(), "b".into()]))
+        );
+
+        let input = json!({
+            "a" : true,
+            "b" : false,
+        });
+
+        assert!(HashSet::<String>::try_from_json(input).is_err());
     }
 
     #[cfg(feature = "serde_json")]
