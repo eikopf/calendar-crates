@@ -1,18 +1,28 @@
 //! Types representing the members of finite sets.
 
+use strum::EnumString;
+
 /// An iTIP method (RFC 5546 §1.4).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, EnumString)]
 #[non_exhaustive]
-pub enum Method<S> {
+#[strum(ascii_case_insensitive)]
+pub enum Method {
+    #[strum(serialize = "PUBLISH")]
     Publish,
+    #[strum(serialize = "REQUEST")]
     Request,
+    #[strum(serialize = "REPLY")]
     Reply,
+    #[strum(serialize = "ADD")]
     Add,
+    #[strum(serialize = "CANCEL")]
     Cancel,
+    #[strum(serialize = "REFRESH")]
     Refresh,
+    #[strum(serialize = "COUNTER")]
     Counter,
+    #[strum(serialize = "DECLINECOUNTER")]
     DeclineCounter,
-    Other(S),
 }
 
 /// An unsigned integer in the range `0..=100` (RFC 5545 §3.8.1.8).
