@@ -41,6 +41,18 @@ pub enum Termination {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub struct Interval(pub(crate) NonZero<u64>);
 
+impl Interval {
+    /// Constructs an `Interval` from a non-zero value.
+    pub const fn new(value: NonZero<u64>) -> Self {
+        Self(value)
+    }
+
+    /// Returns the interval value.
+    pub const fn get(self) -> NonZero<u64> {
+        self.0
+    }
+}
+
 impl Default for Interval {
     fn default() -> Self {
         Self(std::num::NonZeroU64::MIN)

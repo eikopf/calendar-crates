@@ -48,6 +48,20 @@ impl std::fmt::Display for LanguageTag {
 
 use crate::json::{DestructibleJsonValue, TryFromJson, TypeErrorOr};
 
+impl<V: DestructibleJsonValue> TryFromJson<V> for LanguageTag {
+    type Error = TypeErrorOr<StringError<language_tags::ParseError>>;
+
+    fn try_from_json(value: V) -> Result<Self, Self::Error> {
+        let input = value.try_into_string()?;
+        LanguageTag::parse(input.as_ref())
+            .map_err(|error| StringError {
+                input: String::from(input.as_ref()).into(),
+                error,
+            })
+            .map_err(TypeErrorOr::Other)
+    }
+}
+
 // TryFromJson impls for reexported string types
 
 impl<V: DestructibleJsonValue> TryFromJson<V> for Box<Uid> {
@@ -86,6 +100,18 @@ impl<V: DestructibleJsonValue> TryFromJson<V> for Box<Uri> {
 pub struct StringError<E> {
     pub(crate) input: Box<str>,
     pub(crate) error: E,
+}
+
+impl<E: std::fmt::Display> std::fmt::Display for StringError<E> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "invalid value {:?}: {}", self.input, self.error)
+    }
+}
+
+impl<E: std::error::Error + 'static> std::error::Error for StringError<E> {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        Some(&self.error)
+    }
 }
 
 /// A string slice satisfying the regex `/[A-Za-z0-9\-\_]{1, 255}/` (RFC 8984 §1.4.1).

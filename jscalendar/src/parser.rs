@@ -91,6 +91,12 @@ impl<Sy, Se> OwnedParseError<Sy, Se> {
     }
 }
 
+impl<Sy: std::fmt::Display, Se: std::fmt::Display> std::fmt::Display for OwnedParseError<Sy, Se> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{} (at index {} of {:?})", self.error, self.index, self.complete_input)
+    }
+}
+
 /// The result of applying a parser, which is either a `T` or a [`ParseError<&'i str, Sy, Se>`].
 pub type ParseResult<'i, T, Sy, Se> = Result<T, ParseError<&'i str, Sy, Se>>;
 

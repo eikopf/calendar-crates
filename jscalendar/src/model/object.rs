@@ -1,8 +1,9 @@
 //! Distinguished object types.
 
 use std::{
-    collections::{HashMap, HashSet, VecDeque},
+    collections::{BTreeSet, HashMap, HashSet, VecDeque},
     hash::Hash,
+    num::NonZero,
 };
 
 use structible::structible;
@@ -10,8 +11,8 @@ use thiserror::Error;
 
 use crate::{
     json::{
-        DestructibleJsonValue, DocumentError, IntoDocumentError, JsonObject, JsonValue,
-        PathSegment, TryFromJson, TypeErrorOr, UnsignedInt,
+        DestructibleJsonValue, DocumentError, IntoDocumentError, Int, JsonArray, JsonObject,
+        JsonValue, PathSegment, TryFromJson, TypeError, TypeErrorOr, UnsignedInt,
     },
     model::{
         request_status::{RequestStatus, StatusCode},
@@ -27,9 +28,15 @@ use crate::{
             ImplicitJsonPointer, InvalidImplicitJsonPointerError, LanguageTag, MediaType, Uid, Uri,
             VendorStr,
         },
-        time::{DateTime, Duration, Local, SignedDuration, Utc, UtcOffset},
+        time::{
+            Date, DateTime, Day, Duration, Hour, IsoWeek, Local, Minute, Month, NonLeapSecond,
+            Sign, SignedDuration, Utc, UtcOffset, Weekday, Year,
+        },
     },
 };
+use crate::parser::{local_date_time, parse_full};
+use rfc5545_types::time::DateTimeOrDate;
+use rfc5545_types::rrule::weekday_num_set::WeekdayNumSet;
 
 type Token<T> = super::set::Token<T, Box<str>>;
 
@@ -545,6 +552,2697 @@ impl<V: DestructibleJsonValue> TryFromJson<V> for PatchObject<V> {
     }
 }
 
+// ============================================================================
+// Error type and helpers for object parsing
+// ============================================================================
+
+#[derive(Debug, Clone, PartialEq, Eq, Error)]
+pub enum ObjectFromJsonError {
+    #[error("missing required field: {0}")]
+    MissingField(&'static str),
+    #[error("{0}")]
+    InvalidFieldValue(Box<str>),
+}
+
+type ObjErr = DocumentError<TypeErrorOr<ObjectFromJsonError>>;
+
+fn field_err<E: std::fmt::Display>(field: &'static str, e: TypeErrorOr<E>) -> ObjErr {
+    let err = match e {
+        TypeErrorOr::TypeError(t) => TypeErrorOr::TypeError(t),
+        TypeErrorOr::Other(e) => {
+            TypeErrorOr::Other(ObjectFromJsonError::InvalidFieldValue(e.to_string().into_boxed_str()))
+        }
+    };
+    DocumentError { path: [PathSegment::Static(field)].into(), error: err }
+}
+
+fn type_field_err(field: &'static str, e: TypeError) -> ObjErr {
+    DocumentError { path: [PathSegment::Static(field)].into(), error: TypeErrorOr::TypeError(e) }
+}
+
+fn doc_field_err<E: std::fmt::Display>(field: &'static str, mut e: DocumentError<TypeErrorOr<E>>) -> ObjErr {
+    let err = match e.error {
+        TypeErrorOr::TypeError(t) => TypeErrorOr::TypeError(t),
+        TypeErrorOr::Other(e) => {
+            TypeErrorOr::Other(ObjectFromJsonError::InvalidFieldValue(e.to_string().into_boxed_str()))
+        }
+    };
+    e.path.push_front(PathSegment::Static(field));
+    DocumentError { path: e.path, error: err }
+}
+
+fn prepend(field: &'static str, mut e: ObjErr) -> ObjErr {
+    e.path.push_front(PathSegment::Static(field));
+    e
+}
+
+fn missing(field: &'static str) -> ObjErr {
+    DocumentError::root(TypeErrorOr::Other(ObjectFromJsonError::MissingField(field)))
+}
+
+// ============================================================================
+// UtcOffset TryFromJson
+// ============================================================================
+
+#[derive(Debug, Clone, PartialEq, Eq, Error)]
+#[error("invalid UTC offset string: {0:?}")]
+pub struct InvalidUtcOffsetError(pub Box<str>);
+
+impl<V: DestructibleJsonValue> TryFromJson<V> for UtcOffset {
+    type Error = TypeErrorOr<InvalidUtcOffsetError>;
+
+    fn try_from_json(value: V) -> Result<Self, Self::Error> {
+        let s = value.try_into_string()?;
+        parse_utc_offset(s.as_ref())
+            .ok_or_else(|| TypeErrorOr::Other(InvalidUtcOffsetError(String::from(s.as_ref()).into_boxed_str())))
+    }
+}
+
+fn parse_utc_offset(s: &str) -> Option<UtcOffset> {
+    let (sign, rest) = match s.as_bytes().first() {
+        Some(b'+') => (Sign::Pos, &s[1..]),
+        Some(b'-') => (Sign::Neg, &s[1..]),
+        _ => return None,
+    };
+    let parts: Vec<&str> = rest.split(':').collect();
+    if parts.len() < 2 || parts.len() > 3 { return None; }
+    let hh: u8 = parts[0].parse().ok()?;
+    let mm: u8 = parts[1].parse().ok()?;
+    let ss: u8 = if parts.len() == 3 { parts[2].parse().ok()? } else { 0 };
+    Some(UtcOffset {
+        sign,
+        hour: Hour::new(hh).ok()?,
+        minute: Minute::new(mm).ok()?,
+        second: NonLeapSecond::new(ss).ok()?,
+    })
+}
+
+// ============================================================================
+// StatusCode TryFromJson
+// ============================================================================
+
+#[derive(Debug, Clone, PartialEq, Eq, Error)]
+#[error("invalid status code string: {0:?}")]
+pub struct InvalidStatusCodeError(pub Box<str>);
+
+impl<V: DestructibleJsonValue> TryFromJson<V> for StatusCode {
+    type Error = TypeErrorOr<InvalidStatusCodeError>;
+
+    fn try_from_json(value: V) -> Result<Self, Self::Error> {
+        let s = value.try_into_string()?;
+        parse_status_code(s.as_ref())
+            .ok_or_else(|| TypeErrorOr::Other(InvalidStatusCodeError(String::from(s.as_ref()).into_boxed_str())))
+    }
+}
+
+fn parse_status_code(s: &str) -> Option<StatusCode> {
+    use crate::model::request_status::Class;
+    let mut parts = s.splitn(3, '.');
+    let class_n: u8 = parts.next()?.parse().ok()?;
+    let class = match class_n {
+        1 => Class::C1,
+        2 => Class::C2,
+        3 => Class::C3,
+        4 => Class::C4,
+        5 => Class::C5,
+        _ => return None,
+    };
+    let major: u8 = parts.next()?.parse().ok()?;
+    let minor: Option<u8> = match parts.next() {
+        Some(s) => Some(s.parse().ok()?),
+        None => None,
+    };
+    Some(StatusCode { class, major, minor })
+}
+
+// ============================================================================
+// RequestStatus TryFromJson
+// ============================================================================
+
+#[derive(Debug, Clone, PartialEq, Eq, Error)]
+#[error("invalid request status string: {0:?}")]
+pub struct InvalidRequestStatusError(pub Box<str>);
+
+impl<V: DestructibleJsonValue> TryFromJson<V> for RequestStatus {
+    type Error = TypeErrorOr<InvalidRequestStatusError>;
+
+    fn try_from_json(value: V) -> Result<Self, Self::Error> {
+        let s = value.try_into_string()?;
+        parse_request_status(s.as_ref())
+            .ok_or_else(|| TypeErrorOr::Other(InvalidRequestStatusError(String::from(s.as_ref()).into_boxed_str())))
+    }
+}
+
+fn parse_request_status(s: &str) -> Option<RequestStatus> {
+    let mut parts = s.splitn(3, ';');
+    let code_str = parts.next()?;
+    let code = parse_status_code(code_str)?;
+    let description: Box<str> = parts.next()?.into();
+    let exception_data: Option<Box<str>> = parts.next().map(Into::into);
+    Some(RequestStatus { code, description, exception_data })
+}
+
+// ============================================================================
+// RRule TryFromJson
+// ============================================================================
+
+#[derive(Debug, Clone, PartialEq, Eq, Error)]
+pub enum RRuleFromJsonError {
+    #[error("missing required field: {0}")]
+    MissingField(&'static str),
+    #[error("invalid field value: {0}")]
+    InvalidValue(Box<str>),
+}
+
+impl<V: DestructibleJsonValue> TryFromJson<V> for RRule {
+    type Error = DocumentError<TypeErrorOr<RRuleFromJsonError>>;
+
+    fn try_from_json(value: V) -> Result<Self, Self::Error> {
+        fn rrule_field_err<E: std::fmt::Display>(
+            field: &'static str,
+            e: TypeErrorOr<E>,
+        ) -> DocumentError<TypeErrorOr<RRuleFromJsonError>> {
+            let err = match e {
+                TypeErrorOr::TypeError(t) => TypeErrorOr::TypeError(t),
+                TypeErrorOr::Other(e) => TypeErrorOr::Other(
+                    RRuleFromJsonError::InvalidValue(e.to_string().into_boxed_str()),
+                ),
+            };
+            DocumentError { path: [PathSegment::Static(field)].into(), error: err }
+        }
+        fn rrule_invalid(field: &'static str, msg: &str) -> DocumentError<TypeErrorOr<RRuleFromJsonError>> {
+            DocumentError {
+                path: [PathSegment::Static(field)].into(),
+                error: TypeErrorOr::Other(RRuleFromJsonError::InvalidValue(msg.into())),
+            }
+        }
+        fn rrule_missing(field: &'static str) -> DocumentError<TypeErrorOr<RRuleFromJsonError>> {
+            DocumentError::root(TypeErrorOr::Other(RRuleFromJsonError::MissingField(field)))
+        }
+
+        let obj = value
+            .try_into_object()
+            .map_err(TypeErrorOr::from)
+            .map_err(DocumentError::root)?;
+
+        // Collect raw JSON values for each field
+        let mut frequency_val: Option<V> = None;
+        let mut interval_val: Option<V> = None;
+        let mut count_val: Option<V> = None;
+        let mut until_val: Option<V> = None;
+        let mut week_start_val: Option<V> = None;
+        let mut by_day_val: Option<V> = None;
+        let mut by_hour_val: Option<V> = None;
+        let mut by_minute_val: Option<V> = None;
+        let mut by_second_val: Option<V> = None;
+        let mut by_month_val: Option<V> = None;
+        let mut by_set_pos_val: Option<V> = None;
+        let mut by_month_day_val: Option<V> = None;
+        let mut by_year_day_val: Option<V> = None;
+        let mut by_week_no_val: Option<V> = None;
+
+        for (key, val) in obj.into_iter() {
+            let k = <V::Object as JsonObject>::key_into_string(key);
+            match k.as_str() {
+                "@type" | "rscale" | "skip" => {}
+                "frequency" => frequency_val = Some(val),
+                "interval" => interval_val = Some(val),
+                "count" => count_val = Some(val),
+                "until" => until_val = Some(val),
+                "firstDayOfWeek" => week_start_val = Some(val),
+                "byDay" => by_day_val = Some(val),
+                "byHour" => by_hour_val = Some(val),
+                "byMinute" => by_minute_val = Some(val),
+                "bySecond" => by_second_val = Some(val),
+                "byMonth" => by_month_val = Some(val),
+                "bySetPosition" => by_set_pos_val = Some(val),
+                "byMonthDay" => by_month_day_val = Some(val),
+                "byYearDay" => by_year_day_val = Some(val),
+                "byWeekNo" => by_week_no_val = Some(val),
+                _ => {}
+            }
+        }
+
+        // Parse frequency (required)
+        let freq_str = frequency_val
+            .ok_or_else(|| rrule_missing("frequency"))?
+            .try_into_string()
+            .map_err(|e| rrule_field_err::<std::convert::Infallible>("frequency", TypeErrorOr::TypeError(e)))?;
+
+        // Parse interval
+        let interval = match interval_val {
+            None => None,
+            Some(v) => {
+                let n = UnsignedInt::try_from_json(v).map_err(|e| rrule_field_err("interval", e))?;
+                let nz = NonZero::new(n.get())
+                    .ok_or_else(|| rrule_invalid("interval", "interval must be >= 1"))?;
+                Some(crate::model::rrule::Interval::new(nz))
+            }
+        };
+
+        // Parse termination (count or until, mutually exclusive)
+        let termination = match (count_val, until_val) {
+            (Some(c), None) => {
+                let n = UnsignedInt::try_from_json(c).map_err(|e| rrule_field_err("count", e))?;
+                Some(crate::model::rrule::Termination::Count(n.get()))
+            }
+            (None, Some(u)) => {
+                let s = u.try_into_string().map_err(|e| rrule_field_err::<std::convert::Infallible>("until", TypeErrorOr::TypeError(e)))?;
+                let until = parse_date_or_datetime(s.as_ref())
+                    .ok_or_else(|| rrule_invalid("until", s.as_ref()))?;
+                Some(crate::model::rrule::Termination::Until(until))
+            }
+            (None, None) => None,
+            (Some(_), Some(_)) => {
+                return Err(rrule_invalid("count", "count and until are mutually exclusive"));
+            }
+        };
+
+        // Parse firstDayOfWeek
+        let week_start = match week_start_val {
+            None => None,
+            Some(v) => {
+                let s = v.try_into_string().map_err(|e| rrule_field_err::<std::convert::Infallible>("firstDayOfWeek", TypeErrorOr::TypeError(e)))?;
+                let wd = parse_weekday_code(s.as_ref())
+                    .ok_or_else(|| rrule_invalid("firstDayOfWeek", s.as_ref()))?;
+                Some(wd)
+            }
+        };
+
+        // Parse byDay → WeekdayNumSet
+        let by_day = match by_day_val {
+            None => None,
+            Some(v) => Some(parse_by_day::<V>(v).map_err(|e| {
+                let error = match e.error {
+                    TypeErrorOr::TypeError(t) => TypeErrorOr::TypeError(t),
+                    TypeErrorOr::Other(br) => TypeErrorOr::Other(RRuleFromJsonError::InvalidValue(br.to_string().into_boxed_str())),
+                };
+                let mut path = e.path;
+                path.push_front(PathSegment::Static("byDay"));
+                DocumentError { path, error }
+            })?),
+        };
+
+        // Parse byHour → HourSet
+        let by_hour = match by_hour_val {
+            None => None,
+            Some(v) => Some(parse_by_hour::<V>(v).map_err(|e| {
+                rrule_field_err("byHour", e)
+            })?),
+        };
+
+        // Parse byMinute → MinuteSet
+        let by_minute = match by_minute_val {
+            None => None,
+            Some(v) => Some(parse_by_minute::<V>(v).map_err(|e| {
+                rrule_field_err("byMinute", e)
+            })?),
+        };
+
+        // Parse bySecond → SecondSet
+        let by_second = match by_second_val {
+            None => None,
+            Some(v) => Some(parse_by_second::<V>(v).map_err(|e| {
+                rrule_field_err("bySecond", e)
+            })?),
+        };
+
+        // Parse byMonth → MonthSet
+        let by_month = match by_month_val {
+            None => None,
+            Some(v) => Some(parse_by_month::<V>(v).map_err(|e| {
+                rrule_field_err("byMonth", e)
+            })?),
+        };
+
+        // Parse bySetPosition → BTreeSet<YearDayNum>
+        let by_set_pos = match by_set_pos_val {
+            None => None,
+            Some(v) => Some(parse_year_day_nums::<V>(v).map_err(|e| {
+                rrule_field_err("bySetPosition", e)
+            })?),
+        };
+
+        // Parse byMonthDay → MonthDaySet
+        let by_month_day = match by_month_day_val {
+            None => None,
+            Some(v) => Some(parse_by_month_day::<V>(v).map_err(|e| {
+                rrule_field_err("byMonthDay", e)
+            })?),
+        };
+
+        // Parse byYearDay → BTreeSet<YearDayNum>
+        let by_year_day = match by_year_day_val {
+            None => None,
+            Some(v) => Some(parse_year_day_nums::<V>(v).map_err(|e| {
+                rrule_field_err("byYearDay", e)
+            })?),
+        };
+
+        // Parse byWeekNo → WeekNoSet
+        let by_week_no = match by_week_no_val {
+            None => None,
+            Some(v) => Some(parse_by_week_no::<V>(v).map_err(|e| {
+                rrule_field_err("byWeekNo", e)
+            })?),
+        };
+
+        // Build CoreByRules
+        let core_by_rules = crate::model::rrule::CoreByRules {
+            by_second,
+            by_minute,
+            by_hour,
+            by_month,
+            by_day,
+            by_set_pos,
+        };
+
+        // Build FreqByRules based on frequency string
+        let freq = match freq_str.as_ref().to_lowercase().as_str() {
+            "secondly" => crate::model::rrule::FreqByRules::Secondly(
+                crate::model::rrule::ByPeriodDayRules { by_month_day, by_year_day },
+            ),
+            "minutely" => crate::model::rrule::FreqByRules::Minutely(
+                crate::model::rrule::ByPeriodDayRules { by_month_day, by_year_day },
+            ),
+            "hourly" => crate::model::rrule::FreqByRules::Hourly(
+                crate::model::rrule::ByPeriodDayRules { by_month_day, by_year_day },
+            ),
+            "daily" => crate::model::rrule::FreqByRules::Daily(
+                crate::model::rrule::ByMonthDayRule { by_month_day },
+            ),
+            "weekly" => crate::model::rrule::FreqByRules::Weekly,
+            "monthly" => crate::model::rrule::FreqByRules::Monthly(
+                crate::model::rrule::ByMonthDayRule { by_month_day },
+            ),
+            "yearly" => crate::model::rrule::FreqByRules::Yearly(
+                crate::model::rrule::YearlyByRules { by_month_day, by_year_day, by_week_no },
+            ),
+            _ => {
+                return Err(rrule_invalid("frequency", freq_str.as_ref()));
+            }
+        };
+
+        Ok(RRule { freq, core_by_rules, interval, termination, week_start })
+    }
+}
+
+fn parse_weekday_code(s: &str) -> Option<Weekday> {
+    match s.to_lowercase().as_str() {
+        "mo" => Some(Weekday::Monday),
+        "tu" => Some(Weekday::Tuesday),
+        "we" => Some(Weekday::Wednesday),
+        "th" => Some(Weekday::Thursday),
+        "fr" => Some(Weekday::Friday),
+        "sa" => Some(Weekday::Saturday),
+        "su" => Some(Weekday::Sunday),
+        _ => None,
+    }
+}
+
+fn parse_date_or_datetime(s: &str) -> Option<DateTimeOrDate<crate::model::time::Local>> {
+    if let Ok(dt) = parse_full(local_date_time)(s) {
+        return Some(DateTimeOrDate::DateTime(dt));
+    }
+    // Try date-only: YYYY-MM-DD
+    if s.len() == 10 && s.as_bytes().get(4) == Some(&b'-') && s.as_bytes().get(7) == Some(&b'-') {
+        let year: u16 = s[0..4].parse().ok()?;
+        let month: u8 = s[5..7].parse().ok()?;
+        let day: u8 = s[8..10].parse().ok()?;
+        let date = Date::new(Year::new(year).ok()?, Month::new(month).ok()?, Day::new(day).ok()?).ok()?;
+        return Some(DateTimeOrDate::Date(date));
+    }
+    None
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Error)]
+pub enum ByRuleParseError {
+    #[error("invalid value in by-rule array")]
+    InvalidValue,
+}
+
+fn parse_by_day<V: DestructibleJsonValue>(
+    val: V,
+) -> Result<WeekdayNumSet, DocumentError<TypeErrorOr<ByRuleParseError>>> {
+    let arr = val
+        .try_into_array()
+        .map_err(TypeErrorOr::from)
+        .map_err(DocumentError::root)?;
+    let mut set = WeekdayNumSet::with_capacity(0);
+    for (i, elem) in arr.into_iter().enumerate() {
+        let obj = elem.try_into_object()
+            .map_err(|e| DocumentError { path: [PathSegment::Index(i)].into(), error: TypeErrorOr::TypeError(e) })?;
+        let mut day_val: Option<Weekday> = None;
+        let mut nth_val: Option<i64> = None;
+        for (key, val) in obj.into_iter() {
+            let k = <V::Object as JsonObject>::key_into_string(key);
+            match k.as_str() {
+                "@type" => {}
+                "day" => {
+                    let s = val.try_into_string()
+                        .map_err(|e| DocumentError { path: [PathSegment::Index(i), PathSegment::Static("day")].into(), error: TypeErrorOr::TypeError(e) })?;
+                    day_val = Some(parse_weekday_code(s.as_ref()).ok_or_else(|| DocumentError {
+                        path: [PathSegment::Index(i), PathSegment::Static("day")].into(),
+                        error: TypeErrorOr::Other(ByRuleParseError::InvalidValue),
+                    })?);
+                }
+                "nthOfPeriod" => {
+                    let n = Int::try_from_json(val)
+                        .map_err(|e| DocumentError {
+                            path: [PathSegment::Index(i), PathSegment::Static("nthOfPeriod")].into(),
+                            error: match e {
+                                TypeErrorOr::TypeError(t) => TypeErrorOr::TypeError(t),
+                                TypeErrorOr::Other(_) => TypeErrorOr::Other(ByRuleParseError::InvalidValue),
+                            },
+                        })?;
+                    nth_val = Some(n.get());
+                }
+                _ => {}
+            }
+        }
+        let weekday = day_val.ok_or_else(|| DocumentError {
+            path: [PathSegment::Index(i)].into(),
+            error: TypeErrorOr::Other(ByRuleParseError::InvalidValue),
+        })?;
+        let ordinal = match nth_val {
+            None => None,
+            Some(n) if n == 0 => return Err(DocumentError {
+                path: [PathSegment::Index(i)].into(),
+                error: TypeErrorOr::Other(ByRuleParseError::InvalidValue),
+            }),
+            Some(n) => {
+                let sign = if n > 0 { Sign::Pos } else { Sign::Neg };
+                let abs = n.unsigned_abs() as u8;
+                let week = IsoWeek::from_index(abs).ok_or_else(|| DocumentError {
+                    path: [PathSegment::Index(i)].into(),
+                    error: TypeErrorOr::Other(ByRuleParseError::InvalidValue),
+                })?;
+                Some((sign, week))
+            }
+        };
+        set.insert(crate::model::rrule::WeekdayNum { ordinal, weekday });
+    }
+    Ok(set)
+}
+
+fn parse_by_hour<V: DestructibleJsonValue>(
+    val: V,
+) -> Result<crate::model::rrule::HourSet, TypeErrorOr<ByRuleParseError>> {
+    let arr = val.try_into_array().map_err(TypeErrorOr::from)?;
+    let mut set = crate::model::rrule::HourSet::default();
+    for elem in arr.into_iter() {
+        let n = elem.try_as_unsigned_int().map_err(|e| match e {
+            TypeErrorOr::TypeError(t) => TypeErrorOr::TypeError(t),
+            TypeErrorOr::Other(_) => TypeErrorOr::Other(ByRuleParseError::InvalidValue),
+        })?;
+        let h = crate::model::rrule::Hour::from_repr(n.get() as u8)
+            .ok_or(TypeErrorOr::Other(ByRuleParseError::InvalidValue))?;
+        set.set(h);
+    }
+    Ok(set)
+}
+
+fn parse_by_minute<V: DestructibleJsonValue>(
+    val: V,
+) -> Result<crate::model::rrule::MinuteSet, TypeErrorOr<ByRuleParseError>> {
+    let arr = val.try_into_array().map_err(TypeErrorOr::from)?;
+    let mut set = crate::model::rrule::MinuteSet::default();
+    for elem in arr.into_iter() {
+        let n = elem.try_as_unsigned_int().map_err(|e| match e {
+            TypeErrorOr::TypeError(t) => TypeErrorOr::TypeError(t),
+            TypeErrorOr::Other(_) => TypeErrorOr::Other(ByRuleParseError::InvalidValue),
+        })?;
+        let m = crate::model::rrule::Minute::from_repr(n.get() as u8)
+            .ok_or(TypeErrorOr::Other(ByRuleParseError::InvalidValue))?;
+        set.set(m);
+    }
+    Ok(set)
+}
+
+fn parse_by_second<V: DestructibleJsonValue>(
+    val: V,
+) -> Result<crate::model::rrule::SecondSet, TypeErrorOr<ByRuleParseError>> {
+    let arr = val.try_into_array().map_err(TypeErrorOr::from)?;
+    let mut set = crate::model::rrule::SecondSet::default();
+    for elem in arr.into_iter() {
+        let n = elem.try_as_unsigned_int().map_err(|e| match e {
+            TypeErrorOr::TypeError(t) => TypeErrorOr::TypeError(t),
+            TypeErrorOr::Other(_) => TypeErrorOr::Other(ByRuleParseError::InvalidValue),
+        })?;
+        let s = crate::model::rrule::Second::from_repr(n.get() as u8)
+            .ok_or(TypeErrorOr::Other(ByRuleParseError::InvalidValue))?;
+        set.set(s);
+    }
+    Ok(set)
+}
+
+fn parse_by_month<V: DestructibleJsonValue>(
+    val: V,
+) -> Result<crate::model::rrule::MonthSet, TypeErrorOr<ByRuleParseError>> {
+    let arr = val.try_into_array().map_err(TypeErrorOr::from)?;
+    let mut set = crate::model::rrule::MonthSet::default();
+    for elem in arr.into_iter() {
+        let n = elem.try_as_unsigned_int().map_err(|e| match e {
+            TypeErrorOr::TypeError(t) => TypeErrorOr::TypeError(t),
+            TypeErrorOr::Other(_) => TypeErrorOr::Other(ByRuleParseError::InvalidValue),
+        })?;
+        let m = Month::new(n.get() as u8)
+            .map_err(|_| TypeErrorOr::Other(ByRuleParseError::InvalidValue))?;
+        set.set(m);
+    }
+    Ok(set)
+}
+
+fn parse_year_day_nums<V: DestructibleJsonValue>(
+    val: V,
+) -> Result<BTreeSet<crate::model::rrule::YearDayNum>, TypeErrorOr<ByRuleParseError>> {
+    let arr = val.try_into_array().map_err(TypeErrorOr::from)?;
+    let mut set = BTreeSet::new();
+    for elem in arr.into_iter() {
+        let n = Int::try_from_json(elem).map_err(|e| match e {
+            TypeErrorOr::TypeError(t) => TypeErrorOr::TypeError(t),
+            TypeErrorOr::Other(_) => TypeErrorOr::Other(ByRuleParseError::InvalidValue),
+        })?;
+        let raw = n.get();
+        let (sign, abs) = if raw >= 0 { (Sign::Pos, raw as u64) } else { (Sign::Neg, raw.unsigned_abs()) };
+        let ydn = crate::model::rrule::YearDayNum::from_signed_index(sign, abs as u16)
+            .ok_or(TypeErrorOr::Other(ByRuleParseError::InvalidValue))?;
+        set.insert(ydn);
+    }
+    Ok(set)
+}
+
+fn parse_by_month_day<V: DestructibleJsonValue>(
+    val: V,
+) -> Result<crate::model::rrule::MonthDaySet, TypeErrorOr<ByRuleParseError>> {
+    let arr = val.try_into_array().map_err(TypeErrorOr::from)?;
+    let mut set = crate::model::rrule::MonthDaySet::default();
+    for elem in arr.into_iter() {
+        let n = Int::try_from_json(elem).map_err(|e| match e {
+            TypeErrorOr::TypeError(t) => TypeErrorOr::TypeError(t),
+            TypeErrorOr::Other(_) => TypeErrorOr::Other(ByRuleParseError::InvalidValue),
+        })?;
+        let raw = n.get();
+        let (sign, abs) = if raw >= 0 { (Sign::Pos, raw as u64) } else { (Sign::Neg, raw.unsigned_abs()) };
+        let md = crate::model::rrule::MonthDay::from_repr(abs as u8)
+            .ok_or(TypeErrorOr::Other(ByRuleParseError::InvalidValue))?;
+        let idx = crate::model::rrule::MonthDaySetIndex::from_signed_month_day(sign, md);
+        set.set(idx);
+    }
+    Ok(set)
+}
+
+fn parse_by_week_no<V: DestructibleJsonValue>(
+    val: V,
+) -> Result<crate::model::rrule::WeekNoSet, TypeErrorOr<ByRuleParseError>> {
+    let arr = val.try_into_array().map_err(TypeErrorOr::from)?;
+    let mut set = crate::model::rrule::WeekNoSet::default();
+    for elem in arr.into_iter() {
+        let n = Int::try_from_json(elem).map_err(|e| match e {
+            TypeErrorOr::TypeError(t) => TypeErrorOr::TypeError(t),
+            TypeErrorOr::Other(_) => TypeErrorOr::Other(ByRuleParseError::InvalidValue),
+        })?;
+        let raw = n.get();
+        let (sign, abs) = if raw >= 0 { (Sign::Pos, raw as u64) } else { (Sign::Neg, raw.unsigned_abs()) };
+        let week = IsoWeek::from_index(abs as u8)
+            .ok_or(TypeErrorOr::Other(ByRuleParseError::InvalidValue))?;
+        let idx = crate::model::rrule::WeekNoSetIndex::from_signed_week(sign, week);
+        set.set(idx);
+    }
+    Ok(set)
+}
+
+// ============================================================================
+// Relation TryFromJson
+// ============================================================================
+
+impl<V: DestructibleJsonValue> TryFromJson<V> for Relation<V> {
+    type Error = ObjErr;
+
+    fn try_from_json(value: V) -> Result<Self, Self::Error> {
+        let obj = value
+            .try_into_object()
+            .map_err(TypeErrorOr::from)
+            .map_err(DocumentError::root)?;
+
+        let mut relations: Option<HashSet<Token<RelationValue>>> = None;
+        let mut vendor_parts: Vec<(Box<str>, V)> = Vec::new();
+
+        for (key, val) in obj.into_iter() {
+            let k = <V::Object as JsonObject>::key_into_string(key);
+            match k.as_str() {
+                "@type" => {}
+                "relation" => {
+                    relations = Some(
+                        HashSet::<Token<RelationValue>>::try_from_json(val)
+                            .map_err(|e| doc_field_err("relation", e))?,
+                    );
+                }
+                _ => vendor_parts.push((k.into_boxed_str(), val)),
+            }
+        }
+
+        let relations = relations.unwrap_or_default();
+        let mut result = Relation::new(relations);
+        for (k, v) in vendor_parts {
+            if let Ok(vk) = VendorStr::new(k.as_ref()) {
+                result.insert_vendor_property(vk.into(), v);
+            }
+        }
+        Ok(result)
+    }
+}
+
+// ============================================================================
+// OffsetTrigger TryFromJson
+// ============================================================================
+
+impl<V: DestructibleJsonValue> TryFromJson<V> for OffsetTrigger<V> {
+    type Error = ObjErr;
+
+    fn try_from_json(value: V) -> Result<Self, Self::Error> {
+        let obj = value
+            .try_into_object()
+            .map_err(TypeErrorOr::from)
+            .map_err(DocumentError::root)?;
+
+        let mut offset_val: Option<SignedDuration> = None;
+        let mut relative_to_val: Option<Token<AlertRelativeTo>> = None;
+        let mut vendor_parts: Vec<(Box<str>, V)> = Vec::new();
+
+        for (key, val) in obj.into_iter() {
+            let k = <V::Object as JsonObject>::key_into_string(key);
+            match k.as_str() {
+                "@type" => {}
+                "offset" => {
+                    offset_val = Some(
+                        SignedDuration::try_from_json(val).map_err(|e| field_err("offset", e))?,
+                    );
+                }
+                "relativeTo" => {
+                    relative_to_val = Some(
+                        Token::<AlertRelativeTo>::try_from_json(val)
+                            .map_err(|e| type_field_err("relativeTo", e))?,
+                    );
+                }
+                _ => vendor_parts.push((k.into_boxed_str(), val)),
+            }
+        }
+
+        let offset = offset_val.ok_or_else(|| missing("offset"))?;
+        let mut result = OffsetTrigger::new(offset);
+        if let Some(v) = relative_to_val { result.set_relative_to(v); }
+        for (k, v) in vendor_parts {
+            if let Ok(vk) = VendorStr::new(k.as_ref()) {
+                result.insert_vendor_property(vk.into(), v);
+            }
+        }
+        Ok(result)
+    }
+}
+
+// ============================================================================
+// AbsoluteTrigger TryFromJson
+// ============================================================================
+
+impl<V: DestructibleJsonValue> TryFromJson<V> for AbsoluteTrigger<V> {
+    type Error = ObjErr;
+
+    fn try_from_json(value: V) -> Result<Self, Self::Error> {
+        let obj = value
+            .try_into_object()
+            .map_err(TypeErrorOr::from)
+            .map_err(DocumentError::root)?;
+
+        let mut when_val: Option<DateTime<Utc>> = None;
+        let mut vendor_parts: Vec<(Box<str>, V)> = Vec::new();
+
+        for (key, val) in obj.into_iter() {
+            let k = <V::Object as JsonObject>::key_into_string(key);
+            match k.as_str() {
+                "@type" => {}
+                "when" => {
+                    when_val = Some(
+                        DateTime::<Utc>::try_from_json(val).map_err(|e| field_err("when", e))?,
+                    );
+                }
+                _ => vendor_parts.push((k.into_boxed_str(), val)),
+            }
+        }
+
+        let when = when_val.ok_or_else(|| missing("when"))?;
+        let mut result = AbsoluteTrigger::new(when);
+        for (k, v) in vendor_parts {
+            if let Ok(vk) = VendorStr::new(k.as_ref()) {
+                result.insert_vendor_property(vk.into(), v);
+            }
+        }
+        Ok(result)
+    }
+}
+
+// ============================================================================
+// Trigger TryFromJson
+// ============================================================================
+
+impl<V: DestructibleJsonValue> TryFromJson<V> for Trigger<V> {
+    type Error = ObjErr;
+
+    fn try_from_json(value: V) -> Result<Self, Self::Error> {
+        // We need to inspect @type before deciding which variant to parse.
+        // Collect all (key, val) pairs first, then dispatch.
+        let obj = value
+            .try_into_object()
+            .map_err(TypeErrorOr::from)
+            .map_err(DocumentError::root)?;
+
+        let mut type_str: Option<String> = None;
+        let mut items: Vec<(String, V)> = Vec::new();
+
+        for (key, val) in obj.into_iter() {
+            let k = <V::Object as JsonObject>::key_into_string(key);
+            if k.as_str() == "@type" {
+                if let Ok(s) = val.try_into_string() {
+                    type_str = Some(s.into());
+                }
+            } else {
+                items.push((k, val));
+            }
+        }
+
+        match type_str.as_deref() {
+            Some("OffsetTrigger") => {
+                // Parse as OffsetTrigger from the collected items
+                let mut offset_val: Option<SignedDuration> = None;
+                let mut relative_to_val: Option<Token<AlertRelativeTo>> = None;
+                let mut vendor_parts: Vec<(Box<str>, V)> = Vec::new();
+                for (k, val) in items {
+                    match k.as_str() {
+                        "offset" => {
+                            offset_val = Some(
+                                SignedDuration::try_from_json(val).map_err(|e| field_err("offset", e))?,
+                            );
+                        }
+                        "relativeTo" => {
+                            relative_to_val = Some(
+                                Token::<AlertRelativeTo>::try_from_json(val)
+                                    .map_err(|e| type_field_err("relativeTo", e))?,
+                            );
+                        }
+                        _ => vendor_parts.push((k.into_boxed_str(), val)),
+                    }
+                }
+                let offset = offset_val.ok_or_else(|| missing("offset"))?;
+                let mut trigger = OffsetTrigger::new(offset);
+                if let Some(v) = relative_to_val { trigger.set_relative_to(v); }
+                for (k, v) in vendor_parts {
+                    if let Ok(vk) = VendorStr::new(k.as_ref()) { trigger.insert_vendor_property(vk.into(), v); }
+                }
+                Ok(Trigger::Offset(trigger))
+            }
+            Some("AbsoluteTrigger") => {
+                let mut when_val: Option<DateTime<Utc>> = None;
+                let mut vendor_parts: Vec<(Box<str>, V)> = Vec::new();
+                for (k, val) in items {
+                    match k.as_str() {
+                        "when" => {
+                            when_val = Some(
+                                DateTime::<Utc>::try_from_json(val).map_err(|e| field_err("when", e))?,
+                            );
+                        }
+                        _ => vendor_parts.push((k.into_boxed_str(), val)),
+                    }
+                }
+                let when = when_val.ok_or_else(|| missing("when"))?;
+                let mut trigger = AbsoluteTrigger::new(when);
+                for (k, v) in vendor_parts {
+                    if let Ok(vk) = VendorStr::new(k.as_ref()) { trigger.insert_vendor_property(vk.into(), v); }
+                }
+                Ok(Trigger::Absolute(trigger))
+            }
+            _ => {
+                // Unknown type - store raw object as Unknown variant
+                // We already consumed the object, so we can't reconstruct it.
+                // Return an error for unknown trigger types.
+                Err(missing("@type"))
+            }
+        }
+    }
+}
+
+// ============================================================================
+// ReplyTo TryFromJson
+// ============================================================================
+
+impl<V: DestructibleJsonValue> TryFromJson<V> for ReplyTo {
+    type Error = ObjErr;
+
+    fn try_from_json(value: V) -> Result<Self, Self::Error> {
+        let obj = value
+            .try_into_object()
+            .map_err(TypeErrorOr::from)
+            .map_err(DocumentError::root)?;
+
+        let mut imip_val: Option<Box<CalAddress>> = None;
+        let mut web_val: Option<Box<Uri>> = None;
+        let mut other_parts: Vec<(String, Box<Uri>)> = Vec::new();
+
+        for (key, val) in obj.into_iter() {
+            let k = <V::Object as JsonObject>::key_into_string(key);
+            match k.as_str() {
+                "imip" => {
+                    imip_val = Some(
+                        Box::<CalAddress>::try_from_json(val).map_err(|e| field_err("imip", e))?,
+                    );
+                }
+                "web" => {
+                    web_val = Some(
+                        Box::<Uri>::try_from_json(val).map_err(|e| field_err("web", e))?,
+                    );
+                }
+                other => {
+                    // Try to parse value as Uri for other methods
+                    if let Ok(uri) = Box::<Uri>::try_from_json(val) {
+                        other_parts.push((other.into(), uri));
+                    }
+                }
+            }
+        }
+
+        let mut result = ReplyTo::new();
+        if let Some(v) = imip_val { result.set_imip(v); }
+        if let Some(v) = web_val { result.set_web(v); }
+        for (k, v) in other_parts {
+            if let Ok(ak) = AlphaNumeric::new(k.as_ref()) {
+                result.insert_other(ak.into(), v);
+            }
+        }
+        Ok(result)
+    }
+}
+
+// ============================================================================
+// SendToParticipant TryFromJson
+// ============================================================================
+
+impl<V: DestructibleJsonValue> TryFromJson<V> for SendToParticipant {
+    type Error = ObjErr;
+
+    fn try_from_json(value: V) -> Result<Self, Self::Error> {
+        let obj = value
+            .try_into_object()
+            .map_err(TypeErrorOr::from)
+            .map_err(DocumentError::root)?;
+
+        let mut imip_val: Option<Box<CalAddress>> = None;
+        let mut other_parts: Vec<(String, Box<Uri>)> = Vec::new();
+
+        for (key, val) in obj.into_iter() {
+            let k = <V::Object as JsonObject>::key_into_string(key);
+            match k.as_str() {
+                "imip" => {
+                    imip_val = Some(
+                        Box::<CalAddress>::try_from_json(val).map_err(|e| field_err("imip", e))?,
+                    );
+                }
+                other => {
+                    if let Ok(uri) = Box::<Uri>::try_from_json(val) {
+                        other_parts.push((other.into(), uri));
+                    }
+                }
+            }
+        }
+
+        let mut result = SendToParticipant::new();
+        if let Some(v) = imip_val { result.set_imip(v); }
+        for (k, v) in other_parts {
+            if let Ok(ak) = AlphaNumeric::new(k.as_ref()) {
+                result.insert_other(ak.into(), v);
+            }
+        }
+        Ok(result)
+    }
+}
+
+// ============================================================================
+// Link TryFromJson
+// ============================================================================
+
+impl<V: DestructibleJsonValue> TryFromJson<V> for Link<V> {
+    type Error = ObjErr;
+
+    fn try_from_json(value: V) -> Result<Self, Self::Error> {
+        let obj = value
+            .try_into_object()
+            .map_err(TypeErrorOr::from)
+            .map_err(DocumentError::root)?;
+
+        let mut href_val: Option<Box<Uri>> = None;
+        let mut content_id_val: Option<Box<ContentId>> = None;
+        let mut media_type_val: Option<Box<MediaType>> = None;
+        let mut size_val: Option<UnsignedInt> = None;
+        let mut relation_val: Option<LinkRelation> = None;
+        let mut display_val: Option<Token<DisplayPurpose>> = None;
+        let mut title_val: Option<String> = None;
+        let mut vendor_parts: Vec<(Box<str>, V)> = Vec::new();
+
+        for (key, val) in obj.into_iter() {
+            let k = <V::Object as JsonObject>::key_into_string(key);
+            match k.as_str() {
+                "@type" => {}
+                "href" => {
+                    href_val = Some(Box::<Uri>::try_from_json(val).map_err(|e| field_err("href", e))?);
+                }
+                "contentId" => {
+                    content_id_val = Some(Box::<ContentId>::try_from_json(val).map_err(|e| field_err("contentId", e))?);
+                }
+                "mediaType" => {
+                    media_type_val = Some(Box::<MediaType>::try_from_json(val).map_err(|e| field_err("mediaType", e))?);
+                }
+                "size" => {
+                    size_val = Some(UnsignedInt::try_from_json(val).map_err(|e| field_err("size", e))?);
+                }
+                "rel" => {
+                    let s = val.try_into_string().map_err(|e| type_field_err("rel", e))?;
+                    use std::str::FromStr;
+                    relation_val = Some(
+                        LinkRelation::from_str(s.as_ref())
+                            .map_err(|e| field_err("rel", TypeErrorOr::Other(e)))?
+                    );
+                }
+                "display" => {
+                    display_val = Some(Token::<DisplayPurpose>::try_from_json(val).map_err(|e| type_field_err("display", e))?);
+                }
+                "title" => {
+                    title_val = Some(String::try_from_json(val).map_err(|e| type_field_err("title", e))?);
+                }
+                _ => vendor_parts.push((k.into_boxed_str(), val)),
+            }
+        }
+
+        let href = href_val.ok_or_else(|| missing("href"))?;
+        let mut result = Link::new(href);
+        if let Some(v) = content_id_val { result.set_content_id(v); }
+        if let Some(v) = media_type_val { result.set_media_type(v); }
+        if let Some(v) = size_val { result.set_size(v); }
+        if let Some(v) = relation_val { result.set_relation(v); }
+        if let Some(v) = display_val { result.set_display(v); }
+        if let Some(v) = title_val { result.set_title(v); }
+        for (k, v) in vendor_parts {
+            if let Ok(vk) = VendorStr::new(k.as_ref()) { result.insert_vendor_property(vk.into(), v); }
+        }
+        Ok(result)
+    }
+}
+
+// ============================================================================
+// Helper functions for parsing arrays, maps, and sets
+// ============================================================================
+
+fn parse_vec<V, T, F>(value: V, parse_elem: F) -> Result<Vec<T>, ObjErr>
+where
+    V: DestructibleJsonValue,
+    F: Fn(V) -> Result<T, ObjErr>,
+{
+    let arr = value
+        .try_into_array()
+        .map_err(TypeErrorOr::from)
+        .map_err(DocumentError::root)?;
+    let mut out = Vec::new();
+    for (i, elem) in arr.into_iter().enumerate() {
+        let v = parse_elem(elem).map_err(|mut e| {
+            e.path.push_front(PathSegment::Index(i));
+            e
+        })?;
+        out.push(v);
+    }
+    Ok(out)
+}
+
+fn parse_map<V, K, T, KF, VF>(
+    value: V,
+    parse_key: KF,
+    parse_val: VF,
+) -> Result<HashMap<K, T>, ObjErr>
+where
+    V: DestructibleJsonValue,
+    K: Eq + Hash,
+    KF: Fn(&str) -> Result<K, ObjErr>,
+    VF: Fn(V) -> Result<T, ObjErr>,
+{
+    let obj = value
+        .try_into_object()
+        .map_err(TypeErrorOr::from)
+        .map_err(DocumentError::root)?;
+    let mut out = HashMap::new();
+    for (key, val) in obj.into_iter() {
+        let k_str = <V::Object as JsonObject>::key_into_string(key);
+        let k = parse_key(k_str.as_str())?;
+        let v = parse_val(val).map_err(|mut e| {
+            e.path.push_front(PathSegment::String(k_str.into_boxed_str()));
+            e
+        })?;
+        out.insert(k, v);
+    }
+    Ok(out)
+}
+
+fn parse_id_set<V: DestructibleJsonValue>(value: V) -> Result<HashSet<Box<Id>>, ObjErr> {
+    let arr = value
+        .try_into_array()
+        .map_err(TypeErrorOr::from)
+        .map_err(DocumentError::root)?;
+    let mut out = HashSet::new();
+    for (i, elem) in arr.into_iter().enumerate() {
+        let s = elem.try_into_string().map_err(|e| {
+            DocumentError { path: [PathSegment::Index(i)].into(), error: TypeErrorOr::TypeError(e) }
+        })?;
+        let id: Box<Id> = Id::new(s.as_ref())
+            .map(Into::into)
+            .map_err(|e| DocumentError {
+                path: [PathSegment::Index(i)].into(),
+                error: TypeErrorOr::Other(ObjectFromJsonError::InvalidFieldValue(
+                    e.to_string().into_boxed_str(),
+                )),
+            })?;
+        out.insert(id);
+    }
+    Ok(out)
+}
+
+fn parse_str_set<V: DestructibleJsonValue>(value: V) -> Result<HashSet<Box<str>>, ObjErr> {
+    let arr = value
+        .try_into_array()
+        .map_err(TypeErrorOr::from)
+        .map_err(DocumentError::root)?;
+    let mut out = HashSet::new();
+    for (i, elem) in arr.into_iter().enumerate() {
+        let s = elem.try_into_string().map_err(|e| {
+            DocumentError { path: [PathSegment::Index(i)].into(), error: TypeErrorOr::TypeError(e) }
+        })?;
+        out.insert(Box::<str>::from(s.as_ref()));
+    }
+    Ok(out)
+}
+
+fn rrule_vec<V: DestructibleJsonValue>(value: V) -> Result<Vec<RRule>, ObjErr> {
+    parse_vec(value, |elem| {
+        RRule::try_from_json(elem).map_err(|e| {
+            let error = match e.error {
+                TypeErrorOr::TypeError(t) => TypeErrorOr::TypeError(t),
+                TypeErrorOr::Other(re) => TypeErrorOr::Other(
+                    ObjectFromJsonError::InvalidFieldValue(re.to_string().into_boxed_str()),
+                ),
+            };
+            DocumentError { path: e.path, error }
+        })
+    })
+}
+
+fn parse_id_map<V, T, F>(value: V, parse_val: F) -> Result<HashMap<Box<Id>, T>, ObjErr>
+where
+    V: DestructibleJsonValue,
+    F: Fn(V) -> Result<T, ObjErr>,
+{
+    parse_map(
+        value,
+        |k| {
+            Id::new(k)
+                .map(|id| Box::<Id>::from(id))
+                .map_err(|e| {
+                    DocumentError::root(TypeErrorOr::Other(ObjectFromJsonError::InvalidFieldValue(
+                        e.to_string().into_boxed_str(),
+                    )))
+                })
+        },
+        parse_val,
+    )
+}
+
+fn parse_tz_map<V, T, F>(value: V, parse_val: F) -> Result<HashMap<Box<CustomTimeZoneId>, T>, ObjErr>
+where
+    V: DestructibleJsonValue,
+    F: Fn(V) -> Result<T, ObjErr>,
+{
+    parse_map(
+        value,
+        |k| {
+            CustomTimeZoneId::new(k)
+                .map(|id| Box::<CustomTimeZoneId>::from(id))
+                .map_err(|e| {
+                    DocumentError::root(TypeErrorOr::Other(ObjectFromJsonError::InvalidFieldValue(
+                        e.to_string().into_boxed_str(),
+                    )))
+                })
+        },
+        parse_val,
+    )
+}
+
+fn parse_uid_map<V, T, F>(value: V, parse_val: F) -> Result<HashMap<Box<Uid>, T>, ObjErr>
+where
+    V: DestructibleJsonValue,
+    F: Fn(V) -> Result<T, ObjErr>,
+{
+    parse_map(
+        value,
+        |k| {
+            Uid::new(k)
+                .map(|uid| Box::<Uid>::from(uid))
+                .map_err(|e| {
+                    DocumentError::root(TypeErrorOr::Other(ObjectFromJsonError::InvalidFieldValue(
+                        e.to_string().into_boxed_str(),
+                    )))
+                })
+        },
+        parse_val,
+    )
+}
+
+fn parse_dt_local_map<V, T, F>(value: V, parse_val: F) -> Result<HashMap<DateTime<Local>, T>, ObjErr>
+where
+    V: DestructibleJsonValue,
+    F: Fn(V) -> Result<T, ObjErr>,
+{
+    parse_map(
+        value,
+        |k| {
+            crate::parser::parse_full(crate::parser::local_date_time)(k).map_err(|_| {
+                DocumentError::root(TypeErrorOr::Other(ObjectFromJsonError::InvalidFieldValue(
+                    format!("invalid local datetime key: {k:?}").into_boxed_str(),
+                )))
+            })
+        },
+        parse_val,
+    )
+}
+
+fn parse_lang_map<V, T, F>(value: V, parse_val: F) -> Result<HashMap<LanguageTag, T>, ObjErr>
+where
+    V: DestructibleJsonValue,
+    F: Fn(V) -> Result<T, ObjErr>,
+{
+    parse_map(
+        value,
+        |k| {
+            LanguageTag::parse(k).map_err(|e| {
+                DocumentError::root(TypeErrorOr::Other(ObjectFromJsonError::InvalidFieldValue(
+                    e.to_string().into_boxed_str(),
+                )))
+            })
+        },
+        parse_val,
+    )
+}
+
+fn parse_status_code_vec<V: DestructibleJsonValue>(value: V) -> Result<Vec<StatusCode>, ObjErr> {
+    parse_vec(value, |elem| {
+        StatusCode::try_from_json(elem).map_err(|e| {
+            let error = match e {
+                TypeErrorOr::TypeError(t) => TypeErrorOr::TypeError(t),
+                TypeErrorOr::Other(se) => TypeErrorOr::Other(
+                    ObjectFromJsonError::InvalidFieldValue(se.to_string().into_boxed_str()),
+                ),
+            };
+            DocumentError::root(error)
+        })
+    })
+}
+
+fn patch_object_from_json<V: DestructibleJsonValue>(value: V) -> Result<PatchObject<V>, ObjErr> {
+    PatchObject::try_from_json(value).map_err(|e| match e {
+        TypeErrorOr::TypeError(t) => DocumentError::root(TypeErrorOr::TypeError(t)),
+        TypeErrorOr::Other(patch_err) => {
+            let doc = patch_err.into_document_error();
+            DocumentError {
+                path: doc.path,
+                error: TypeErrorOr::Other(ObjectFromJsonError::InvalidFieldValue(
+                    doc.error.to_string().into_boxed_str(),
+                )),
+            }
+        }
+    })
+}
+
+fn parse_str_vec<V: DestructibleJsonValue>(value: V) -> Result<Vec<String>, ObjErr> {
+    parse_vec(value, |elem| {
+        String::try_from_json(elem).map_err(|e| {
+            DocumentError::root(TypeErrorOr::TypeError(e))
+        })
+    })
+}
+
+// ============================================================================
+// Location TryFromJson
+// ============================================================================
+
+impl<V: DestructibleJsonValue> TryFromJson<V> for Location<V> {
+    type Error = ObjErr;
+
+    fn try_from_json(value: V) -> Result<Self, Self::Error> {
+        let obj = value
+            .try_into_object()
+            .map_err(TypeErrorOr::from)
+            .map_err(DocumentError::root)?;
+
+        let mut name_val: Option<String> = None;
+        let mut description_val: Option<String> = None;
+        let mut location_types_val: Option<HashSet<LocationType>> = None;
+        let mut relative_to_val: Option<Token<RelationValue>> = None;
+        let mut time_zone_val: Option<String> = None;
+        let mut coordinates_val: Option<Box<GeoUri>> = None;
+        let mut links_val: Option<HashMap<Box<Id>, Link<V>>> = None;
+        let mut vendor_parts: Vec<(Box<str>, V)> = Vec::new();
+
+        for (key, val) in obj.into_iter() {
+            let k = <V::Object as JsonObject>::key_into_string(key);
+            match k.as_str() {
+                "@type" => {}
+                "name" => {
+                    name_val = Some(String::try_from_json(val).map_err(|e| type_field_err("name", e))?);
+                }
+                "description" => {
+                    description_val = Some(String::try_from_json(val).map_err(|e| type_field_err("description", e))?);
+                }
+                "locationTypes" => {
+                    location_types_val = Some(
+                        HashSet::<LocationType>::try_from_json(val)
+                            .map_err(|e| doc_field_err("locationTypes", e))?,
+                    );
+                }
+                "relativeTo" => {
+                    relative_to_val = Some(
+                        Token::<RelationValue>::try_from_json(val)
+                            .map_err(|e| type_field_err("relativeTo", e))?,
+                    );
+                }
+                "timeZone" => {
+                    time_zone_val = Some(String::try_from_json(val).map_err(|e| type_field_err("timeZone", e))?);
+                }
+                "coordinates" => {
+                    coordinates_val = Some(
+                        Box::<GeoUri>::try_from_json(val).map_err(|e| field_err("coordinates", e))?,
+                    );
+                }
+                "links" => {
+                    links_val = Some(
+                        parse_id_map(val, Link::try_from_json)
+                            .map_err(|e| prepend("links", e))?,
+                    );
+                }
+                _ => vendor_parts.push((k.into_boxed_str(), val)),
+            }
+        }
+
+        let mut result = Location::new();
+        if let Some(v) = name_val { result.set_name(v); }
+        if let Some(v) = description_val { result.set_description(v); }
+        if let Some(v) = location_types_val { result.set_location_types(v); }
+        if let Some(v) = relative_to_val { result.set_relative_to(v); }
+        if let Some(v) = time_zone_val { result.set_time_zone(v); }
+        if let Some(v) = coordinates_val { result.set_coordinates(v); }
+        if let Some(v) = links_val { result.set_links(v); }
+        for (k, v) in vendor_parts {
+            if let Ok(vk) = VendorStr::new(k.as_ref()) { result.insert_vendor_property(vk.into(), v); }
+        }
+        Ok(result)
+    }
+}
+
+// ============================================================================
+// VirtualLocation TryFromJson
+// ============================================================================
+
+impl<V: DestructibleJsonValue> TryFromJson<V> for VirtualLocation<V> {
+    type Error = ObjErr;
+
+    fn try_from_json(value: V) -> Result<Self, Self::Error> {
+        let obj = value
+            .try_into_object()
+            .map_err(TypeErrorOr::from)
+            .map_err(DocumentError::root)?;
+
+        let mut name_val: Option<String> = None;
+        let mut description_val: Option<String> = None;
+        let mut uri_val: Option<Box<Uri>> = None;
+        let mut features_val: Option<HashSet<Token<VirtualLocationFeature>>> = None;
+        let mut vendor_parts: Vec<(Box<str>, V)> = Vec::new();
+
+        for (key, val) in obj.into_iter() {
+            let k = <V::Object as JsonObject>::key_into_string(key);
+            match k.as_str() {
+                "@type" => {}
+                "name" => {
+                    name_val = Some(String::try_from_json(val).map_err(|e| type_field_err("name", e))?);
+                }
+                "description" => {
+                    description_val = Some(String::try_from_json(val).map_err(|e| type_field_err("description", e))?);
+                }
+                "uri" => {
+                    uri_val = Some(Box::<Uri>::try_from_json(val).map_err(|e| field_err("uri", e))?);
+                }
+                "features" => {
+                    features_val = Some(
+                        HashSet::<Token<VirtualLocationFeature>>::try_from_json(val)
+                            .map_err(|e| doc_field_err("features", e))?,
+                    );
+                }
+                _ => vendor_parts.push((k.into_boxed_str(), val)),
+            }
+        }
+
+        let uri = uri_val.ok_or_else(|| missing("uri"))?;
+        let mut result = VirtualLocation::new(uri);
+        if let Some(v) = name_val { result.set_name(v); }
+        if let Some(v) = description_val { result.set_description(v); }
+        if let Some(v) = features_val { result.set_features(v); }
+        for (k, v) in vendor_parts {
+            if let Ok(vk) = VendorStr::new(k.as_ref()) { result.insert_vendor_property(vk.into(), v); }
+        }
+        Ok(result)
+    }
+}
+
+// ============================================================================
+// Alert TryFromJson
+// ============================================================================
+
+impl<V: DestructibleJsonValue> TryFromJson<V> for Alert<V> {
+    type Error = ObjErr;
+
+    fn try_from_json(value: V) -> Result<Self, Self::Error> {
+        let obj = value
+            .try_into_object()
+            .map_err(TypeErrorOr::from)
+            .map_err(DocumentError::root)?;
+
+        let mut trigger_val: Option<Trigger<V>> = None;
+        let mut acknowledged_val: Option<DateTime<Utc>> = None;
+        let mut related_to_val: Option<HashMap<Box<str>, Relation<V>>> = None;
+        let mut action_val: Option<Token<AlertAction>> = None;
+        let mut vendor_parts: Vec<(Box<str>, V)> = Vec::new();
+
+        for (key, val) in obj.into_iter() {
+            let k = <V::Object as JsonObject>::key_into_string(key);
+            match k.as_str() {
+                "@type" => {}
+                "trigger" => {
+                    trigger_val = Some(Trigger::try_from_json(val).map_err(|e| prepend("trigger", e))?);
+                }
+                "acknowledged" => {
+                    acknowledged_val = Some(
+                        DateTime::<Utc>::try_from_json(val).map_err(|e| field_err("acknowledged", e))?,
+                    );
+                }
+                "relatedTo" => {
+                    related_to_val = Some(
+                        parse_map(
+                            val,
+                            |k| Ok(Box::<str>::from(k)),
+                            Relation::try_from_json,
+                        )
+                        .map_err(|e| prepend("relatedTo", e))?,
+                    );
+                }
+                "action" => {
+                    action_val = Some(
+                        Token::<AlertAction>::try_from_json(val)
+                            .map_err(|e| type_field_err("action", e))?,
+                    );
+                }
+                _ => vendor_parts.push((k.into_boxed_str(), val)),
+            }
+        }
+
+        let trigger = trigger_val.ok_or_else(|| missing("trigger"))?;
+        let mut result = Alert::new(trigger);
+        if let Some(v) = acknowledged_val { result.set_acknowledged(v); }
+        if let Some(v) = related_to_val { result.set_related_to(v); }
+        if let Some(v) = action_val { result.set_action(v); }
+        for (k, v) in vendor_parts {
+            if let Ok(vk) = VendorStr::new(k.as_ref()) { result.insert_vendor_property(vk.into(), v); }
+        }
+        Ok(result)
+    }
+}
+
+// ============================================================================
+// TimeZoneRule TryFromJson
+// ============================================================================
+
+impl<V: DestructibleJsonValue> TryFromJson<V> for TimeZoneRule<V> {
+    type Error = ObjErr;
+
+    fn try_from_json(value: V) -> Result<Self, Self::Error> {
+        let obj = value
+            .try_into_object()
+            .map_err(TypeErrorOr::from)
+            .map_err(DocumentError::root)?;
+
+        let mut start_val: Option<DateTime<Local>> = None;
+        let mut offset_from_val: Option<UtcOffset> = None;
+        let mut offset_to_val: Option<UtcOffset> = None;
+        let mut recurrence_rules_val: Option<Vec<RRule>> = None;
+        let mut recurrence_overrides_val: Option<HashMap<DateTime<Local>, PatchObject<V>>> = None;
+        let mut names_val: Option<HashSet<String>> = None;
+        let mut comments_val: Option<Vec<String>> = None;
+        let mut vendor_parts: Vec<(Box<str>, V)> = Vec::new();
+
+        for (key, val) in obj.into_iter() {
+            let k = <V::Object as JsonObject>::key_into_string(key);
+            match k.as_str() {
+                "@type" => {}
+                "start" => {
+                    start_val = Some(
+                        DateTime::<Local>::try_from_json(val).map_err(|e| field_err("start", e))?,
+                    );
+                }
+                "offsetFrom" => {
+                    offset_from_val = Some(
+                        UtcOffset::try_from_json(val).map_err(|e| field_err("offsetFrom", e))?,
+                    );
+                }
+                "offsetTo" => {
+                    offset_to_val = Some(
+                        UtcOffset::try_from_json(val).map_err(|e| field_err("offsetTo", e))?,
+                    );
+                }
+                "recurrenceRules" => {
+                    recurrence_rules_val = Some(
+                        rrule_vec(val).map_err(|e| prepend("recurrenceRules", e))?,
+                    );
+                }
+                "recurrenceOverrides" => {
+                    recurrence_overrides_val = Some(
+                        parse_dt_local_map(val, patch_object_from_json)
+                            .map_err(|e| prepend("recurrenceOverrides", e))?,
+                    );
+                }
+                "names" => {
+                    names_val = Some(
+                        HashSet::<String>::try_from_json(val)
+                            .map_err(|e| doc_field_err("names", e))?,
+                    );
+                }
+                "comments" => {
+                    comments_val = Some(
+                        parse_str_vec(val).map_err(|e| prepend("comments", e))?,
+                    );
+                }
+                _ => vendor_parts.push((k.into_boxed_str(), val)),
+            }
+        }
+
+        let start = start_val.ok_or_else(|| missing("start"))?;
+        let offset_from = offset_from_val.ok_or_else(|| missing("offsetFrom"))?;
+        let offset_to = offset_to_val.ok_or_else(|| missing("offsetTo"))?;
+        let mut result = TimeZoneRule::new(start, offset_from, offset_to);
+        if let Some(v) = recurrence_rules_val { result.set_recurrence_rules(v); }
+        if let Some(v) = recurrence_overrides_val { result.set_recurrence_overrides(v); }
+        if let Some(v) = names_val { result.set_names(v); }
+        if let Some(v) = comments_val { result.set_comments(v); }
+        for (k, v) in vendor_parts {
+            if let Ok(vk) = VendorStr::new(k.as_ref()) { result.insert_vendor_property(vk.into(), v); }
+        }
+        Ok(result)
+    }
+}
+
+// ============================================================================
+// TimeZone TryFromJson
+// ============================================================================
+
+impl<V: DestructibleJsonValue> TryFromJson<V> for TimeZone<V> {
+    type Error = ObjErr;
+
+    fn try_from_json(value: V) -> Result<Self, Self::Error> {
+        let obj = value
+            .try_into_object()
+            .map_err(TypeErrorOr::from)
+            .map_err(DocumentError::root)?;
+
+        let mut tz_id_val: Option<String> = None;
+        let mut updated_val: Option<DateTime<Utc>> = None;
+        let mut url_val: Option<Box<Uri>> = None;
+        let mut valid_until_val: Option<DateTime<Utc>> = None;
+        let mut aliases_val: Option<HashSet<Box<str>>> = None;
+        let mut standard_val: Option<Vec<TimeZoneRule<V>>> = None;
+        let mut daylight_val: Option<Vec<TimeZoneRule<V>>> = None;
+        let mut vendor_parts: Vec<(Box<str>, V)> = Vec::new();
+
+        for (key, val) in obj.into_iter() {
+            let k = <V::Object as JsonObject>::key_into_string(key);
+            match k.as_str() {
+                "@type" => {}
+                "tzId" => {
+                    tz_id_val = Some(String::try_from_json(val).map_err(|e| type_field_err("tzId", e))?);
+                }
+                "updated" => {
+                    updated_val = Some(
+                        DateTime::<Utc>::try_from_json(val).map_err(|e| field_err("updated", e))?,
+                    );
+                }
+                "url" => {
+                    url_val = Some(Box::<Uri>::try_from_json(val).map_err(|e| field_err("url", e))?);
+                }
+                "validUntil" => {
+                    valid_until_val = Some(
+                        DateTime::<Utc>::try_from_json(val).map_err(|e| field_err("validUntil", e))?,
+                    );
+                }
+                "aliases" => {
+                    aliases_val = Some(
+                        parse_str_set(val).map_err(|e| prepend("aliases", e))?,
+                    );
+                }
+                "standard" => {
+                    standard_val = Some(
+                        parse_vec(val, TimeZoneRule::try_from_json)
+                            .map_err(|e| prepend("standard", e))?,
+                    );
+                }
+                "daylight" => {
+                    daylight_val = Some(
+                        parse_vec(val, TimeZoneRule::try_from_json)
+                            .map_err(|e| prepend("daylight", e))?,
+                    );
+                }
+                _ => vendor_parts.push((k.into_boxed_str(), val)),
+            }
+        }
+
+        let tz_id = tz_id_val.ok_or_else(|| missing("tzId"))?;
+        let mut result = TimeZone::new(tz_id);
+        if let Some(v) = updated_val { result.set_updated(v); }
+        if let Some(v) = url_val { result.set_url(v); }
+        if let Some(v) = valid_until_val { result.set_valid_until(v); }
+        if let Some(v) = aliases_val { result.set_aliases(v); }
+        if let Some(v) = standard_val { result.set_standard(v); }
+        if let Some(v) = daylight_val { result.set_daylight(v); }
+        for (k, v) in vendor_parts {
+            if let Ok(vk) = VendorStr::new(k.as_ref()) { result.insert_vendor_property(vk.into(), v); }
+        }
+        Ok(result)
+    }
+}
+
+// ============================================================================
+// Participant TryFromJson
+// ============================================================================
+
+fn parse_participant_common<V: DestructibleJsonValue>(
+    k: &str,
+    val: V,
+    name_val: &mut Option<String>,
+    email_val: &mut Option<Box<EmailAddr>>,
+    description_val: &mut Option<String>,
+    send_to_val: &mut Option<SendToParticipant>,
+    kind_val: &mut Option<Token<ParticipantKind>>,
+    roles_val: &mut Option<HashSet<Token<ParticipantRole>>>,
+    location_id_val: &mut Option<Box<Id>>,
+    language_val: &mut Option<LanguageTag>,
+    participation_status_val: &mut Option<Token<ParticipationStatus>>,
+    participation_comment_val: &mut Option<String>,
+    expect_reply_val: &mut Option<bool>,
+    schedule_agent_val: &mut Option<Token<ScheduleAgent>>,
+    schedule_force_send_val: &mut Option<bool>,
+    schedule_sequence_val: &mut Option<UnsignedInt>,
+    schedule_status_val: &mut Option<Vec<StatusCode>>,
+    schedule_updated_val: &mut Option<DateTime<Utc>>,
+    sent_by_val: &mut Option<Box<EmailAddr>>,
+    invited_by_val: &mut Option<Box<Id>>,
+    delegated_to_val: &mut Option<HashSet<Box<Id>>>,
+    delegated_from_val: &mut Option<HashSet<Box<Id>>>,
+    member_of_val: &mut Option<HashSet<Box<Id>>>,
+    links_val: &mut Option<HashMap<Box<Id>, Link<V>>>,
+    vendor_parts: &mut Vec<(Box<str>, V)>,
+) -> Result<bool, ObjErr> {
+    match k {
+        "@type" => {}
+        "name" => {
+            *name_val = Some(String::try_from_json(val).map_err(|e| type_field_err("name", e))?);
+        }
+        "email" => {
+            *email_val = Some(Box::<EmailAddr>::try_from_json(val).map_err(|e| field_err("email", e))?);
+        }
+        "description" => {
+            *description_val = Some(String::try_from_json(val).map_err(|e| type_field_err("description", e))?);
+        }
+        "sendTo" => {
+            *send_to_val = Some(SendToParticipant::try_from_json(val).map_err(|e| prepend("sendTo", e))?);
+        }
+        "kind" => {
+            *kind_val = Some(Token::<ParticipantKind>::try_from_json(val).map_err(|e| type_field_err("kind", e))?);
+        }
+        "roles" => {
+            *roles_val = Some(
+                HashSet::<Token<ParticipantRole>>::try_from_json(val)
+                    .map_err(|e| doc_field_err("roles", e))?,
+            );
+        }
+        "locationId" => {
+            *location_id_val = Some(Box::<Id>::try_from_json(val).map_err(|e| field_err("locationId", e))?);
+        }
+        "language" => {
+            *language_val = Some(LanguageTag::try_from_json(val).map_err(|e| field_err("language", e))?);
+        }
+        "participationStatus" => {
+            *participation_status_val = Some(
+                Token::<ParticipationStatus>::try_from_json(val)
+                    .map_err(|e| type_field_err("participationStatus", e))?,
+            );
+        }
+        "participationComment" => {
+            *participation_comment_val = Some(
+                String::try_from_json(val).map_err(|e| type_field_err("participationComment", e))?,
+            );
+        }
+        "expectReply" => {
+            *expect_reply_val = Some(bool::try_from_json(val).map_err(|e| type_field_err("expectReply", e))?);
+        }
+        "scheduleAgent" => {
+            *schedule_agent_val = Some(
+                Token::<ScheduleAgent>::try_from_json(val)
+                    .map_err(|e| type_field_err("scheduleAgent", e))?,
+            );
+        }
+        "scheduleForceSend" => {
+            *schedule_force_send_val = Some(
+                bool::try_from_json(val).map_err(|e| type_field_err("scheduleForceSend", e))?,
+            );
+        }
+        "scheduleSequence" => {
+            *schedule_sequence_val = Some(
+                UnsignedInt::try_from_json(val).map_err(|e| field_err("scheduleSequence", e))?,
+            );
+        }
+        "scheduleStatus" => {
+            *schedule_status_val = Some(
+                parse_status_code_vec(val).map_err(|e| prepend("scheduleStatus", e))?,
+            );
+        }
+        "scheduleUpdated" => {
+            *schedule_updated_val = Some(
+                DateTime::<Utc>::try_from_json(val).map_err(|e| field_err("scheduleUpdated", e))?,
+            );
+        }
+        "sentBy" => {
+            *sent_by_val = Some(Box::<EmailAddr>::try_from_json(val).map_err(|e| field_err("sentBy", e))?);
+        }
+        "invitedBy" => {
+            *invited_by_val = Some(Box::<Id>::try_from_json(val).map_err(|e| field_err("invitedBy", e))?);
+        }
+        "delegatedTo" => {
+            *delegated_to_val = Some(parse_id_set(val).map_err(|e| prepend("delegatedTo", e))?);
+        }
+        "delegatedFrom" => {
+            *delegated_from_val = Some(parse_id_set(val).map_err(|e| prepend("delegatedFrom", e))?);
+        }
+        "memberOf" => {
+            *member_of_val = Some(parse_id_set(val).map_err(|e| prepend("memberOf", e))?);
+        }
+        "links" => {
+            *links_val = Some(
+                parse_id_map(val, Link::try_from_json)
+                    .map_err(|e| prepend("links", e))?,
+            );
+        }
+        _ => {
+            vendor_parts.push((k.to_string().into_boxed_str(), val));
+            return Ok(false);
+        }
+    }
+    Ok(true)
+}
+
+impl<V: DestructibleJsonValue> TryFromJson<V> for Participant<V> {
+    type Error = ObjErr;
+
+    fn try_from_json(value: V) -> Result<Self, Self::Error> {
+        let obj = value
+            .try_into_object()
+            .map_err(TypeErrorOr::from)
+            .map_err(DocumentError::root)?;
+
+        let mut name_val: Option<String> = None;
+        let mut email_val: Option<Box<EmailAddr>> = None;
+        let mut description_val: Option<String> = None;
+        let mut send_to_val: Option<SendToParticipant> = None;
+        let mut kind_val: Option<Token<ParticipantKind>> = None;
+        let mut roles_val: Option<HashSet<Token<ParticipantRole>>> = None;
+        let mut location_id_val: Option<Box<Id>> = None;
+        let mut language_val: Option<LanguageTag> = None;
+        let mut participation_status_val: Option<Token<ParticipationStatus>> = None;
+        let mut participation_comment_val: Option<String> = None;
+        let mut expect_reply_val: Option<bool> = None;
+        let mut schedule_agent_val: Option<Token<ScheduleAgent>> = None;
+        let mut schedule_force_send_val: Option<bool> = None;
+        let mut schedule_sequence_val: Option<UnsignedInt> = None;
+        let mut schedule_status_val: Option<Vec<StatusCode>> = None;
+        let mut schedule_updated_val: Option<DateTime<Utc>> = None;
+        let mut sent_by_val: Option<Box<EmailAddr>> = None;
+        let mut invited_by_val: Option<Box<Id>> = None;
+        let mut delegated_to_val: Option<HashSet<Box<Id>>> = None;
+        let mut delegated_from_val: Option<HashSet<Box<Id>>> = None;
+        let mut member_of_val: Option<HashSet<Box<Id>>> = None;
+        let mut links_val: Option<HashMap<Box<Id>, Link<V>>> = None;
+        let mut vendor_parts: Vec<(Box<str>, V)> = Vec::new();
+
+        for (key, val) in obj.into_iter() {
+            let k = <V::Object as JsonObject>::key_into_string(key);
+            parse_participant_common(
+                k.as_str(), val,
+                &mut name_val, &mut email_val, &mut description_val, &mut send_to_val,
+                &mut kind_val, &mut roles_val, &mut location_id_val, &mut language_val,
+                &mut participation_status_val, &mut participation_comment_val,
+                &mut expect_reply_val, &mut schedule_agent_val, &mut schedule_force_send_val,
+                &mut schedule_sequence_val, &mut schedule_status_val, &mut schedule_updated_val,
+                &mut sent_by_val, &mut invited_by_val, &mut delegated_to_val,
+                &mut delegated_from_val, &mut member_of_val, &mut links_val,
+                &mut vendor_parts,
+            )?;
+        }
+
+        let mut result = Participant::new();
+        if let Some(v) = name_val { result.set_name(v); }
+        if let Some(v) = email_val { result.set_email(v); }
+        if let Some(v) = description_val { result.set_description(v); }
+        if let Some(v) = send_to_val { result.set_send_to(v); }
+        if let Some(v) = kind_val { result.set_kind(v); }
+        if let Some(v) = roles_val { result.set_roles(v); }
+        if let Some(v) = location_id_val { result.set_location_id(v); }
+        if let Some(v) = language_val { result.set_language(v); }
+        if let Some(v) = participation_status_val { result.set_participation_status(v); }
+        if let Some(v) = participation_comment_val { result.set_participation_comment(v); }
+        if let Some(v) = expect_reply_val { result.set_expect_reply(v); }
+        if let Some(v) = schedule_agent_val { result.set_schedule_agent(v); }
+        if let Some(v) = schedule_force_send_val { result.set_schedule_force_send(v); }
+        if let Some(v) = schedule_sequence_val { result.set_schedule_sequence(v); }
+        if let Some(v) = schedule_status_val { result.set_schedule_status(v); }
+        if let Some(v) = schedule_updated_val { result.set_schedule_updated(v); }
+        if let Some(v) = sent_by_val { result.set_sent_by(v); }
+        if let Some(v) = invited_by_val { result.set_invited_by(v); }
+        if let Some(v) = delegated_to_val { result.set_delegated_to(v); }
+        if let Some(v) = delegated_from_val { result.set_delegated_from(v); }
+        if let Some(v) = member_of_val { result.set_member_of(v); }
+        if let Some(v) = links_val { result.set_links(v); }
+        for (k, v) in vendor_parts {
+            if let Ok(vk) = VendorStr::new(k.as_ref()) { result.insert_vendor_property(vk.into(), v); }
+        }
+        Ok(result)
+    }
+}
+
+// ============================================================================
+// TaskParticipant TryFromJson
+// ============================================================================
+
+impl<V: DestructibleJsonValue> TryFromJson<V> for TaskParticipant<V> {
+    type Error = ObjErr;
+
+    fn try_from_json(value: V) -> Result<Self, Self::Error> {
+        let obj = value
+            .try_into_object()
+            .map_err(TypeErrorOr::from)
+            .map_err(DocumentError::root)?;
+
+        let mut name_val: Option<String> = None;
+        let mut email_val: Option<Box<EmailAddr>> = None;
+        let mut description_val: Option<String> = None;
+        let mut send_to_val: Option<SendToParticipant> = None;
+        let mut kind_val: Option<Token<ParticipantKind>> = None;
+        let mut roles_val: Option<HashSet<Token<ParticipantRole>>> = None;
+        let mut location_id_val: Option<Box<Id>> = None;
+        let mut language_val: Option<LanguageTag> = None;
+        let mut participation_status_val: Option<Token<ParticipationStatus>> = None;
+        let mut participation_comment_val: Option<String> = None;
+        let mut expect_reply_val: Option<bool> = None;
+        let mut schedule_agent_val: Option<Token<ScheduleAgent>> = None;
+        let mut schedule_force_send_val: Option<bool> = None;
+        let mut schedule_sequence_val: Option<UnsignedInt> = None;
+        let mut schedule_status_val: Option<Vec<StatusCode>> = None;
+        let mut schedule_updated_val: Option<DateTime<Utc>> = None;
+        let mut sent_by_val: Option<Box<EmailAddr>> = None;
+        let mut invited_by_val: Option<Box<Id>> = None;
+        let mut delegated_to_val: Option<HashSet<Box<Id>>> = None;
+        let mut delegated_from_val: Option<HashSet<Box<Id>>> = None;
+        let mut member_of_val: Option<HashSet<Box<Id>>> = None;
+        let mut links_val: Option<HashMap<Box<Id>, Link<V>>> = None;
+        let mut progress_val: Option<Token<TaskProgress>> = None;
+        let mut progress_updated_val: Option<DateTime<Utc>> = None;
+        let mut percent_complete_val: Option<Percent> = None;
+        let mut vendor_parts: Vec<(Box<str>, V)> = Vec::new();
+
+        for (key, val) in obj.into_iter() {
+            let k = <V::Object as JsonObject>::key_into_string(key);
+            let consumed = parse_participant_common(
+                k.as_str(), val,
+                &mut name_val, &mut email_val, &mut description_val, &mut send_to_val,
+                &mut kind_val, &mut roles_val, &mut location_id_val, &mut language_val,
+                &mut participation_status_val, &mut participation_comment_val,
+                &mut expect_reply_val, &mut schedule_agent_val, &mut schedule_force_send_val,
+                &mut schedule_sequence_val, &mut schedule_status_val, &mut schedule_updated_val,
+                &mut sent_by_val, &mut invited_by_val, &mut delegated_to_val,
+                &mut delegated_from_val, &mut member_of_val, &mut links_val,
+                &mut vendor_parts,
+            );
+            // parse_participant_common moves val into vendor_parts on unknown key; skip task-specific
+            let _ = consumed;
+        }
+
+        // Task-specific fields were put in vendor_parts; pull them out
+        let mut remaining: Vec<(Box<str>, V)> = Vec::new();
+        // We can't easily re-parse from vendor_parts since val was moved.
+        // Instead, handle task-specific fields separately in a second pass.
+        // The approach: collect task-specific fields before calling parse_participant_common.
+        // Since we already iterated, we need a different approach for TaskParticipant.
+        // vendor_parts contains unknowns + task-specific. We store task-specific ones there.
+        for (k, v) in vendor_parts {
+            match k.as_ref() {
+                "progress" => {
+                    progress_val = Some(
+                        Token::<TaskProgress>::try_from_json(v)
+                            .map_err(|e| type_field_err("progress", e))?,
+                    );
+                }
+                "progressUpdated" => {
+                    progress_updated_val = Some(
+                        DateTime::<Utc>::try_from_json(v).map_err(|e| field_err("progressUpdated", e))?,
+                    );
+                }
+                "percentComplete" => {
+                    percent_complete_val = Some(
+                        Percent::try_from_json(v).map_err(|e| field_err("percentComplete", e))?,
+                    );
+                }
+                _ => remaining.push((k, v)),
+            }
+        }
+
+        let mut result = TaskParticipant::new();
+        if let Some(v) = name_val { result.set_name(v); }
+        if let Some(v) = email_val { result.set_email(v); }
+        if let Some(v) = description_val { result.set_description(v); }
+        if let Some(v) = send_to_val { result.set_send_to(v); }
+        if let Some(v) = kind_val { result.set_kind(v); }
+        if let Some(v) = roles_val { result.set_roles(v); }
+        if let Some(v) = location_id_val { result.set_location_id(v); }
+        if let Some(v) = language_val { result.set_language(v); }
+        if let Some(v) = participation_status_val { result.set_participation_status(v); }
+        if let Some(v) = participation_comment_val { result.set_participation_comment(v); }
+        if let Some(v) = expect_reply_val { result.set_expect_reply(v); }
+        if let Some(v) = schedule_agent_val { result.set_schedule_agent(v); }
+        if let Some(v) = schedule_force_send_val { result.set_schedule_force_send(v); }
+        if let Some(v) = schedule_sequence_val { result.set_schedule_sequence(v); }
+        if let Some(v) = schedule_status_val { result.set_schedule_status(v); }
+        if let Some(v) = schedule_updated_val { result.set_schedule_updated(v); }
+        if let Some(v) = sent_by_val { result.set_sent_by(v); }
+        if let Some(v) = invited_by_val { result.set_invited_by(v); }
+        if let Some(v) = delegated_to_val { result.set_delegated_to(v); }
+        if let Some(v) = delegated_from_val { result.set_delegated_from(v); }
+        if let Some(v) = member_of_val { result.set_member_of(v); }
+        if let Some(v) = links_val { result.set_links(v); }
+        if let Some(v) = progress_val { result.set_progress(v); }
+        if let Some(v) = progress_updated_val { result.set_progress_updated(v); }
+        if let Some(v) = percent_complete_val { result.set_percent_complete(v); }
+        for (k, v) in remaining {
+            if let Ok(vk) = VendorStr::new(k.as_ref()) { result.insert_vendor_property(vk.into(), v); }
+        }
+        Ok(result)
+    }
+}
+
+// ============================================================================
+// Shared field parsers for Event and Task
+// ============================================================================
+
+fn fill_event_from_fields<V: DestructibleJsonValue>(
+    fields: Vec<(String, V)>,
+    start_val: &mut Option<DateTime<Local>>,
+    duration_val: &mut Option<Duration>,
+    status_val: &mut Option<Token<EventStatus>>,
+    uid_val: &mut Option<Box<Uid>>,
+    related_to_val: &mut Option<HashMap<Box<Uid>, Relation<V>>>,
+    prod_id_val: &mut Option<String>,
+    created_val: &mut Option<DateTime<Utc>>,
+    updated_val: &mut Option<DateTime<Utc>>,
+    sequence_val: &mut Option<UnsignedInt>,
+    method_val: &mut Option<Token<Method>>,
+    title_val: &mut Option<String>,
+    description_val: &mut Option<String>,
+    description_content_type_val: &mut Option<String>,
+    show_without_time_val: &mut Option<bool>,
+    locations_val: &mut Option<HashMap<Box<Id>, Location<V>>>,
+    virtual_locations_val: &mut Option<HashMap<Box<Id>, VirtualLocation<V>>>,
+    links_val: &mut Option<HashMap<Box<Id>, Link<V>>>,
+    locale_val: &mut Option<LanguageTag>,
+    keywords_val: &mut Option<HashSet<String>>,
+    categories_val: &mut Option<HashSet<String>>,
+    color_val: &mut Option<Color>,
+    recurrence_id_val: &mut Option<DateTime<Local>>,
+    recurrence_id_time_zone_val: &mut Option<String>,
+    recurrence_rules_val: &mut Option<Vec<RRule>>,
+    excluded_recurrence_rules_val: &mut Option<Vec<RRule>>,
+    recurrence_overrides_val: &mut Option<HashMap<DateTime<Local>, PatchObject<V>>>,
+    excluded_val: &mut Option<bool>,
+    priority_val: &mut Option<Priority>,
+    free_busy_status_val: &mut Option<Token<FreeBusyStatus>>,
+    privacy_val: &mut Option<Token<Privacy>>,
+    reply_to_val: &mut Option<ReplyTo>,
+    sent_by_val: &mut Option<Box<CalAddress>>,
+    participants_val: &mut Option<HashMap<Box<Id>, Participant<V>>>,
+    request_status_val: &mut Option<RequestStatus>,
+    use_default_alerts_val: &mut Option<bool>,
+    alerts_val: &mut Option<HashMap<Box<Id>, Alert<V>>>,
+    localizations_val: &mut Option<HashMap<LanguageTag, PatchObject<V>>>,
+    time_zone_val: &mut Option<String>,
+    time_zones_val: &mut Option<HashMap<Box<CustomTimeZoneId>, TimeZone<V>>>,
+    vendor_parts: &mut Vec<(Box<str>, V)>,
+) -> Result<(), ObjErr> {
+    for (k, val) in fields {
+        match k.as_str() {
+            "@type" => {}
+            "start" => {
+                *start_val = Some(DateTime::<Local>::try_from_json(val).map_err(|e| field_err("start", e))?);
+            }
+            "duration" => {
+                *duration_val = Some(Duration::try_from_json(val).map_err(|e| field_err("duration", e))?);
+            }
+            "status" => {
+                *status_val = Some(Token::<EventStatus>::try_from_json(val).map_err(|e| type_field_err("status", e))?);
+            }
+            "uid" => {
+                *uid_val = Some(Box::<Uid>::try_from_json(val).map_err(|e| field_err("uid", e))?);
+            }
+            "relatedTo" => {
+                *related_to_val = Some(
+                    parse_uid_map(val, Relation::try_from_json)
+                        .map_err(|e| prepend("relatedTo", e))?,
+                );
+            }
+            "prodId" => {
+                *prod_id_val = Some(String::try_from_json(val).map_err(|e| type_field_err("prodId", e))?);
+            }
+            "created" => {
+                *created_val = Some(DateTime::<Utc>::try_from_json(val).map_err(|e| field_err("created", e))?);
+            }
+            "updated" => {
+                *updated_val = Some(DateTime::<Utc>::try_from_json(val).map_err(|e| field_err("updated", e))?);
+            }
+            "sequence" => {
+                *sequence_val = Some(UnsignedInt::try_from_json(val).map_err(|e| field_err("sequence", e))?);
+            }
+            "method" => {
+                *method_val = Some(Token::<Method>::try_from_json(val).map_err(|e| type_field_err("method", e))?);
+            }
+            "title" => {
+                *title_val = Some(String::try_from_json(val).map_err(|e| type_field_err("title", e))?);
+            }
+            "description" => {
+                *description_val = Some(String::try_from_json(val).map_err(|e| type_field_err("description", e))?);
+            }
+            "descriptionContentType" => {
+                *description_content_type_val = Some(String::try_from_json(val).map_err(|e| type_field_err("descriptionContentType", e))?);
+            }
+            "showWithoutTime" => {
+                *show_without_time_val = Some(bool::try_from_json(val).map_err(|e| type_field_err("showWithoutTime", e))?);
+            }
+            "locations" => {
+                *locations_val = Some(
+                    parse_id_map(val, Location::try_from_json)
+                        .map_err(|e| prepend("locations", e))?,
+                );
+            }
+            "virtualLocations" => {
+                *virtual_locations_val = Some(
+                    parse_id_map(val, VirtualLocation::try_from_json)
+                        .map_err(|e| prepend("virtualLocations", e))?,
+                );
+            }
+            "links" => {
+                *links_val = Some(
+                    parse_id_map(val, Link::try_from_json)
+                        .map_err(|e| prepend("links", e))?,
+                );
+            }
+            "locale" => {
+                *locale_val = Some(LanguageTag::try_from_json(val).map_err(|e| field_err("locale", e))?);
+            }
+            "keywords" => {
+                *keywords_val = Some(
+                    HashSet::<String>::try_from_json(val)
+                        .map_err(|e| doc_field_err("keywords", e))?,
+                );
+            }
+            "categories" => {
+                *categories_val = Some(
+                    HashSet::<String>::try_from_json(val)
+                        .map_err(|e| doc_field_err("categories", e))?,
+                );
+            }
+            "color" => {
+                *color_val = Some(Color::try_from_json(val).map_err(|e| field_err("color", e))?);
+            }
+            "recurrenceId" => {
+                *recurrence_id_val = Some(DateTime::<Local>::try_from_json(val).map_err(|e| field_err("recurrenceId", e))?);
+            }
+            "recurrenceIdTimeZone" => {
+                *recurrence_id_time_zone_val = Some(String::try_from_json(val).map_err(|e| type_field_err("recurrenceIdTimeZone", e))?);
+            }
+            "recurrenceRules" => {
+                *recurrence_rules_val = Some(rrule_vec(val).map_err(|e| prepend("recurrenceRules", e))?);
+            }
+            "excludedRecurrenceRules" => {
+                *excluded_recurrence_rules_val = Some(rrule_vec(val).map_err(|e| prepend("excludedRecurrenceRules", e))?);
+            }
+            "recurrenceOverrides" => {
+                *recurrence_overrides_val = Some(
+                    parse_dt_local_map(val, patch_object_from_json)
+                        .map_err(|e| prepend("recurrenceOverrides", e))?,
+                );
+            }
+            "excluded" => {
+                *excluded_val = Some(bool::try_from_json(val).map_err(|e| type_field_err("excluded", e))?);
+            }
+            "priority" => {
+                *priority_val = Some(Priority::try_from_json(val).map_err(|e| field_err("priority", e))?);
+            }
+            "freeBusyStatus" => {
+                *free_busy_status_val = Some(Token::<FreeBusyStatus>::try_from_json(val).map_err(|e| type_field_err("freeBusyStatus", e))?);
+            }
+            "privacy" => {
+                *privacy_val = Some(Token::<Privacy>::try_from_json(val).map_err(|e| type_field_err("privacy", e))?);
+            }
+            "replyTo" => {
+                *reply_to_val = Some(ReplyTo::try_from_json(val).map_err(|e| prepend("replyTo", e))?);
+            }
+            "sentBy" => {
+                *sent_by_val = Some(Box::<CalAddress>::try_from_json(val).map_err(|e| field_err("sentBy", e))?);
+            }
+            "participants" => {
+                *participants_val = Some(
+                    parse_id_map(val, Participant::try_from_json)
+                        .map_err(|e| prepend("participants", e))?,
+                );
+            }
+            "requestStatus" => {
+                *request_status_val = Some(RequestStatus::try_from_json(val).map_err(|e| field_err("requestStatus", e))?);
+            }
+            "useDefaultAlerts" => {
+                *use_default_alerts_val = Some(bool::try_from_json(val).map_err(|e| type_field_err("useDefaultAlerts", e))?);
+            }
+            "alerts" => {
+                *alerts_val = Some(
+                    parse_id_map(val, Alert::try_from_json)
+                        .map_err(|e| prepend("alerts", e))?,
+                );
+            }
+            "localizations" => {
+                *localizations_val = Some(
+                    parse_lang_map(val, patch_object_from_json)
+                        .map_err(|e| prepend("localizations", e))?,
+                );
+            }
+            "timeZone" => {
+                *time_zone_val = Some(String::try_from_json(val).map_err(|e| type_field_err("timeZone", e))?);
+            }
+            "timeZones" => {
+                *time_zones_val = Some(
+                    parse_tz_map(val, TimeZone::try_from_json)
+                        .map_err(|e| prepend("timeZones", e))?,
+                );
+            }
+            _ => vendor_parts.push((k.into_boxed_str(), val)),
+        }
+    }
+    Ok(())
+}
+
+// ============================================================================
+// Event TryFromJson
+// ============================================================================
+
+impl<V: DestructibleJsonValue> TryFromJson<V> for Event<V> {
+    type Error = ObjErr;
+
+    fn try_from_json(value: V) -> Result<Self, Self::Error> {
+        let obj = value
+            .try_into_object()
+            .map_err(TypeErrorOr::from)
+            .map_err(DocumentError::root)?;
+
+        let fields: Vec<(String, V)> = obj
+            .into_iter()
+            .map(|(key, val)| (<V::Object as JsonObject>::key_into_string(key), val))
+            .collect();
+
+        event_from_fields(fields)
+    }
+}
+
+fn event_from_fields<V: DestructibleJsonValue>(fields: Vec<(String, V)>) -> Result<Event<V>, ObjErr> {
+    let mut start_val: Option<DateTime<Local>> = None;
+    let mut duration_val: Option<Duration> = None;
+    let mut status_val: Option<Token<EventStatus>> = None;
+    let mut uid_val: Option<Box<Uid>> = None;
+    let mut related_to_val: Option<HashMap<Box<Uid>, Relation<V>>> = None;
+    let mut prod_id_val: Option<String> = None;
+    let mut created_val: Option<DateTime<Utc>> = None;
+    let mut updated_val: Option<DateTime<Utc>> = None;
+    let mut sequence_val: Option<UnsignedInt> = None;
+    let mut method_val: Option<Token<Method>> = None;
+    let mut title_val: Option<String> = None;
+    let mut description_val: Option<String> = None;
+    let mut description_content_type_val: Option<String> = None;
+    let mut show_without_time_val: Option<bool> = None;
+    let mut locations_val: Option<HashMap<Box<Id>, Location<V>>> = None;
+    let mut virtual_locations_val: Option<HashMap<Box<Id>, VirtualLocation<V>>> = None;
+    let mut links_val: Option<HashMap<Box<Id>, Link<V>>> = None;
+    let mut locale_val: Option<LanguageTag> = None;
+    let mut keywords_val: Option<HashSet<String>> = None;
+    let mut categories_val: Option<HashSet<String>> = None;
+    let mut color_val: Option<Color> = None;
+    let mut recurrence_id_val: Option<DateTime<Local>> = None;
+    let mut recurrence_id_time_zone_val: Option<String> = None;
+    let mut recurrence_rules_val: Option<Vec<RRule>> = None;
+    let mut excluded_recurrence_rules_val: Option<Vec<RRule>> = None;
+    let mut recurrence_overrides_val: Option<HashMap<DateTime<Local>, PatchObject<V>>> = None;
+    let mut excluded_val: Option<bool> = None;
+    let mut priority_val: Option<Priority> = None;
+    let mut free_busy_status_val: Option<Token<FreeBusyStatus>> = None;
+    let mut privacy_val: Option<Token<Privacy>> = None;
+    let mut reply_to_val: Option<ReplyTo> = None;
+    let mut sent_by_val: Option<Box<CalAddress>> = None;
+    let mut participants_val: Option<HashMap<Box<Id>, Participant<V>>> = None;
+    let mut request_status_val: Option<RequestStatus> = None;
+    let mut use_default_alerts_val: Option<bool> = None;
+    let mut alerts_val: Option<HashMap<Box<Id>, Alert<V>>> = None;
+    let mut localizations_val: Option<HashMap<LanguageTag, PatchObject<V>>> = None;
+    let mut time_zone_val: Option<String> = None;
+    let mut time_zones_val: Option<HashMap<Box<CustomTimeZoneId>, TimeZone<V>>> = None;
+    let mut vendor_parts: Vec<(Box<str>, V)> = Vec::new();
+
+    fill_event_from_fields(
+        fields,
+        &mut start_val, &mut duration_val, &mut status_val, &mut uid_val,
+        &mut related_to_val, &mut prod_id_val, &mut created_val, &mut updated_val,
+        &mut sequence_val, &mut method_val, &mut title_val, &mut description_val,
+        &mut description_content_type_val, &mut show_without_time_val,
+        &mut locations_val, &mut virtual_locations_val, &mut links_val, &mut locale_val,
+        &mut keywords_val, &mut categories_val, &mut color_val,
+        &mut recurrence_id_val, &mut recurrence_id_time_zone_val,
+        &mut recurrence_rules_val, &mut excluded_recurrence_rules_val,
+        &mut recurrence_overrides_val, &mut excluded_val,
+        &mut priority_val, &mut free_busy_status_val, &mut privacy_val,
+        &mut reply_to_val, &mut sent_by_val, &mut participants_val, &mut request_status_val,
+        &mut use_default_alerts_val, &mut alerts_val, &mut localizations_val,
+        &mut time_zone_val, &mut time_zones_val, &mut vendor_parts,
+    )?;
+
+    let start = start_val.ok_or_else(|| missing("start"))?;
+    let uid = uid_val.ok_or_else(|| missing("uid"))?;
+    let mut result = Event::new(start, uid);
+    if let Some(v) = duration_val { result.set_duration(v); }
+    if let Some(v) = status_val { result.set_status(v); }
+    if let Some(v) = related_to_val { result.set_related_to(v); }
+    if let Some(v) = prod_id_val { result.set_prod_id(v); }
+    if let Some(v) = created_val { result.set_created(v); }
+    if let Some(v) = updated_val { result.set_updated(v); }
+    if let Some(v) = sequence_val { result.set_sequence(v); }
+    if let Some(v) = method_val { result.set_method(v); }
+    if let Some(v) = title_val { result.set_title(v); }
+    if let Some(v) = description_val { result.set_description(v); }
+    if let Some(v) = description_content_type_val { result.set_description_content_type(v); }
+    if let Some(v) = show_without_time_val { result.set_show_without_time(v); }
+    if let Some(v) = locations_val { result.set_locations(v); }
+    if let Some(v) = virtual_locations_val { result.set_virtual_locations(v); }
+    if let Some(v) = links_val { result.set_links(v); }
+    if let Some(v) = locale_val { result.set_locale(v); }
+    if let Some(v) = keywords_val { result.set_keywords(v); }
+    if let Some(v) = categories_val { result.set_categories(v); }
+    if let Some(v) = color_val { result.set_color(v); }
+    if let Some(v) = recurrence_id_val { result.set_recurrence_id(v); }
+    if let Some(v) = recurrence_id_time_zone_val { result.set_recurrence_id_time_zone(v); }
+    if let Some(v) = recurrence_rules_val { result.set_recurrence_rules(v); }
+    if let Some(v) = excluded_recurrence_rules_val { result.set_excluded_recurrence_rules(v); }
+    if let Some(v) = recurrence_overrides_val { result.set_recurrence_overrides(v); }
+    if let Some(v) = excluded_val { result.set_excluded(v); }
+    if let Some(v) = priority_val { result.set_priority(v); }
+    if let Some(v) = free_busy_status_val { result.set_free_busy_status(v); }
+    if let Some(v) = privacy_val { result.set_privacy(v); }
+    if let Some(v) = reply_to_val { result.set_reply_to(v); }
+    if let Some(v) = sent_by_val { result.set_sent_by(v); }
+    if let Some(v) = participants_val { result.set_participants(v); }
+    if let Some(v) = request_status_val { result.set_request_status(v); }
+    if let Some(v) = use_default_alerts_val { result.set_use_default_alerts(v); }
+    if let Some(v) = alerts_val { result.set_alerts(v); }
+    if let Some(v) = localizations_val { result.set_localizations(v); }
+    if let Some(v) = time_zone_val { result.set_time_zone(v); }
+    if let Some(v) = time_zones_val { result.set_time_zones(v); }
+    for (k, v) in vendor_parts {
+        if let Ok(vk) = VendorStr::new(k.as_ref()) { result.insert_vendor_property(vk.into(), v); }
+    }
+    Ok(result)
+}
+
+// ============================================================================
+// Task TryFromJson
+// ============================================================================
+
+impl<V: DestructibleJsonValue> TryFromJson<V> for Task<V> {
+    type Error = ObjErr;
+
+    fn try_from_json(value: V) -> Result<Self, Self::Error> {
+        let obj = value
+            .try_into_object()
+            .map_err(TypeErrorOr::from)
+            .map_err(DocumentError::root)?;
+
+        let fields: Vec<(String, V)> = obj
+            .into_iter()
+            .map(|(key, val)| (<V::Object as JsonObject>::key_into_string(key), val))
+            .collect();
+
+        task_from_fields(fields)
+    }
+}
+
+fn task_from_fields<V: DestructibleJsonValue>(fields: Vec<(String, V)>) -> Result<Task<V>, ObjErr> {
+    let mut due_val: Option<DateTime<Local>> = None;
+    let mut start_val: Option<DateTime<Local>> = None;
+    let mut estimated_duration_val: Option<Duration> = None;
+    let mut percent_complete_val: Option<Percent> = None;
+    let mut progress_val: Option<Token<TaskProgress>> = None;
+    let mut progress_updated_val: Option<DateTime<Utc>> = None;
+    let mut uid_val: Option<Box<Uid>> = None;
+    let mut related_to_val: Option<HashMap<Box<Uid>, Relation<V>>> = None;
+    let mut prod_id_val: Option<String> = None;
+    let mut created_val: Option<DateTime<Utc>> = None;
+    let mut updated_val: Option<DateTime<Utc>> = None;
+    let mut sequence_val: Option<UnsignedInt> = None;
+    let mut method_val: Option<Token<Method>> = None;
+    let mut title_val: Option<String> = None;
+    let mut description_val: Option<String> = None;
+    let mut description_content_type_val: Option<String> = None;
+    let mut show_without_time_val: Option<bool> = None;
+    let mut locations_val: Option<HashMap<Box<Id>, Location<V>>> = None;
+    let mut virtual_locations_val: Option<HashMap<Box<Id>, VirtualLocation<V>>> = None;
+    let mut links_val: Option<HashMap<Box<Id>, Link<V>>> = None;
+    let mut locale_val: Option<LanguageTag> = None;
+    let mut keywords_val: Option<HashSet<String>> = None;
+    let mut categories_val: Option<HashSet<String>> = None;
+    let mut color_val: Option<Color> = None;
+    let mut recurrence_id_val: Option<DateTime<Local>> = None;
+    let mut recurrence_id_time_zone_val: Option<String> = None;
+    let mut recurrence_rules_val: Option<Vec<RRule>> = None;
+    let mut excluded_recurrence_rules_val: Option<Vec<RRule>> = None;
+    let mut recurrence_overrides_val: Option<HashMap<DateTime<Local>, PatchObject<V>>> = None;
+    let mut excluded_val: Option<bool> = None;
+    let mut priority_val: Option<Priority> = None;
+    let mut free_busy_status_val: Option<Token<FreeBusyStatus>> = None;
+    let mut privacy_val: Option<Token<Privacy>> = None;
+    let mut reply_to_val: Option<ReplyTo> = None;
+    let mut sent_by_val: Option<Box<CalAddress>> = None;
+    let mut participants_val: Option<HashMap<Box<Id>, TaskParticipant<V>>> = None;
+    let mut request_status_val: Option<RequestStatus> = None;
+    let mut use_default_alerts_val: Option<bool> = None;
+    let mut alerts_val: Option<HashMap<Box<Id>, Alert<V>>> = None;
+    let mut localizations_val: Option<HashMap<LanguageTag, PatchObject<V>>> = None;
+    let mut time_zone_val: Option<String> = None;
+    let mut time_zones_val: Option<HashMap<Box<CustomTimeZoneId>, TimeZone<V>>> = None;
+    let mut vendor_parts: Vec<(Box<str>, V)> = Vec::new();
+
+    for (k, val) in fields {
+        match k.as_str() {
+            "@type" => {}
+            "due" => {
+                due_val = Some(DateTime::<Local>::try_from_json(val).map_err(|e| field_err("due", e))?);
+            }
+            "start" => {
+                start_val = Some(DateTime::<Local>::try_from_json(val).map_err(|e| field_err("start", e))?);
+            }
+            "estimatedDuration" => {
+                estimated_duration_val = Some(Duration::try_from_json(val).map_err(|e| field_err("estimatedDuration", e))?);
+            }
+            "percentComplete" => {
+                percent_complete_val = Some(Percent::try_from_json(val).map_err(|e| field_err("percentComplete", e))?);
+            }
+            "progress" => {
+                progress_val = Some(Token::<TaskProgress>::try_from_json(val).map_err(|e| type_field_err("progress", e))?);
+            }
+            "progressUpdated" => {
+                progress_updated_val = Some(DateTime::<Utc>::try_from_json(val).map_err(|e| field_err("progressUpdated", e))?);
+            }
+            "uid" => {
+                uid_val = Some(Box::<Uid>::try_from_json(val).map_err(|e| field_err("uid", e))?);
+            }
+            "relatedTo" => {
+                related_to_val = Some(
+                    parse_uid_map(val, Relation::try_from_json)
+                        .map_err(|e| prepend("relatedTo", e))?,
+                );
+            }
+            "prodId" => {
+                prod_id_val = Some(String::try_from_json(val).map_err(|e| type_field_err("prodId", e))?);
+            }
+            "created" => {
+                created_val = Some(DateTime::<Utc>::try_from_json(val).map_err(|e| field_err("created", e))?);
+            }
+            "updated" => {
+                updated_val = Some(DateTime::<Utc>::try_from_json(val).map_err(|e| field_err("updated", e))?);
+            }
+            "sequence" => {
+                sequence_val = Some(UnsignedInt::try_from_json(val).map_err(|e| field_err("sequence", e))?);
+            }
+            "method" => {
+                method_val = Some(Token::<Method>::try_from_json(val).map_err(|e| type_field_err("method", e))?);
+            }
+            "title" => {
+                title_val = Some(String::try_from_json(val).map_err(|e| type_field_err("title", e))?);
+            }
+            "description" => {
+                description_val = Some(String::try_from_json(val).map_err(|e| type_field_err("description", e))?);
+            }
+            "descriptionContentType" => {
+                description_content_type_val = Some(String::try_from_json(val).map_err(|e| type_field_err("descriptionContentType", e))?);
+            }
+            "showWithoutTime" => {
+                show_without_time_val = Some(bool::try_from_json(val).map_err(|e| type_field_err("showWithoutTime", e))?);
+            }
+            "locations" => {
+                locations_val = Some(
+                    parse_id_map(val, Location::try_from_json)
+                        .map_err(|e| prepend("locations", e))?,
+                );
+            }
+            "virtualLocations" => {
+                virtual_locations_val = Some(
+                    parse_id_map(val, VirtualLocation::try_from_json)
+                        .map_err(|e| prepend("virtualLocations", e))?,
+                );
+            }
+            "links" => {
+                links_val = Some(
+                    parse_id_map(val, Link::try_from_json)
+                        .map_err(|e| prepend("links", e))?,
+                );
+            }
+            "locale" => {
+                locale_val = Some(LanguageTag::try_from_json(val).map_err(|e| field_err("locale", e))?);
+            }
+            "keywords" => {
+                keywords_val = Some(
+                    HashSet::<String>::try_from_json(val)
+                        .map_err(|e| doc_field_err("keywords", e))?,
+                );
+            }
+            "categories" => {
+                categories_val = Some(
+                    HashSet::<String>::try_from_json(val)
+                        .map_err(|e| doc_field_err("categories", e))?,
+                );
+            }
+            "color" => {
+                color_val = Some(Color::try_from_json(val).map_err(|e| field_err("color", e))?);
+            }
+            "recurrenceId" => {
+                recurrence_id_val = Some(DateTime::<Local>::try_from_json(val).map_err(|e| field_err("recurrenceId", e))?);
+            }
+            "recurrenceIdTimeZone" => {
+                recurrence_id_time_zone_val = Some(String::try_from_json(val).map_err(|e| type_field_err("recurrenceIdTimeZone", e))?);
+            }
+            "recurrenceRules" => {
+                recurrence_rules_val = Some(rrule_vec(val).map_err(|e| prepend("recurrenceRules", e))?);
+            }
+            "excludedRecurrenceRules" => {
+                excluded_recurrence_rules_val = Some(rrule_vec(val).map_err(|e| prepend("excludedRecurrenceRules", e))?);
+            }
+            "recurrenceOverrides" => {
+                recurrence_overrides_val = Some(
+                    parse_dt_local_map(val, patch_object_from_json)
+                        .map_err(|e| prepend("recurrenceOverrides", e))?,
+                );
+            }
+            "excluded" => {
+                excluded_val = Some(bool::try_from_json(val).map_err(|e| type_field_err("excluded", e))?);
+            }
+            "priority" => {
+                priority_val = Some(Priority::try_from_json(val).map_err(|e| field_err("priority", e))?);
+            }
+            "freeBusyStatus" => {
+                free_busy_status_val = Some(Token::<FreeBusyStatus>::try_from_json(val).map_err(|e| type_field_err("freeBusyStatus", e))?);
+            }
+            "privacy" => {
+                privacy_val = Some(Token::<Privacy>::try_from_json(val).map_err(|e| type_field_err("privacy", e))?);
+            }
+            "replyTo" => {
+                reply_to_val = Some(ReplyTo::try_from_json(val).map_err(|e| prepend("replyTo", e))?);
+            }
+            "sentBy" => {
+                sent_by_val = Some(Box::<CalAddress>::try_from_json(val).map_err(|e| field_err("sentBy", e))?);
+            }
+            "participants" => {
+                participants_val = Some(
+                    parse_id_map(val, TaskParticipant::try_from_json)
+                        .map_err(|e| prepend("participants", e))?,
+                );
+            }
+            "requestStatus" => {
+                request_status_val = Some(RequestStatus::try_from_json(val).map_err(|e| field_err("requestStatus", e))?);
+            }
+            "useDefaultAlerts" => {
+                use_default_alerts_val = Some(bool::try_from_json(val).map_err(|e| type_field_err("useDefaultAlerts", e))?);
+            }
+            "alerts" => {
+                alerts_val = Some(
+                    parse_id_map(val, Alert::try_from_json)
+                        .map_err(|e| prepend("alerts", e))?,
+                );
+            }
+            "localizations" => {
+                localizations_val = Some(
+                    parse_lang_map(val, patch_object_from_json)
+                        .map_err(|e| prepend("localizations", e))?,
+                );
+            }
+            "timeZone" => {
+                time_zone_val = Some(String::try_from_json(val).map_err(|e| type_field_err("timeZone", e))?);
+            }
+            "timeZones" => {
+                time_zones_val = Some(
+                    parse_tz_map(val, TimeZone::try_from_json)
+                        .map_err(|e| prepend("timeZones", e))?,
+                );
+            }
+            _ => vendor_parts.push((k.into_boxed_str(), val)),
+        }
+    }
+
+    let uid = uid_val.ok_or_else(|| missing("uid"))?;
+    let mut result = Task::new(uid);
+    if let Some(v) = due_val { result.set_due(v); }
+    if let Some(v) = start_val { result.set_start(v); }
+    if let Some(v) = estimated_duration_val { result.set_estimated_duration(v); }
+    if let Some(v) = percent_complete_val { result.set_percent_complete(v); }
+    if let Some(v) = progress_val { result.set_progress(v); }
+    if let Some(v) = progress_updated_val { result.set_progress_updated(v); }
+    if let Some(v) = related_to_val { result.set_related_to(v); }
+    if let Some(v) = prod_id_val { result.set_prod_id(v); }
+    if let Some(v) = created_val { result.set_created(v); }
+    if let Some(v) = updated_val { result.set_updated(v); }
+    if let Some(v) = sequence_val { result.set_sequence(v); }
+    if let Some(v) = method_val { result.set_method(v); }
+    if let Some(v) = title_val { result.set_title(v); }
+    if let Some(v) = description_val { result.set_description(v); }
+    if let Some(v) = description_content_type_val { result.set_description_content_type(v); }
+    if let Some(v) = show_without_time_val { result.set_show_without_time(v); }
+    if let Some(v) = locations_val { result.set_locations(v); }
+    if let Some(v) = virtual_locations_val { result.set_virtual_locations(v); }
+    if let Some(v) = links_val { result.set_links(v); }
+    if let Some(v) = locale_val { result.set_locale(v); }
+    if let Some(v) = keywords_val { result.set_keywords(v); }
+    if let Some(v) = categories_val { result.set_categories(v); }
+    if let Some(v) = color_val { result.set_color(v); }
+    if let Some(v) = recurrence_id_val { result.set_recurrence_id(v); }
+    if let Some(v) = recurrence_id_time_zone_val { result.set_recurrence_id_time_zone(v); }
+    if let Some(v) = recurrence_rules_val { result.set_recurrence_rules(v); }
+    if let Some(v) = excluded_recurrence_rules_val { result.set_excluded_recurrence_rules(v); }
+    if let Some(v) = recurrence_overrides_val { result.set_recurrence_overrides(v); }
+    if let Some(v) = excluded_val { result.set_excluded(v); }
+    if let Some(v) = priority_val { result.set_priority(v); }
+    if let Some(v) = free_busy_status_val { result.set_free_busy_status(v); }
+    if let Some(v) = privacy_val { result.set_privacy(v); }
+    if let Some(v) = reply_to_val { result.set_reply_to(v); }
+    if let Some(v) = sent_by_val { result.set_sent_by(v); }
+    if let Some(v) = participants_val { result.set_participants(v); }
+    if let Some(v) = request_status_val { result.set_request_status(v); }
+    if let Some(v) = use_default_alerts_val { result.set_use_default_alerts(v); }
+    if let Some(v) = alerts_val { result.set_alerts(v); }
+    if let Some(v) = localizations_val { result.set_localizations(v); }
+    if let Some(v) = time_zone_val { result.set_time_zone(v); }
+    if let Some(v) = time_zones_val { result.set_time_zones(v); }
+    for (k, v) in vendor_parts {
+        if let Ok(vk) = VendorStr::new(k.as_ref()) { result.insert_vendor_property(vk.into(), v); }
+    }
+    Ok(result)
+}
+
+// ============================================================================
+// Group TryFromJson
+// ============================================================================
+
+impl<V: DestructibleJsonValue> TryFromJson<V> for Group<V> {
+    type Error = ObjErr;
+
+    fn try_from_json(value: V) -> Result<Self, Self::Error> {
+        let obj = value
+            .try_into_object()
+            .map_err(TypeErrorOr::from)
+            .map_err(DocumentError::root)?;
+
+        let mut entries_val: Option<Vec<TaskOrEvent<V>>> = None;
+        let mut source_val: Option<Box<Uri>> = None;
+        let mut uid_val: Option<Box<Uid>> = None;
+        let mut prod_id_val: Option<String> = None;
+        let mut created_val: Option<DateTime<Utc>> = None;
+        let mut updated_val: Option<DateTime<Utc>> = None;
+        let mut title_val: Option<String> = None;
+        let mut description_val: Option<String> = None;
+        let mut description_content_type_val: Option<String> = None;
+        let mut links_val: Option<HashMap<Box<Id>, Link<V>>> = None;
+        let mut locale_val: Option<LanguageTag> = None;
+        let mut keywords_val: Option<HashSet<String>> = None;
+        let mut categories_val: Option<HashSet<String>> = None;
+        let mut color_val: Option<Color> = None;
+        let mut time_zones_val: Option<HashMap<Box<CustomTimeZoneId>, TimeZone<V>>> = None;
+        let mut vendor_parts: Vec<(Box<str>, V)> = Vec::new();
+
+        for (key, val) in obj.into_iter() {
+            let k = <V::Object as JsonObject>::key_into_string(key);
+            match k.as_str() {
+                "@type" => {}
+                "entries" => {
+                    entries_val = Some(
+                        parse_vec(val, TaskOrEvent::try_from_json)
+                            .map_err(|e| prepend("entries", e))?,
+                    );
+                }
+                "source" => {
+                    source_val = Some(Box::<Uri>::try_from_json(val).map_err(|e| field_err("source", e))?);
+                }
+                "uid" => {
+                    uid_val = Some(Box::<Uid>::try_from_json(val).map_err(|e| field_err("uid", e))?);
+                }
+                "prodId" => {
+                    prod_id_val = Some(String::try_from_json(val).map_err(|e| type_field_err("prodId", e))?);
+                }
+                "created" => {
+                    created_val = Some(DateTime::<Utc>::try_from_json(val).map_err(|e| field_err("created", e))?);
+                }
+                "updated" => {
+                    updated_val = Some(DateTime::<Utc>::try_from_json(val).map_err(|e| field_err("updated", e))?);
+                }
+                "title" => {
+                    title_val = Some(String::try_from_json(val).map_err(|e| type_field_err("title", e))?);
+                }
+                "description" => {
+                    description_val = Some(String::try_from_json(val).map_err(|e| type_field_err("description", e))?);
+                }
+                "descriptionContentType" => {
+                    description_content_type_val = Some(String::try_from_json(val).map_err(|e| type_field_err("descriptionContentType", e))?);
+                }
+                "links" => {
+                    links_val = Some(
+                        parse_id_map(val, Link::try_from_json)
+                            .map_err(|e| prepend("links", e))?,
+                    );
+                }
+                "locale" => {
+                    locale_val = Some(LanguageTag::try_from_json(val).map_err(|e| field_err("locale", e))?);
+                }
+                "keywords" => {
+                    keywords_val = Some(
+                        HashSet::<String>::try_from_json(val)
+                            .map_err(|e| doc_field_err("keywords", e))?,
+                    );
+                }
+                "categories" => {
+                    categories_val = Some(
+                        HashSet::<String>::try_from_json(val)
+                            .map_err(|e| doc_field_err("categories", e))?,
+                    );
+                }
+                "color" => {
+                    color_val = Some(Color::try_from_json(val).map_err(|e| field_err("color", e))?);
+                }
+                "timeZones" => {
+                    time_zones_val = Some(
+                        parse_tz_map(val, TimeZone::try_from_json)
+                            .map_err(|e| prepend("timeZones", e))?,
+                    );
+                }
+                _ => vendor_parts.push((k.into_boxed_str(), val)),
+            }
+        }
+
+        let entries = entries_val.unwrap_or_default();
+        let uid = uid_val.ok_or_else(|| missing("uid"))?;
+        let mut result = Group::new(entries, uid);
+        if let Some(v) = source_val { result.set_source(v); }
+        if let Some(v) = prod_id_val { result.set_prod_id(v); }
+        if let Some(v) = created_val { result.set_created(v); }
+        if let Some(v) = updated_val { result.set_updated(v); }
+        if let Some(v) = title_val { result.set_title(v); }
+        if let Some(v) = description_val { result.set_description(v); }
+        if let Some(v) = description_content_type_val { result.set_description_content_type(v); }
+        if let Some(v) = links_val { result.set_links(v); }
+        if let Some(v) = locale_val { result.set_locale(v); }
+        if let Some(v) = keywords_val { result.set_keywords(v); }
+        if let Some(v) = categories_val { result.set_categories(v); }
+        if let Some(v) = color_val { result.set_color(v); }
+        if let Some(v) = time_zones_val { result.set_time_zones(v); }
+        for (k, v) in vendor_parts {
+            if let Ok(vk) = VendorStr::new(k.as_ref()) { result.insert_vendor_property(vk.into(), v); }
+        }
+        Ok(result)
+    }
+}
+
+// ============================================================================
+// TaskOrEvent TryFromJson
+// ============================================================================
+
+impl<V: DestructibleJsonValue> TryFromJson<V> for TaskOrEvent<V> {
+    type Error = ObjErr;
+
+    fn try_from_json(value: V) -> Result<Self, Self::Error> {
+        let obj = value
+            .try_into_object()
+            .map_err(TypeErrorOr::from)
+            .map_err(DocumentError::root)?;
+
+        let mut type_str: Option<String> = None;
+        let mut items: Vec<(String, V)> = Vec::new();
+
+        for (key, val) in obj.into_iter() {
+            let k = <V::Object as JsonObject>::key_into_string(key);
+            if k.as_str() == "@type" {
+                if let Ok(s) = val.try_into_string() {
+                    type_str = Some(s.into());
+                }
+            } else {
+                items.push((k, val));
+            }
+        }
+
+        match type_str.as_deref() {
+            Some("Event") => Ok(TaskOrEvent::Event(event_from_fields(items)?)),
+            Some("Task") => Ok(TaskOrEvent::Task(task_from_fields(items)?)),
+            _ => Err(missing("@type")),
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -588,5 +3286,96 @@ mod tests {
                 error: InvalidImplicitJsonPointerError::BareTilde { index: 3 }
             }))
         );
+    }
+
+    #[cfg(feature = "serde_json")]
+    #[test]
+    fn link_from_serde_json() {
+        use serde_json::json;
+
+        let input = json!({
+            "@type": "Link",
+            "href": "https://example.com/file.pdf",
+            "mediaType": "application/pdf",
+            "title": "The Specification",
+            "size": 42000,
+        });
+
+        let link = Link::try_from_json(input).expect("valid link");
+        assert!(link.title().is_some());
+    }
+
+    #[cfg(feature = "serde_json")]
+    #[test]
+    fn event_from_serde_json() {
+        use serde_json::json;
+
+        let input = json!({
+            "@type": "Event",
+            "uid": "test-event-uid-1",
+            "start": "2024-01-15T09:00:00",
+            "title": "Team Meeting",
+            "duration": "PT1H",
+        });
+
+        let event = Event::try_from_json(input).expect("valid event");
+        assert!(event.title().is_some());
+    }
+
+    #[cfg(feature = "serde_json")]
+    #[test]
+    fn task_or_event_dispatch() {
+        use serde_json::json;
+
+        let event_input = json!({
+            "@type": "Event",
+            "uid": "event-1",
+            "start": "2024-03-01T10:00:00",
+        });
+
+        let task_input = json!({
+            "@type": "Task",
+            "uid": "task-1",
+        });
+
+        let toe1 = TaskOrEvent::try_from_json(event_input).expect("valid event");
+        let toe2 = TaskOrEvent::try_from_json(task_input).expect("valid task");
+
+        assert!(matches!(toe1, TaskOrEvent::Event(_)));
+        assert!(matches!(toe2, TaskOrEvent::Task(_)));
+    }
+
+    #[cfg(feature = "serde_json")]
+    #[test]
+    fn missing_required_field_error() {
+        use serde_json::json;
+
+        // Event missing uid
+        let input = json!({ "@type": "Event", "start": "2024-01-01T00:00:00" });
+        let err = Event::try_from_json(input).unwrap_err();
+        assert!(matches!(
+            err.error,
+            TypeErrorOr::Other(ObjectFromJsonError::MissingField("uid"))
+        ));
+
+        // Link missing href
+        let input = json!({ "@type": "Link", "title": "test" });
+        let err = Link::try_from_json(input).unwrap_err();
+        assert!(matches!(
+            err.error,
+            TypeErrorOr::Other(ObjectFromJsonError::MissingField("href"))
+        ));
+    }
+
+    #[cfg(feature = "serde_json")]
+    #[test]
+    fn wrong_type_field_error() {
+        use serde_json::json;
+
+        // Event uid is not a string
+        let input = json!({ "@type": "Event", "uid": 123, "start": "2024-01-01T00:00:00" });
+        let err = Event::try_from_json(input).unwrap_err();
+        assert!(matches!(err.error, TypeErrorOr::TypeError(_)));
+        assert_eq!(err.path.front(), Some(&PathSegment::Static("uid")));
     }
 }

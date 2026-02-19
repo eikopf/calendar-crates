@@ -10,6 +10,7 @@ use std::{
 
 use calendar_types::{
     duration::{Duration, InvalidDurationError, SignedDuration},
+    set::Token,
     time::{DateTime, InvalidDateTimeError, Local, Utc},
 };
 use thiserror::Error;
@@ -82,6 +83,20 @@ impl<V: DestructibleJsonValue> TryFromJson<V> for SignedDuration {
         let input = value.try_into_string()?;
         let duration = parse_full(signed_duration)(input.as_ref()).map_err(TypeErrorOr::Other)?;
         Ok(duration)
+    }
+}
+
+impl<T, V> TryFromJson<V> for Token<T, Box<str>>
+where
+    T: FromStr,
+    V: DestructibleJsonValue,
+{
+    type Error = TypeError;
+
+    fn try_from_json(value: V) -> Result<Self, Self::Error> {
+        let s = value.try_into_string()?;
+        // Token::from_str is infallible when S = Box<str> (since &str: Into<Box<str>>)
+        Ok(Token::from_str(s.as_ref()).unwrap())
     }
 }
 

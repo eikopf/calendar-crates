@@ -6,6 +6,9 @@ pub use calendar_types::{
 };
 pub use rfc5545_types::set::{Method, Percent, Priority};
 use strum::EnumString;
+use thiserror::Error;
+
+use crate::json::{DestructibleJsonValue, TryFromJson, TypeErrorOr, UnsignedInt};
 
 /// A value which may appear in the `relation` field of a `Relation` object (RFC 8984 §1.4.10).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, EnumString)]
@@ -163,4 +166,82 @@ pub struct Rgb {
 pub enum Color {
     Css(Css3Color),
     Rgb(Rgb),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Error)]
+#[error("not a known CSS3 color name or #RRGGBB hex string: {0:?}")]
+pub struct InvalidColorError(pub Box<str>);
+
+impl<V: DestructibleJsonValue> TryFromJson<V> for Color {
+    type Error = TypeErrorOr<InvalidColorError>;
+
+    fn try_from_json(value: V) -> Result<Self, Self::Error> {
+        let s = value.try_into_string()?;
+        // Try CSS3 name first (case-insensitive)
+        let s_lower = s.as_ref().to_lowercase();
+        if let Some(css) = Css3Color::iter().find(|c| c.as_str() == s_lower.as_str()) {
+            return Ok(Color::Css(css));
+        }
+        // Try #RRGGBB
+        if let Some(hex) = s.as_ref().strip_prefix('#') {
+            if hex.len() == 6 {
+                if let (Ok(r), Ok(g), Ok(b)) = (
+                    u8::from_str_radix(&hex[0..2], 16),
+                    u8::from_str_radix(&hex[2..4], 16),
+                    u8::from_str_radix(&hex[4..6], 16),
+                ) {
+                    return Ok(Color::Rgb(Rgb { red: r, green: g, blue: b }));
+                }
+            }
+        }
+        Err(TypeErrorOr::Other(InvalidColorError(
+            String::from(s.as_ref()).into_boxed_str(),
+        )))
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Error)]
+#[error("priority must be an integer in the range 0..=9, got {0}")]
+pub struct InvalidPriorityError(u64);
+
+impl<V: DestructibleJsonValue> TryFromJson<V> for Priority {
+    type Error = TypeErrorOr<InvalidPriorityError>;
+
+    fn try_from_json(value: V) -> Result<Self, Self::Error> {
+        let n = UnsignedInt::try_from_json(value).map_err(|e| match e {
+            TypeErrorOr::TypeError(t) => TypeErrorOr::TypeError(t),
+            TypeErrorOr::Other(_) => TypeErrorOr::Other(InvalidPriorityError(u64::MAX)),
+        })?;
+        match n.get() {
+            0 => Ok(Priority::Zero),
+            1 => Ok(Priority::A1),
+            2 => Ok(Priority::A2),
+            3 => Ok(Priority::A3),
+            4 => Ok(Priority::B1),
+            5 => Ok(Priority::B2),
+            6 => Ok(Priority::B3),
+            7 => Ok(Priority::C1),
+            8 => Ok(Priority::C2),
+            9 => Ok(Priority::C3),
+            v => Err(TypeErrorOr::Other(InvalidPriorityError(v))),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Error)]
+#[error("percent must be an integer in the range 0..=100, got {0}")]
+pub struct InvalidPercentError(u64);
+
+impl<V: DestructibleJsonValue> TryFromJson<V> for Percent {
+    type Error = TypeErrorOr<InvalidPercentError>;
+
+    fn try_from_json(value: V) -> Result<Self, Self::Error> {
+        let n = UnsignedInt::try_from_json(value).map_err(|e| match e {
+            TypeErrorOr::TypeError(t) => TypeErrorOr::TypeError(t),
+            TypeErrorOr::Other(_) => TypeErrorOr::Other(InvalidPercentError(u64::MAX)),
+        })?;
+        Percent::new(n.get() as u8)
+            .ok_or(InvalidPercentError(n.get()))
+            .map_err(TypeErrorOr::Other)
+    }
 }
