@@ -1440,91 +1440,18 @@ impl<V: DestructibleJsonValue> TryFromJson<V> for Trigger<V> {
     type Error = ObjErr;
 
     fn try_from_json(value: V) -> Result<Self, Self::Error> {
-        // We need to inspect @type before deciding which variant to parse.
-        // Collect all (key, val) pairs first, then dispatch.
-        let obj = value
-            .try_into_object()
+        let type_str = value
+            .try_as_object()
             .map_err(TypeErrorOr::from)
-            .map_err(DocumentError::root)?;
-
-        let mut type_str: Option<String> = None;
-        let mut items: Vec<(String, V)> = Vec::new();
-
-        for (key, val) in obj.into_iter() {
-            let k = <V::Object as JsonObject>::key_into_string(key);
-            if k.as_str() == "@type" {
-                if let Ok(s) = val.try_into_string() {
-                    type_str = Some(s.into());
-                }
-            } else {
-                items.push((k, val));
-            }
-        }
+            .map_err(DocumentError::root)?
+            .get("@type")
+            .and_then(|v| v.try_as_string().ok())
+            .map(|s| s.as_ref().to_owned());
 
         match type_str.as_deref() {
-            Some("OffsetTrigger") => {
-                // Parse as OffsetTrigger from the collected items
-                let mut offset_val: Option<SignedDuration> = None;
-                let mut relative_to_val: Option<Token<AlertRelativeTo>> = None;
-                let mut vendor_parts: Vec<(Box<str>, V)> = Vec::new();
-                for (k, val) in items {
-                    match k.as_str() {
-                        "offset" => {
-                            offset_val = Some(
-                                SignedDuration::try_from_json(val)
-                                    .map_err(|e| field_err("offset", e))?,
-                            );
-                        }
-                        "relativeTo" => {
-                            relative_to_val = Some(
-                                Token::<AlertRelativeTo>::try_from_json(val)
-                                    .map_err(|e| type_field_err("relativeTo", e))?,
-                            );
-                        }
-                        _ => vendor_parts.push((k.into_boxed_str(), val)),
-                    }
-                }
-                let offset = offset_val.ok_or_else(|| missing("offset"))?;
-                let mut trigger = OffsetTrigger::new(offset);
-                if let Some(v) = relative_to_val {
-                    trigger.set_relative_to(v);
-                }
-                for (k, v) in vendor_parts {
-                    if let Ok(vk) = VendorStr::new(k.as_ref()) {
-                        trigger.insert_vendor_property(vk.into(), v);
-                    }
-                }
-                Ok(Trigger::Offset(trigger))
-            }
-            Some("AbsoluteTrigger") => {
-                let mut when_val: Option<DateTime<Utc>> = None;
-                let mut vendor_parts: Vec<(Box<str>, V)> = Vec::new();
-                for (k, val) in items {
-                    match k.as_str() {
-                        "when" => {
-                            when_val = Some(
-                                DateTime::<Utc>::try_from_json(val)
-                                    .map_err(|e| field_err("when", e))?,
-                            );
-                        }
-                        _ => vendor_parts.push((k.into_boxed_str(), val)),
-                    }
-                }
-                let when = when_val.ok_or_else(|| missing("when"))?;
-                let mut trigger = AbsoluteTrigger::new(when);
-                for (k, v) in vendor_parts {
-                    if let Ok(vk) = VendorStr::new(k.as_ref()) {
-                        trigger.insert_vendor_property(vk.into(), v);
-                    }
-                }
-                Ok(Trigger::Absolute(trigger))
-            }
-            _ => {
-                // Unknown type - store raw object as Unknown variant
-                // We already consumed the object, so we can't reconstruct it.
-                // Return an error for unknown trigger types.
-                Err(missing("@type"))
-            }
+            Some("OffsetTrigger") => OffsetTrigger::try_from_json(value).map(Trigger::Offset),
+            Some("AbsoluteTrigger") => AbsoluteTrigger::try_from_json(value).map(Trigger::Absolute),
+            _ => Err(missing("@type")),
         }
     }
 }
@@ -2857,7 +2784,7 @@ impl<V: DestructibleJsonValue> TryFromJson<V> for TaskParticipant<V> {
 // ============================================================================
 
 fn fill_event_from_fields<V: DestructibleJsonValue>(
-    fields: Vec<(String, V)>,
+    fields: V::Object,
     start_val: &mut Option<DateTime<Local>>,
     duration_val: &mut Option<Duration>,
     status_val: &mut Option<Token<EventStatus>>,
@@ -2899,7 +2826,8 @@ fn fill_event_from_fields<V: DestructibleJsonValue>(
     time_zones_val: &mut Option<HashMap<Box<CustomTimeZoneId>, TimeZone<V>>>,
     vendor_parts: &mut Vec<(Box<str>, V)>,
 ) -> Result<(), ObjErr> {
-    for (k, val) in fields {
+    for (key, val) in fields.into_iter() {
+        let k = <V::Object as JsonObject>::key_into_string(key);
         match k.as_str() {
             "@type" => {}
             "start" => {
@@ -3111,17 +3039,12 @@ impl<V: DestructibleJsonValue> TryFromJson<V> for Event<V> {
             .map_err(TypeErrorOr::from)
             .map_err(DocumentError::root)?;
 
-        let fields: Vec<(String, V)> = obj
-            .into_iter()
-            .map(|(key, val)| (<V::Object as JsonObject>::key_into_string(key), val))
-            .collect();
-
-        event_from_fields(fields)
+        event_from_fields(obj)
     }
 }
 
 fn event_from_fields<V: DestructibleJsonValue>(
-    fields: Vec<(String, V)>,
+    fields: V::Object,
 ) -> Result<Event<V>, ObjErr> {
     let mut start_val: Option<DateTime<Local>> = None;
     let mut duration_val: Option<Duration> = None;
@@ -3343,16 +3266,11 @@ impl<V: DestructibleJsonValue> TryFromJson<V> for Task<V> {
             .map_err(TypeErrorOr::from)
             .map_err(DocumentError::root)?;
 
-        let fields: Vec<(String, V)> = obj
-            .into_iter()
-            .map(|(key, val)| (<V::Object as JsonObject>::key_into_string(key), val))
-            .collect();
-
-        task_from_fields(fields)
+        task_from_fields(obj)
     }
 }
 
-fn task_from_fields<V: DestructibleJsonValue>(fields: Vec<(String, V)>) -> Result<Task<V>, ObjErr> {
+fn task_from_fields<V: DestructibleJsonValue>(fields: V::Object) -> Result<Task<V>, ObjErr> {
     let mut due_val: Option<DateTime<Local>> = None;
     let mut start_val: Option<DateTime<Local>> = None;
     let mut estimated_duration_val: Option<Duration> = None;
@@ -3397,7 +3315,8 @@ fn task_from_fields<V: DestructibleJsonValue>(fields: Vec<(String, V)>) -> Resul
     let mut time_zones_val: Option<HashMap<Box<CustomTimeZoneId>, TimeZone<V>>> = None;
     let mut vendor_parts: Vec<(Box<str>, V)> = Vec::new();
 
-    for (k, val) in fields {
+    for (key, val) in fields.into_iter() {
+        let k = <V::Object as JsonObject>::key_into_string(key);
         match k.as_str() {
             "@type" => {}
             "due" => {
@@ -3912,28 +3831,17 @@ impl<V: DestructibleJsonValue> TryFromJson<V> for TaskOrEvent<V> {
     type Error = ObjErr;
 
     fn try_from_json(value: V) -> Result<Self, Self::Error> {
-        let obj = value
-            .try_into_object()
+        let type_str = value
+            .try_as_object()
             .map_err(TypeErrorOr::from)
-            .map_err(DocumentError::root)?;
-
-        let mut type_str: Option<String> = None;
-        let mut items: Vec<(String, V)> = Vec::new();
-
-        for (key, val) in obj.into_iter() {
-            let k = <V::Object as JsonObject>::key_into_string(key);
-            if k.as_str() == "@type" {
-                if let Ok(s) = val.try_into_string() {
-                    type_str = Some(s.into());
-                }
-            } else {
-                items.push((k, val));
-            }
-        }
+            .map_err(DocumentError::root)?
+            .get("@type")
+            .and_then(|v| v.try_as_string().ok())
+            .map(|s| s.as_ref().to_owned());
 
         match type_str.as_deref() {
-            Some("Event") => Ok(TaskOrEvent::Event(event_from_fields(items)?)),
-            Some("Task") => Ok(TaskOrEvent::Task(task_from_fields(items)?)),
+            Some("Event") => Event::try_from_json(value).map(TaskOrEvent::Event),
+            Some("Task") => Task::try_from_json(value).map(TaskOrEvent::Task),
             _ => Err(missing("@type")),
         }
     }
