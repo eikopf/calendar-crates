@@ -83,6 +83,7 @@ impl<Sy, Se> OwnedParseError<Sy, Se> {
         }
     }
 
+    #[cfg(test)]
     fn into_semantic(self) -> Option<Se> {
         match self.error {
             ParseErrorKind::Semantic(error) => Some(error),

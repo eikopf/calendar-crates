@@ -182,16 +182,15 @@ impl<V: DestructibleJsonValue> TryFromJson<V> for Color {
             return Ok(Color::Css(css));
         }
         // Try #RRGGBB
-        if let Some(hex) = s.as_ref().strip_prefix('#') {
-            if hex.len() == 6 {
-                if let (Ok(r), Ok(g), Ok(b)) = (
-                    u8::from_str_radix(&hex[0..2], 16),
-                    u8::from_str_radix(&hex[2..4], 16),
-                    u8::from_str_radix(&hex[4..6], 16),
-                ) {
-                    return Ok(Color::Rgb(Rgb { red: r, green: g, blue: b }));
-                }
-            }
+        if let Some(hex) = s.as_ref().strip_prefix('#')
+            && hex.len() == 6
+            && let (Ok(r), Ok(g), Ok(b)) = (
+                u8::from_str_radix(&hex[0..2], 16),
+                u8::from_str_radix(&hex[2..4], 16),
+                u8::from_str_radix(&hex[4..6], 16),
+            )
+        {
+            return Ok(Color::Rgb(Rgb { red: r, green: g, blue: b }));
         }
         Err(TypeErrorOr::Other(InvalidColorError(
             String::from(s.as_ref()).into_boxed_str(),
