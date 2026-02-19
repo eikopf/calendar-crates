@@ -85,15 +85,6 @@ pub enum VirtualLocationFeature {
     Video,
 }
 
-/// A reply method identifier (RFC 8984 §4.4.4).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, EnumString)]
-#[non_exhaustive]
-#[strum(ascii_case_insensitive)]
-pub enum ReplyMethod {
-    Imip,
-    Web,
-}
-
 /// The kind of a participant (RFC 8984 §4.4.6).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, EnumString)]
 #[non_exhaustive]
