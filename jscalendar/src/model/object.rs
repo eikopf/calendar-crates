@@ -2318,139 +2318,6 @@ impl<V: DestructibleJsonValue> TryFromJson<V> for TimeZone<V> {
 // TODO: refactor this to remove the clippy lint about too many parameters, maybe by defining a
 // struct type to use for the argument?
 
-fn parse_participant_common<V: DestructibleJsonValue>(
-    k: &str,
-    val: V,
-    name_val: &mut Option<String>,
-    email_val: &mut Option<Box<EmailAddr>>,
-    description_val: &mut Option<String>,
-    send_to_val: &mut Option<SendToParticipant>,
-    kind_val: &mut Option<Token<ParticipantKind>>,
-    roles_val: &mut Option<HashSet<Token<ParticipantRole>>>,
-    location_id_val: &mut Option<Box<Id>>,
-    language_val: &mut Option<LanguageTag>,
-    participation_status_val: &mut Option<Token<ParticipationStatus>>,
-    participation_comment_val: &mut Option<String>,
-    expect_reply_val: &mut Option<bool>,
-    schedule_agent_val: &mut Option<Token<ScheduleAgent>>,
-    schedule_force_send_val: &mut Option<bool>,
-    schedule_sequence_val: &mut Option<UnsignedInt>,
-    schedule_status_val: &mut Option<Vec<StatusCode>>,
-    schedule_updated_val: &mut Option<DateTime<Utc>>,
-    sent_by_val: &mut Option<Box<EmailAddr>>,
-    invited_by_val: &mut Option<Box<Id>>,
-    delegated_to_val: &mut Option<HashSet<Box<Id>>>,
-    delegated_from_val: &mut Option<HashSet<Box<Id>>>,
-    member_of_val: &mut Option<HashSet<Box<Id>>>,
-    links_val: &mut Option<HashMap<Box<Id>, Link<V>>>,
-    vendor_parts: &mut Vec<(Box<str>, V)>,
-) -> Result<bool, ObjErr> {
-    match k {
-        "@type" => {}
-        "name" => {
-            *name_val = Some(String::try_from_json(val).map_err(|e| type_field_err("name", e))?);
-        }
-        "email" => {
-            *email_val =
-                Some(Box::<EmailAddr>::try_from_json(val).map_err(|e| field_err("email", e))?);
-        }
-        "description" => {
-            *description_val =
-                Some(String::try_from_json(val).map_err(|e| type_field_err("description", e))?);
-        }
-        "sendTo" => {
-            *send_to_val =
-                Some(SendToParticipant::try_from_json(val).map_err(|e| prepend("sendTo", e))?);
-        }
-        "kind" => {
-            *kind_val = Some(
-                Token::<ParticipantKind>::try_from_json(val)
-                    .map_err(|e| type_field_err("kind", e))?,
-            );
-        }
-        "roles" => {
-            *roles_val = Some(
-                HashSet::<Token<ParticipantRole>>::try_from_json(val)
-                    .map_err(|e| doc_field_err("roles", e))?,
-            );
-        }
-        "locationId" => {
-            *location_id_val =
-                Some(Box::<Id>::try_from_json(val).map_err(|e| field_err("locationId", e))?);
-        }
-        "language" => {
-            *language_val =
-                Some(LanguageTag::try_from_json(val).map_err(|e| field_err("language", e))?);
-        }
-        "participationStatus" => {
-            *participation_status_val = Some(
-                Token::<ParticipationStatus>::try_from_json(val)
-                    .map_err(|e| type_field_err("participationStatus", e))?,
-            );
-        }
-        "participationComment" => {
-            *participation_comment_val = Some(
-                String::try_from_json(val)
-                    .map_err(|e| type_field_err("participationComment", e))?,
-            );
-        }
-        "expectReply" => {
-            *expect_reply_val =
-                Some(bool::try_from_json(val).map_err(|e| type_field_err("expectReply", e))?);
-        }
-        "scheduleAgent" => {
-            *schedule_agent_val = Some(
-                Token::<ScheduleAgent>::try_from_json(val)
-                    .map_err(|e| type_field_err("scheduleAgent", e))?,
-            );
-        }
-        "scheduleForceSend" => {
-            *schedule_force_send_val =
-                Some(bool::try_from_json(val).map_err(|e| type_field_err("scheduleForceSend", e))?);
-        }
-        "scheduleSequence" => {
-            *schedule_sequence_val = Some(
-                UnsignedInt::try_from_json(val).map_err(|e| field_err("scheduleSequence", e))?,
-            );
-        }
-        "scheduleStatus" => {
-            *schedule_status_val =
-                Some(parse_status_code_vec(val).map_err(|e| prepend("scheduleStatus", e))?);
-        }
-        "scheduleUpdated" => {
-            *schedule_updated_val = Some(
-                DateTime::<Utc>::try_from_json(val).map_err(|e| field_err("scheduleUpdated", e))?,
-            );
-        }
-        "sentBy" => {
-            *sent_by_val =
-                Some(Box::<EmailAddr>::try_from_json(val).map_err(|e| field_err("sentBy", e))?);
-        }
-        "invitedBy" => {
-            *invited_by_val =
-                Some(Box::<Id>::try_from_json(val).map_err(|e| field_err("invitedBy", e))?);
-        }
-        "delegatedTo" => {
-            *delegated_to_val = Some(parse_id_set(val).map_err(|e| prepend("delegatedTo", e))?);
-        }
-        "delegatedFrom" => {
-            *delegated_from_val = Some(parse_id_set(val).map_err(|e| prepend("delegatedFrom", e))?);
-        }
-        "memberOf" => {
-            *member_of_val = Some(parse_id_set(val).map_err(|e| prepend("memberOf", e))?);
-        }
-        "links" => {
-            *links_val =
-                Some(parse_id_map(val, Link::try_from_json).map_err(|e| prepend("links", e))?);
-        }
-        _ => {
-            vendor_parts.push((k.to_string().into_boxed_str(), val));
-            return Ok(false);
-        }
-    }
-    Ok(true)
-}
-
 impl<V: DestructibleJsonValue> TryFromJson<V> for Participant<V> {
     type Error = ObjErr;
 
@@ -2486,33 +2353,106 @@ impl<V: DestructibleJsonValue> TryFromJson<V> for Participant<V> {
 
         for (key, val) in obj.into_iter() {
             let k = <V::Object as JsonObject>::key_into_string(key);
-            parse_participant_common(
-                k.as_str(),
-                val,
-                &mut name_val,
-                &mut email_val,
-                &mut description_val,
-                &mut send_to_val,
-                &mut kind_val,
-                &mut roles_val,
-                &mut location_id_val,
-                &mut language_val,
-                &mut participation_status_val,
-                &mut participation_comment_val,
-                &mut expect_reply_val,
-                &mut schedule_agent_val,
-                &mut schedule_force_send_val,
-                &mut schedule_sequence_val,
-                &mut schedule_status_val,
-                &mut schedule_updated_val,
-                &mut sent_by_val,
-                &mut invited_by_val,
-                &mut delegated_to_val,
-                &mut delegated_from_val,
-                &mut member_of_val,
-                &mut links_val,
-                &mut vendor_parts,
-            )?;
+            match k.as_str() {
+                "@type" => {}
+                "name" => {
+                    name_val = Some(String::try_from_json(val).map_err(|e| type_field_err("name", e))?);
+                }
+                "email" => {
+                    email_val =
+                        Some(Box::<EmailAddr>::try_from_json(val).map_err(|e| field_err("email", e))?);
+                }
+                "description" => {
+                    description_val =
+                        Some(String::try_from_json(val).map_err(|e| type_field_err("description", e))?);
+                }
+                "sendTo" => {
+                    send_to_val =
+                        Some(SendToParticipant::try_from_json(val).map_err(|e| prepend("sendTo", e))?);
+                }
+                "kind" => {
+                    kind_val = Some(
+                        Token::<ParticipantKind>::try_from_json(val)
+                            .map_err(|e| type_field_err("kind", e))?,
+                    );
+                }
+                "roles" => {
+                    roles_val = Some(
+                        HashSet::<Token<ParticipantRole>>::try_from_json(val)
+                            .map_err(|e| doc_field_err("roles", e))?,
+                    );
+                }
+                "locationId" => {
+                    location_id_val =
+                        Some(Box::<Id>::try_from_json(val).map_err(|e| field_err("locationId", e))?);
+                }
+                "language" => {
+                    language_val =
+                        Some(LanguageTag::try_from_json(val).map_err(|e| field_err("language", e))?);
+                }
+                "participationStatus" => {
+                    participation_status_val = Some(
+                        Token::<ParticipationStatus>::try_from_json(val)
+                            .map_err(|e| type_field_err("participationStatus", e))?,
+                    );
+                }
+                "participationComment" => {
+                    participation_comment_val = Some(
+                        String::try_from_json(val)
+                            .map_err(|e| type_field_err("participationComment", e))?,
+                    );
+                }
+                "expectReply" => {
+                    expect_reply_val =
+                        Some(bool::try_from_json(val).map_err(|e| type_field_err("expectReply", e))?);
+                }
+                "scheduleAgent" => {
+                    schedule_agent_val = Some(
+                        Token::<ScheduleAgent>::try_from_json(val)
+                            .map_err(|e| type_field_err("scheduleAgent", e))?,
+                    );
+                }
+                "scheduleForceSend" => {
+                    schedule_force_send_val =
+                        Some(bool::try_from_json(val).map_err(|e| type_field_err("scheduleForceSend", e))?);
+                }
+                "scheduleSequence" => {
+                    schedule_sequence_val = Some(
+                        UnsignedInt::try_from_json(val).map_err(|e| field_err("scheduleSequence", e))?,
+                    );
+                }
+                "scheduleStatus" => {
+                    schedule_status_val =
+                        Some(parse_status_code_vec(val).map_err(|e| prepend("scheduleStatus", e))?);
+                }
+                "scheduleUpdated" => {
+                    schedule_updated_val = Some(
+                        DateTime::<Utc>::try_from_json(val).map_err(|e| field_err("scheduleUpdated", e))?,
+                    );
+                }
+                "sentBy" => {
+                    sent_by_val =
+                        Some(Box::<EmailAddr>::try_from_json(val).map_err(|e| field_err("sentBy", e))?);
+                }
+                "invitedBy" => {
+                    invited_by_val =
+                        Some(Box::<Id>::try_from_json(val).map_err(|e| field_err("invitedBy", e))?);
+                }
+                "delegatedTo" => {
+                    delegated_to_val = Some(parse_id_set(val).map_err(|e| prepend("delegatedTo", e))?);
+                }
+                "delegatedFrom" => {
+                    delegated_from_val = Some(parse_id_set(val).map_err(|e| prepend("delegatedFrom", e))?);
+                }
+                "memberOf" => {
+                    member_of_val = Some(parse_id_set(val).map_err(|e| prepend("memberOf", e))?);
+                }
+                "links" => {
+                    links_val =
+                        Some(parse_id_map(val, Link::try_from_json).map_err(|e| prepend("links", e))?);
+                }
+                _ => vendor_parts.push((k.into_boxed_str(), val)),
+                }
         }
 
         let mut result = Participant::new();
@@ -2633,65 +2573,123 @@ impl<V: DestructibleJsonValue> TryFromJson<V> for TaskParticipant<V> {
 
         for (key, val) in obj.into_iter() {
             let k = <V::Object as JsonObject>::key_into_string(key);
-            let consumed = parse_participant_common(
-                k.as_str(),
-                val,
-                &mut name_val,
-                &mut email_val,
-                &mut description_val,
-                &mut send_to_val,
-                &mut kind_val,
-                &mut roles_val,
-                &mut location_id_val,
-                &mut language_val,
-                &mut participation_status_val,
-                &mut participation_comment_val,
-                &mut expect_reply_val,
-                &mut schedule_agent_val,
-                &mut schedule_force_send_val,
-                &mut schedule_sequence_val,
-                &mut schedule_status_val,
-                &mut schedule_updated_val,
-                &mut sent_by_val,
-                &mut invited_by_val,
-                &mut delegated_to_val,
-                &mut delegated_from_val,
-                &mut member_of_val,
-                &mut links_val,
-                &mut vendor_parts,
-            );
-            // parse_participant_common moves val into vendor_parts on unknown key; skip task-specific
-            let _ = consumed;
-        }
-
-        // Task-specific fields were put in vendor_parts; pull them out
-        let mut remaining: Vec<(Box<str>, V)> = Vec::new();
-        // We can't easily re-parse from vendor_parts since val was moved.
-        // Instead, handle task-specific fields separately in a second pass.
-        // The approach: collect task-specific fields before calling parse_participant_common.
-        // Since we already iterated, we need a different approach for TaskParticipant.
-        // vendor_parts contains unknowns + task-specific. We store task-specific ones there.
-        for (k, v) in vendor_parts {
-            match k.as_ref() {
+            match k.as_str() {
+                "@type" => {}
                 "progress" => {
                     progress_val = Some(
-                        Token::<TaskProgress>::try_from_json(v)
+                        Token::<TaskProgress>::try_from_json(val)
                             .map_err(|e| type_field_err("progress", e))?,
                     );
                 }
                 "progressUpdated" => {
                     progress_updated_val = Some(
-                        DateTime::<Utc>::try_from_json(v)
+                        DateTime::<Utc>::try_from_json(val)
                             .map_err(|e| field_err("progressUpdated", e))?,
                     );
                 }
                 "percentComplete" => {
                     percent_complete_val = Some(
-                        Percent::try_from_json(v).map_err(|e| field_err("percentComplete", e))?,
+                        Percent::try_from_json(val).map_err(|e| field_err("percentComplete", e))?,
                     );
                 }
-                _ => remaining.push((k, v)),
-            }
+                "name" => {
+                    name_val = Some(String::try_from_json(val).map_err(|e| type_field_err("name", e))?);
+                }
+                "email" => {
+                    email_val =
+                        Some(Box::<EmailAddr>::try_from_json(val).map_err(|e| field_err("email", e))?);
+                }
+                "description" => {
+                    description_val =
+                        Some(String::try_from_json(val).map_err(|e| type_field_err("description", e))?);
+                }
+                "sendTo" => {
+                    send_to_val =
+                        Some(SendToParticipant::try_from_json(val).map_err(|e| prepend("sendTo", e))?);
+                }
+                "kind" => {
+                    kind_val = Some(
+                        Token::<ParticipantKind>::try_from_json(val)
+                            .map_err(|e| type_field_err("kind", e))?,
+                    );
+                }
+                "roles" => {
+                    roles_val = Some(
+                        HashSet::<Token<ParticipantRole>>::try_from_json(val)
+                            .map_err(|e| doc_field_err("roles", e))?,
+                    );
+                }
+                "locationId" => {
+                    location_id_val =
+                        Some(Box::<Id>::try_from_json(val).map_err(|e| field_err("locationId", e))?);
+                }
+                "language" => {
+                    language_val =
+                        Some(LanguageTag::try_from_json(val).map_err(|e| field_err("language", e))?);
+                }
+                "participationStatus" => {
+                    participation_status_val = Some(
+                        Token::<ParticipationStatus>::try_from_json(val)
+                            .map_err(|e| type_field_err("participationStatus", e))?,
+                    );
+                }
+                "participationComment" => {
+                    participation_comment_val = Some(
+                        String::try_from_json(val)
+                            .map_err(|e| type_field_err("participationComment", e))?,
+                    );
+                }
+                "expectReply" => {
+                    expect_reply_val =
+                        Some(bool::try_from_json(val).map_err(|e| type_field_err("expectReply", e))?);
+                }
+                "scheduleAgent" => {
+                    schedule_agent_val = Some(
+                        Token::<ScheduleAgent>::try_from_json(val)
+                            .map_err(|e| type_field_err("scheduleAgent", e))?,
+                    );
+                }
+                "scheduleForceSend" => {
+                    schedule_force_send_val =
+                        Some(bool::try_from_json(val).map_err(|e| type_field_err("scheduleForceSend", e))?);
+                }
+                "scheduleSequence" => {
+                    schedule_sequence_val = Some(
+                        UnsignedInt::try_from_json(val).map_err(|e| field_err("scheduleSequence", e))?,
+                    );
+                }
+                "scheduleStatus" => {
+                    schedule_status_val =
+                        Some(parse_status_code_vec(val).map_err(|e| prepend("scheduleStatus", e))?);
+                }
+                "scheduleUpdated" => {
+                    schedule_updated_val = Some(
+                        DateTime::<Utc>::try_from_json(val).map_err(|e| field_err("scheduleUpdated", e))?,
+                    );
+                }
+                "sentBy" => {
+                    sent_by_val =
+                        Some(Box::<EmailAddr>::try_from_json(val).map_err(|e| field_err("sentBy", e))?);
+                }
+                "invitedBy" => {
+                    invited_by_val =
+                        Some(Box::<Id>::try_from_json(val).map_err(|e| field_err("invitedBy", e))?);
+                }
+                "delegatedTo" => {
+                    delegated_to_val = Some(parse_id_set(val).map_err(|e| prepend("delegatedTo", e))?);
+                }
+                "delegatedFrom" => {
+                    delegated_from_val = Some(parse_id_set(val).map_err(|e| prepend("delegatedFrom", e))?);
+                }
+                "memberOf" => {
+                    member_of_val = Some(parse_id_set(val).map_err(|e| prepend("memberOf", e))?);
+                }
+                "links" => {
+                    links_val =
+                        Some(parse_id_map(val, Link::try_from_json).map_err(|e| prepend("links", e))?);
+                }
+                _ => vendor_parts.push((k.into_boxed_str(), val)),
+                }
         }
 
         let mut result = TaskParticipant::new();
@@ -2770,7 +2768,7 @@ impl<V: DestructibleJsonValue> TryFromJson<V> for TaskParticipant<V> {
         if let Some(v) = percent_complete_val {
             result.set_percent_complete(v);
         }
-        for (k, v) in remaining {
+        for (k, v) in vendor_parts {
             if let Ok(vk) = VendorStr::new(k.as_ref()) {
                 result.insert_vendor_property(vk.into(), v);
             }
