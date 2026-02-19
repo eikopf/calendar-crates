@@ -15,8 +15,8 @@ use crate::{
         set::{
             AlertAction, AlertRelativeTo, Color, DisplayPurpose, EventStatus, FreeBusyStatus,
             LinkRelation, LocationType, Method, ParticipantKind, ParticipantRole,
-            ParticipationStatus, Percent, Priority, Privacy, RelationValue, ReplyMethod,
-            ScheduleAgent, TaskProgress, VirtualLocationFeature,
+            ParticipationStatus, Percent, Priority, Privacy, RelationValue, ScheduleAgent,
+            TaskProgress, VirtualLocationFeature,
         },
         string::{
             AlphaNumeric, CalAddress, ContentId, CustomTimeZoneId, EmailAddr, GeoUri, Id,
@@ -25,6 +25,8 @@ use crate::{
         time::{DateTime, Duration, Local, SignedDuration, Utc, UtcOffset},
     },
 };
+
+type Token<T> = super::set::Token<T, Box<str>>;
 
 /// A JSCalendar group opject (RFC 8984 §2.3).
 ///
@@ -112,7 +114,7 @@ pub struct Event<V: JsonValue> {
     // Event Properties (RFC 8984 §5.1)
     pub start: DateTime<Local>,
     pub duration: Option<Duration>,
-    pub status: Option<EventStatus<Box<VendorStr>>>,
+    pub status: Option<Token<EventStatus>>,
 
     // Metadata Properties (RFC 8984 §4.1)
     pub uid: Box<Uid>,
@@ -121,7 +123,7 @@ pub struct Event<V: JsonValue> {
     pub created: Option<DateTime<Utc>>,
     pub updated: Option<DateTime<Utc>>,
     pub sequence: Option<UnsignedInt>,
-    pub method: Option<Method<Box<VendorStr>>>,
+    pub method: Option<Token<Method>>,
 
     // What and Where Properties (RFC 8984 §4.2)
     pub title: Option<String>,
@@ -146,9 +148,9 @@ pub struct Event<V: JsonValue> {
 
     // Sharing and Scheduling Properties (RFC 8984 §4.4)
     pub priority: Option<Priority>,
-    pub free_busy_status: Option<FreeBusyStatus<Box<VendorStr>>>,
-    pub privacy: Option<Privacy<Box<VendorStr>>>,
-    pub reply_to: Option<HashMap<ReplyMethod<Box<VendorStr>>, Box<Uri>>>,
+    pub free_busy_status: Option<Token<FreeBusyStatus>>,
+    pub privacy: Option<Token<Privacy>>,
+    pub reply_to: Option<ReplyTo>,
     pub sent_by: Option<Box<CalAddress>>,
     pub participants: Option<HashMap<Box<Id>, Participant<V>>>,
     pub request_status: Option<RequestStatus>,
@@ -181,7 +183,7 @@ pub struct Task<V: JsonValue> {
     pub start: Option<DateTime<Local>>,
     pub estimated_duration: Option<Duration>,
     pub percent_complete: Option<Percent>,
-    pub progress: Option<TaskProgress<Box<VendorStr>>>,
+    pub progress: Option<Token<TaskProgress>>,
     pub progress_updated: Option<DateTime<Utc>>,
 
     // Metadata Properties (RFC 8984 §4.1)
@@ -191,7 +193,7 @@ pub struct Task<V: JsonValue> {
     pub created: Option<DateTime<Utc>>,
     pub updated: Option<DateTime<Utc>>,
     pub sequence: Option<UnsignedInt>,
-    pub method: Option<Method<Box<VendorStr>>>,
+    pub method: Option<Token<Method>>,
 
     // What and Where Properties (RFC 8984 §4.2)
     pub title: Option<String>,
@@ -216,9 +218,9 @@ pub struct Task<V: JsonValue> {
 
     // Sharing and Scheduling Properties (RFC 8984 §4.4)
     pub priority: Option<Priority>,
-    pub free_busy_status: Option<FreeBusyStatus<Box<VendorStr>>>,
-    pub privacy: Option<Privacy<Box<VendorStr>>>,
-    pub reply_to: Option<HashMap<ReplyMethod<Box<VendorStr>>, Box<Uri>>>,
+    pub free_busy_status: Option<Token<FreeBusyStatus>>,
+    pub privacy: Option<Token<Privacy>>,
+    pub reply_to: Option<ReplyTo>,
     pub sent_by: Option<Box<CalAddress>>,
     pub participants: Option<HashMap<Box<Id>, TaskParticipant<V>>>,
     pub request_status: Option<RequestStatus>,
@@ -245,7 +247,7 @@ pub struct Location<V> {
     pub name: Option<String>,
     pub description: Option<String>,
     pub location_types: Option<HashSet<LocationType>>,
-    pub relative_to: Option<RelationValue<Box<VendorStr>>>,
+    pub relative_to: Option<Token<RelationValue>>,
     pub time_zone: Option<String>,
     pub coordinates: Option<Box<GeoUri>>,
     pub links: Option<HashMap<Box<Id>, Link<V>>>,
@@ -260,7 +262,7 @@ pub struct VirtualLocation<V> {
     pub name: Option<String>,
     pub description: Option<String>,
     pub uri: Box<Uri>,
-    pub features: Option<HashSet<VirtualLocationFeature<Box<VendorStr>>>>,
+    pub features: Option<HashSet<Token<VirtualLocationFeature>>>,
 
     #[structible(key = Box<VendorStr>)]
     pub vendor_property: Option<V>,
@@ -274,7 +276,7 @@ pub struct Link<V> {
     pub media_type: Option<Box<MediaType>>,
     pub size: Option<UnsignedInt>,
     pub relation: Option<LinkRelation>,
-    pub display: Option<DisplayPurpose<Box<str>>>,
+    pub display: Option<Token<DisplayPurpose>>,
     pub title: Option<String>,
 
     #[structible(key = Box<VendorStr>)]
@@ -319,14 +321,14 @@ pub struct Participant<V> {
     pub email: Option<Box<EmailAddr>>,
     pub description: Option<String>,
     pub send_to: Option<SendToParticipant>,
-    pub kind: Option<ParticipantKind<Box<VendorStr>>>,
-    pub roles: Option<HashSet<ParticipantRole<Box<VendorStr>>>>,
+    pub kind: Option<Token<ParticipantKind>>,
+    pub roles: Option<HashSet<Token<ParticipantRole>>>, // this could be a bitset
     pub location_id: Option<Box<Id>>,
     pub language: Option<LanguageTag>,
-    pub participation_status: Option<ParticipationStatus<Box<VendorStr>>>,
+    pub participation_status: Option<Token<ParticipationStatus>>,
     pub participation_comment: Option<String>,
     pub expect_reply: Option<bool>,
-    pub schedule_agent: Option<ScheduleAgent<Box<VendorStr>>>,
+    pub schedule_agent: Option<Token<ScheduleAgent>>,
     pub schedule_force_send: Option<bool>,
     pub schedule_sequence: Option<UnsignedInt>,
     pub schedule_status: Option<Vec<StatusCode>>,
@@ -350,14 +352,14 @@ pub struct TaskParticipant<V> {
     pub email: Option<Box<EmailAddr>>,
     pub description: Option<String>,
     pub send_to: Option<SendToParticipant>,
-    pub kind: Option<ParticipantKind<Box<VendorStr>>>,
-    pub roles: Option<HashSet<ParticipantRole<Box<VendorStr>>>>,
+    pub kind: Option<Token<ParticipantKind>>,
+    pub roles: Option<HashSet<Token<ParticipantRole>>>, // this could be a bitset
     pub location_id: Option<Box<Id>>,
     pub language: Option<LanguageTag>,
-    pub participation_status: Option<ParticipationStatus<Box<VendorStr>>>,
+    pub participation_status: Option<Token<ParticipationStatus>>,
     pub participation_comment: Option<String>,
     pub expect_reply: Option<bool>,
-    pub schedule_agent: Option<ScheduleAgent<Box<VendorStr>>>,
+    pub schedule_agent: Option<Token<ScheduleAgent>>,
     pub schedule_force_send: Option<bool>,
     pub schedule_sequence: Option<UnsignedInt>,
     pub schedule_status: Option<Vec<StatusCode>>,
@@ -370,7 +372,7 @@ pub struct TaskParticipant<V> {
     pub links: Option<HashMap<Box<Id>, Link<V>>>,
 
     // task-specific fields
-    pub progress: Option<TaskProgress<Box<VendorStr>>>,
+    pub progress: Option<Token<TaskProgress>>,
     pub progress_updated: Option<DateTime<Utc>>,
     pub percent_complete: Option<Percent>,
 
@@ -378,10 +380,26 @@ pub struct TaskParticipant<V> {
     pub vendor_property: Option<V>,
 }
 
-/// The type of the sendTo property on [`Participant`] (RFC 8984, §4.4.6).
-///
-/// Note: This type does not have a separate vendor_property field because the `other` field
-/// already captures all unknown method names (including vendor-prefixed ones) as a catch-all.
+// TODO: define an HttpsUrl newtype for URIs that are statically known to start with the https:
+// scheme, which should then be used for the type of ReplyTo::web
+
+/// The type of the `replyTo` property (RFC 8984 §4.4.4).
+#[structible]
+pub struct ReplyTo {
+    /// If the `imip` field is defined, then the organizer accepts an iMIP (RFC 6047) response at
+    /// the corresponding email address.
+    pub imip: Option<Box<CalAddress>>,
+    /// If the `web` field is defined, then opening the corresponding [`Uri`] in a web browser will
+    /// provide the user with a page where they can submit a reply to the organizer.
+    pub web: Option<Box<Uri>>,
+    /// If any other `replyTo` method is present, the organizer is considered to be identified by
+    /// the corresponding [`Uri`], but the method for submitting the response is undefined. This
+    /// includes vendor-prefixed method names.
+    #[structible(key = Box<AlphaNumeric>)]
+    pub other: Option<Box<Uri>>,
+}
+
+/// The type of the `sendTo` property on [`Participant`] (RFC 8984 §4.4.6).
 #[structible]
 pub struct SendToParticipant {
     /// If the `imip` field is defined, then the participant accepts an iMIP (RFC 6047) request at
@@ -403,7 +421,7 @@ pub struct Alert<V: JsonValue> {
     pub trigger: Trigger<V>,
     pub acknowledged: Option<DateTime<Utc>>,
     pub related_to: Option<HashMap<Box<str>, Relation<V>>>,
-    pub action: Option<AlertAction<Box<str>>>,
+    pub action: Option<Token<AlertAction>>,
 
     #[structible(key = Box<VendorStr>)]
     pub vendor_property: Option<V>,
@@ -449,7 +467,7 @@ where
 #[structible]
 pub struct OffsetTrigger<V> {
     pub offset: SignedDuration,
-    pub relative_to: Option<AlertRelativeTo<Box<VendorStr>>>,
+    pub relative_to: Option<Token<AlertRelativeTo>>,
 
     #[structible(key = Box<VendorStr>)]
     pub vendor_property: Option<V>,
@@ -464,13 +482,15 @@ pub struct AbsoluteTrigger<V> {
     pub vendor_property: Option<V>,
 }
 
+/// A set of relationship types (RFC 8984 §1.4.10).
+#[structible]
+pub struct Relation<V> {
+    pub relations: HashSet<Token<RelationValue>>,
+
+    #[structible(key = Box<VendorStr>)]
+    pub vendor_property: Option<V>,
+}
+
 /// A set of patches to be applied to a JSON object (RFC 8984 §1.4.9).
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct PatchObject<V>(HashMap<Box<ImplicitJsonPointer>, V>);
-
-/// A set of relationship types (RFC 8984 §1.4.10).
-#[derive(Debug, Clone, PartialEq)]
-pub struct Relation<V> {
-    relations: HashSet<RelationValue<Box<VendorStr>>>,
-    vendor_property: Option<V>,
-}
