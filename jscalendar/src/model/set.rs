@@ -240,7 +240,9 @@ impl<V: DestructibleJsonValue> TryFromJson<V> for Percent {
             TypeErrorOr::TypeError(t) => TypeErrorOr::TypeError(t),
             TypeErrorOr::Other(_) => TypeErrorOr::Other(InvalidPercentError(u64::MAX)),
         })?;
-        Percent::new(n.get() as u8)
+        let v = u8::try_from(n.get())
+            .map_err(|_| TypeErrorOr::Other(InvalidPercentError(n.get())))?;
+        Percent::new(v)
             .ok_or(InvalidPercentError(n.get()))
             .map_err(TypeErrorOr::Other)
     }

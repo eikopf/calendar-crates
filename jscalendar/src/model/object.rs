@@ -1132,7 +1132,10 @@ fn parse_by_day<V: DestructibleJsonValue>(
             }
             Some(n) => {
                 let sign = if n > 0 { Sign::Pos } else { Sign::Neg };
-                let abs = n.unsigned_abs() as u8;
+                let abs = u8::try_from(n.unsigned_abs()).map_err(|_| DocumentError {
+                    path: [PathSegment::Index(i)].into(),
+                    error: TypeErrorOr::Other(ByRuleParseError::InvalidValue),
+                })?;
                 let week = IsoWeek::from_index(abs).ok_or_else(|| DocumentError {
                     path: [PathSegment::Index(i)].into(),
                     error: TypeErrorOr::Other(ByRuleParseError::InvalidValue),
@@ -1155,8 +1158,10 @@ fn parse_by_hour<V: DestructibleJsonValue>(
             TypeErrorOr::TypeError(t) => TypeErrorOr::TypeError(t),
             TypeErrorOr::Other(_) => TypeErrorOr::Other(ByRuleParseError::InvalidValue),
         })?;
-        let h = crate::model::rrule::Hour::from_repr(n.get() as u8)
-            .ok_or(TypeErrorOr::Other(ByRuleParseError::InvalidValue))?;
+        let h = crate::model::rrule::Hour::from_repr(
+            u8::try_from(n.get()).map_err(|_| TypeErrorOr::Other(ByRuleParseError::InvalidValue))?,
+        )
+        .ok_or(TypeErrorOr::Other(ByRuleParseError::InvalidValue))?;
         set.set(h);
     }
     Ok(set)
@@ -1172,8 +1177,10 @@ fn parse_by_minute<V: DestructibleJsonValue>(
             TypeErrorOr::TypeError(t) => TypeErrorOr::TypeError(t),
             TypeErrorOr::Other(_) => TypeErrorOr::Other(ByRuleParseError::InvalidValue),
         })?;
-        let m = crate::model::rrule::Minute::from_repr(n.get() as u8)
-            .ok_or(TypeErrorOr::Other(ByRuleParseError::InvalidValue))?;
+        let m = crate::model::rrule::Minute::from_repr(
+            u8::try_from(n.get()).map_err(|_| TypeErrorOr::Other(ByRuleParseError::InvalidValue))?,
+        )
+        .ok_or(TypeErrorOr::Other(ByRuleParseError::InvalidValue))?;
         set.set(m);
     }
     Ok(set)
@@ -1189,8 +1196,10 @@ fn parse_by_second<V: DestructibleJsonValue>(
             TypeErrorOr::TypeError(t) => TypeErrorOr::TypeError(t),
             TypeErrorOr::Other(_) => TypeErrorOr::Other(ByRuleParseError::InvalidValue),
         })?;
-        let s = crate::model::rrule::Second::from_repr(n.get() as u8)
-            .ok_or(TypeErrorOr::Other(ByRuleParseError::InvalidValue))?;
+        let s = crate::model::rrule::Second::from_repr(
+            u8::try_from(n.get()).map_err(|_| TypeErrorOr::Other(ByRuleParseError::InvalidValue))?,
+        )
+        .ok_or(TypeErrorOr::Other(ByRuleParseError::InvalidValue))?;
         set.set(s);
     }
     Ok(set)
@@ -1206,8 +1215,10 @@ fn parse_by_month<V: DestructibleJsonValue>(
             TypeErrorOr::TypeError(t) => TypeErrorOr::TypeError(t),
             TypeErrorOr::Other(_) => TypeErrorOr::Other(ByRuleParseError::InvalidValue),
         })?;
-        let m = Month::new(n.get() as u8)
-            .map_err(|_| TypeErrorOr::Other(ByRuleParseError::InvalidValue))?;
+        let m = Month::new(
+            u8::try_from(n.get()).map_err(|_| TypeErrorOr::Other(ByRuleParseError::InvalidValue))?,
+        )
+        .map_err(|_| TypeErrorOr::Other(ByRuleParseError::InvalidValue))?;
         set.set(m);
     }
     Ok(set)
@@ -1229,7 +1240,9 @@ fn parse_year_day_nums<V: DestructibleJsonValue>(
         } else {
             (Sign::Neg, raw.unsigned_abs())
         };
-        let ydn = crate::model::rrule::YearDayNum::from_signed_index(sign, abs as u16)
+        let abs_u16 = u16::try_from(abs)
+            .map_err(|_| TypeErrorOr::Other(ByRuleParseError::InvalidValue))?;
+        let ydn = crate::model::rrule::YearDayNum::from_signed_index(sign, abs_u16)
             .ok_or(TypeErrorOr::Other(ByRuleParseError::InvalidValue))?;
         set.insert(ydn);
     }
@@ -1252,8 +1265,10 @@ fn parse_by_month_day<V: DestructibleJsonValue>(
         } else {
             (Sign::Neg, raw.unsigned_abs())
         };
-        let md = crate::model::rrule::MonthDay::from_repr(abs as u8)
-            .ok_or(TypeErrorOr::Other(ByRuleParseError::InvalidValue))?;
+        let md = crate::model::rrule::MonthDay::from_repr(
+            u8::try_from(abs).map_err(|_| TypeErrorOr::Other(ByRuleParseError::InvalidValue))?,
+        )
+        .ok_or(TypeErrorOr::Other(ByRuleParseError::InvalidValue))?;
         let idx = crate::model::rrule::MonthDaySetIndex::from_signed_month_day(sign, md);
         set.set(idx);
     }
@@ -1276,8 +1291,10 @@ fn parse_by_week_no<V: DestructibleJsonValue>(
         } else {
             (Sign::Neg, raw.unsigned_abs())
         };
-        let week = IsoWeek::from_index(abs as u8)
-            .ok_or(TypeErrorOr::Other(ByRuleParseError::InvalidValue))?;
+        let week = IsoWeek::from_index(
+            u8::try_from(abs).map_err(|_| TypeErrorOr::Other(ByRuleParseError::InvalidValue))?,
+        )
+        .ok_or(TypeErrorOr::Other(ByRuleParseError::InvalidValue))?;
         let idx = crate::model::rrule::WeekNoSetIndex::from_signed_week(sign, week);
         set.set(idx);
     }
