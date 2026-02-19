@@ -624,7 +624,7 @@ pub trait ConstructibleJsonValue: Sized + JsonValue {
 
 /// A type which represents a JSON object.
 pub trait JsonObject: Sized {
-    type Key;
+    type Key: Borrow<str>;
     type Value;
 
     fn with_capacity(capacity: usize) -> Self;
@@ -687,7 +687,7 @@ pub trait JsonArray: Sized {
     }
 }
 
-impl<K: Eq + Hash + Into<String>, V> JsonObject for HashMap<K, V> {
+impl<K: Eq + Hash + Into<String> + Borrow<str>, V> JsonObject for HashMap<K, V> {
     type Key = K;
     type Value = V;
 
