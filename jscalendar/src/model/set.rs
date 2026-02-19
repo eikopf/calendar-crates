@@ -2,76 +2,80 @@
 
 pub use calendar_types::{
     css::Css3Color,
-    set::{LinkRelation, LocationType},
+    set::{LinkRelation, LocationType, Token},
 };
 pub use rfc5545_types::set::{Method, Percent, Priority};
+use strum::EnumString;
 
 /// A value which may appear in the `relation` field of a `Relation` object (RFC 8984 §1.4.10).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, EnumString)]
 #[non_exhaustive]
-pub enum RelationValue<S> {
+#[strum(ascii_case_insensitive)]
+pub enum RelationValue {
     First,
     Next,
     Child,
     Parent,
-    Other(S),
 }
 
 /// The intended purpose of a link to an image (RFC 8984 §1.4.11).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, EnumString)]
 #[non_exhaustive]
-pub enum DisplayPurpose<S> {
+#[strum(ascii_case_insensitive)]
+pub enum DisplayPurpose {
     Badge,
     Graphic,
     FullSize,
     Thumbnail,
-    Other(S),
 }
 
 /// A free/busy status (RFC 8984 §4.4.2).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, EnumString)]
 #[non_exhaustive]
-pub enum FreeBusyStatus<S> {
+#[strum(ascii_case_insensitive)]
+pub enum FreeBusyStatus {
     Free,
     Busy,
-    Other(S),
 }
 
 /// A privacy level (RFC 8984 §4.4.3).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, EnumString)]
 #[non_exhaustive]
-pub enum Privacy<S> {
+#[strum(ascii_case_insensitive)]
+pub enum Privacy {
     Public,
     Private,
     Secret,
-    Other(S),
 }
 
 /// An event status (RFC 8984 §5.1.3).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, EnumString)]
 #[non_exhaustive]
-pub enum EventStatus<S> {
+#[strum(ascii_case_insensitive)]
+pub enum EventStatus {
     Confirmed,
     Cancelled,
     Tentative,
-    Other(S),
 }
 
 /// A task progress status (RFC 8984 §5.2.5).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, EnumString)]
 #[non_exhaustive]
-pub enum TaskProgress<S> {
+#[strum(ascii_case_insensitive)]
+pub enum TaskProgress {
+    #[strum(serialize = "needs-action")]
     NeedsAction,
+    #[strum(serialize = "in-process")]
     InProcess,
     Completed,
     Cancelled,
-    Other(S),
 }
 
 /// A feature supported by a virutal location (RFC 8984 §4.2.6).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, EnumString)]
 #[non_exhaustive]
-pub enum VirtualLocationFeature<S> {
+#[strum(ascii_case_insensitive)]
+pub enum VirtualLocationFeature {
     Audio,
     Chat,
     Feed,
@@ -79,80 +83,80 @@ pub enum VirtualLocationFeature<S> {
     Phone,
     Screen,
     Video,
-    Other(S),
 }
 
 /// A reply method identifier (RFC 8984 §4.4.4).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, EnumString)]
 #[non_exhaustive]
-pub enum ReplyMethod<S> {
+#[strum(ascii_case_insensitive)]
+pub enum ReplyMethod {
     Imip,
     Web,
-    Other(S),
 }
 
 /// The kind of a participant (RFC 8984 §4.4.6).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, EnumString)]
 #[non_exhaustive]
-pub enum ParticipantKind<S> {
+#[strum(ascii_case_insensitive)]
+pub enum ParticipantKind {
     Individual,
     Group,
     Location,
     Resource,
-    Other(S),
 }
 
 /// The role of a participant (RFC 8984 §4.4.6).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, EnumString)]
 #[non_exhaustive]
-pub enum ParticipantRole<S> {
+#[strum(ascii_case_insensitive)]
+pub enum ParticipantRole {
     Owner,
     Attendee,
     Optional,
     Informational,
     Chair,
     Contact,
-    Other(S),
 }
 
 /// The status of a participant (RFC 8984 §4.4.6).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, EnumString)]
 #[non_exhaustive]
-pub enum ParticipationStatus<S> {
+#[strum(ascii_case_insensitive)]
+pub enum ParticipationStatus {
+    #[strum(serialize = "needs-action")]
     NeedsAction,
     Accepted,
     Declined,
     Tentative,
     Delegated,
-    Other(S),
 }
 
 /// The agent responsible for sending scheduling messages to a participant (RFC 8984 §4.4.6).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, EnumString)]
 #[non_exhaustive]
-pub enum ScheduleAgent<S> {
+#[strum(ascii_case_insensitive)]
+pub enum ScheduleAgent {
     Server,
     Client,
     None,
-    Other(S),
 }
 
 /// The time property that an alert is relative to (RFC 8984 §4.5.2).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, EnumString)]
 #[non_exhaustive]
-pub enum AlertRelativeTo<S> {
+#[strum(ascii_case_insensitive)]
+pub enum AlertRelativeTo {
     Start,
     End,
-    Other(S),
 }
 
 /// The action by which an alert is conveyed (RFC 8984 §4.5.2).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, EnumString)]
 #[non_exhaustive]
-pub enum AlertAction<S> {
+#[strum(ascii_case_insensitive)]
+pub enum AlertAction {
     Display,
     Email,
-    Other(S),
 }
 
 /// An RGB color value.
