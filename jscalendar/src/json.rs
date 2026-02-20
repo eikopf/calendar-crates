@@ -22,6 +22,7 @@ use crate::parser::{
     UtcDateTimeParseError, duration, local_date_time, parse_full, signed_duration, utc_date_time,
 };
 
+/// Fallible conversion from a JSON value into a Rust type.
 pub trait TryFromJson<V>
 where
     Self: Sized,
@@ -179,6 +180,7 @@ where
     }
 }
 
+/// Error returned when parsing a `HashSet` from a JSON object.
 #[derive(Debug, Clone, Copy, PartialEq, Error)]
 pub enum HashSetTryFromJsonError<E> {
     #[error("encountered `false` as a value in a set")]
@@ -223,6 +225,7 @@ where
     }
 }
 
+/// Fallible conversion from a Rust type into a JSON value.
 pub trait TryIntoJson<V>
 where
     V: ConstructibleJsonValue,
@@ -232,6 +235,7 @@ where
     fn try_into_json(self) -> Result<V, Self::Error>;
 }
 
+/// Infallible conversion from a Rust type into a JSON value.
 pub trait IntoJson<V>
 where
     V: ConstructibleJsonValue,
@@ -247,6 +251,7 @@ impl<T: IntoJson<V>, V: ConstructibleJsonValue> TryIntoJson<V> for T {
     }
 }
 
+/// Conversion of a field-level error into a [`DocumentError`] with a JSON path.
 pub trait IntoDocumentError: Sized {
     type Residual;
 
@@ -307,6 +312,7 @@ impl<E: IntoDocumentError> IntoDocumentError for DocumentError<E> {
     }
 }
 
+/// Lifts a [`TypeError`] into the [`TypeErrorOr`] wrapper so that nested errors compose uniformly.
 pub trait LiftTypeError {
     type Residual;
 
@@ -348,6 +354,7 @@ impl<E> LiftTypeError for TypeErrorOr<E> {
     }
 }
 
+/// An error annotated with the JSON path at which it occurred.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DocumentError<E> {
     pub(crate) path: VecDeque<PathSegment<Box<str>>>,
@@ -396,10 +403,14 @@ impl<E: std::fmt::Display> std::fmt::Display for DocumentError<E> {
 
 impl<E: std::fmt::Display + std::fmt::Debug> std::error::Error for DocumentError<E> {}
 
+/// A single segment in a JSON path.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PathSegment<S> {
+    /// An array index.
     Index(usize),
+    /// A statically-known object key.
     Static(&'static str),
+    /// A dynamically-owned object key.
     String(S),
 }
 
@@ -617,6 +628,7 @@ impl std::fmt::Display for ValueType {
     }
 }
 
+/// Either a JSON type mismatch or a domain-specific error `E`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Error)]
 #[error(transparent)]
 pub enum TypeErrorOr<E> {
@@ -624,6 +636,7 @@ pub enum TypeErrorOr<E> {
     Other(E),
 }
 
+/// The JSON value had the wrong type (e.g. expected a string but received an object).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Error)]
 #[error("expected a value of type {expected} but received type {received} instead")]
 pub struct TypeError {
@@ -631,6 +644,7 @@ pub struct TypeError {
     pub received: ValueType,
 }
 
+/// Error returned when a JSON number cannot be converted to [`Int`].
 #[derive(Debug, Clone, Copy, PartialEq, PartialOrd, Error)]
 pub enum IntoIntError {
     #[error("expected an integer but received {0}")]
@@ -641,6 +655,7 @@ pub enum IntoIntError {
     OutsideRangeUnsigned(u64),
 }
 
+/// Error returned when a JSON number cannot be converted to [`UnsignedInt`].
 #[derive(Debug, Clone, Copy, PartialEq, PartialOrd, Error)]
 pub enum IntoUnsignedIntError {
     #[error("expected an integer but received {0}")]

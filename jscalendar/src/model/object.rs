@@ -554,6 +554,7 @@ impl<V> PatchObject<V> {
     }
 }
 
+/// A [`PatchObject`] key was not a valid implicit JSON pointer.
 #[derive(Debug, Clone, PartialEq, Error)]
 #[error("the key {key} is not an implicit JSON pointer")]
 pub struct InvalidPatchObjectError {
@@ -603,6 +604,7 @@ impl<V: DestructibleJsonValue> TryFromJson<V> for PatchObject<V> {
 // Error type and helpers for object parsing
 // ============================================================================
 
+/// Error returned when parsing a JSCalendar object from JSON.
 #[derive(Debug, Clone, PartialEq, Eq, Error)]
 #[non_exhaustive]
 pub enum ObjectFromJsonError {
@@ -664,6 +666,7 @@ fn missing(field: &'static str) -> ObjErr {
 // UtcOffset TryFromJson
 // ============================================================================
 
+/// The string was not a valid `[+-]HH:MM[:SS]` UTC offset.
 #[derive(Debug, Clone, PartialEq, Eq, Error)]
 #[error("invalid UTC offset string: {0:?}")]
 pub struct InvalidUtcOffsetError(pub Box<str>);
@@ -710,6 +713,7 @@ fn parse_utc_offset(s: &str) -> Option<UtcOffset> {
 // StatusCode TryFromJson
 // ============================================================================
 
+/// The string was not a valid `N.N[.N]` iCalendar status code.
 #[derive(Debug, Clone, PartialEq, Eq, Error)]
 #[error("invalid status code string: {0:?}")]
 pub struct InvalidStatusCodeError(pub Box<str>);
@@ -755,6 +759,7 @@ fn parse_status_code(s: &str) -> Option<StatusCode> {
 // RequestStatus TryFromJson
 // ============================================================================
 
+/// The string was not a valid `code;description[;data]` request status.
 #[derive(Debug, Clone, PartialEq, Eq, Error)]
 #[error("invalid request status string: {0:?}")]
 pub struct InvalidRequestStatusError(pub Box<str>);
@@ -789,6 +794,7 @@ fn parse_request_status(s: &str) -> Option<RequestStatus> {
 // RRule TryFromJson
 // ============================================================================
 
+/// Error returned when parsing a recurrence rule from JSON.
 #[derive(Debug, Clone, PartialEq, Eq, Error)]
 #[non_exhaustive]
 pub enum RRuleFromJsonError {
@@ -1098,6 +1104,7 @@ fn parse_date_or_datetime(s: &str) -> Option<DateTimeOrDate<crate::model::time::
     None
 }
 
+/// Error returned when parsing a BYxxx recurrence rule component.
 #[derive(Debug, Clone, PartialEq, Eq, Error)]
 #[non_exhaustive]
 pub enum ByRuleParseError {
