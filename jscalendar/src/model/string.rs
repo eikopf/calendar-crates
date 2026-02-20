@@ -2,54 +2,17 @@
 
 use std::{borrow::Cow, fmt::Debug, num::NonZero};
 
-use std::str::FromStr;
-
-pub use calendar_types::string::{InvalidUidError, InvalidUriError, Uid, UidBuf, Uri, UriBuf};
+pub use calendar_types::string::{
+    InvalidUidError, InvalidUriError, LanguageTag, LanguageTagParseError, Uid, UidBuf, Uri, UriBuf,
+};
 use dizzy::DstNewtype;
 use rfc5545_types::string::ParamText;
 use thiserror::Error;
 
-/// A BCP 47 language tag (RFC 5646).
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct LanguageTag(language_tags::LanguageTag);
-
-impl LanguageTag {
-    /// Parses a language tag from a string.
-    pub fn parse(s: &str) -> Result<Self, language_tags::ParseError> {
-        language_tags::LanguageTag::parse(s).map(LanguageTag)
-    }
-
-    /// Returns the language tag as a string.
-    #[inline]
-    pub fn as_str(&self) -> &str {
-        self.0.as_str()
-    }
-
-    /// Returns the primary language subtag.
-    #[inline]
-    pub fn primary_language(&self) -> &str {
-        self.0.primary_language()
-    }
-}
-
-impl FromStr for LanguageTag {
-    type Err = language_tags::ParseError;
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        Self::parse(s)
-    }
-}
-
-impl std::fmt::Display for LanguageTag {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        std::fmt::Display::fmt(&self.0, f)
-    }
-}
-
 use crate::json::{DestructibleJsonValue, TryFromJson, TypeErrorOr};
 
 impl<V: DestructibleJsonValue> TryFromJson<V> for LanguageTag {
-    type Error = TypeErrorOr<StringError<language_tags::ParseError>>;
+    type Error = TypeErrorOr<StringError<LanguageTagParseError>>;
 
     fn try_from_json(value: V) -> Result<Self, Self::Error> {
         let input = value.try_into_string()?;
