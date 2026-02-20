@@ -24,6 +24,14 @@ use super::{
 use functor_derive::Functor;
 pub use mitsein::NonEmpty;
 
+// Types re-exported from workspace crates
+pub use calendar_types::time::{IsoWeek, Weekday};
+pub use rfc5545_types::set::{
+    Encoding, EventStatus, Gregorian, JournalStatus, Priority, PriorityClass, ThisAndFuture,
+    TimeTransparency, TodoStatus, TriggerRelation, Version,
+};
+pub use rfc5545_types::value::Geo;
+
 /// The INTEGER type as defined in RFC 5545 §3.3.8.
 pub type Integer = i32;
 
@@ -32,17 +40,6 @@ pub type Float = f64;
 
 /// A strictly positive [`Integer`].
 pub type PositiveInteger = NonZero<u32>;
-
-/// The single allowed value of the CALSCALE property.
-#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
-pub struct Gregorian;
-
-/// The value of the VERSION property. This type is an enum because it could potentially obtain a
-/// new value in the future, but this is extremely unlikely.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Version {
-    V2_0,
-}
 
 /// A method as defined in RFC 5546 §1.4
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Functor)]
@@ -184,63 +181,6 @@ impl From<Local> for TimeFormat {
     }
 }
 
-/// One of the seven weekdays.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
-#[repr(u8)]
-pub enum Weekday {
-    Monday,
-    Tuesday,
-    Wednesday,
-    Thursday,
-    Friday,
-    Saturday,
-    Sunday,
-}
-
-impl Weekday {
-    pub const fn from_repr(repr: u8) -> Option<Self> {
-        match repr {
-            0..=6 => {
-                // SAFETY: the valid discriminants of Self are exactly the
-                // values of the range 0..=6.
-                Some(unsafe { std::mem::transmute::<u8, Self>(repr) })
-            }
-            _ => None,
-        }
-    }
-
-    pub fn iter() -> impl ExactSizeIterator<Item = Self> {
-        const VARIANTS: [Weekday; 7] = [
-            Weekday::Monday,
-            Weekday::Tuesday,
-            Weekday::Wednesday,
-            Weekday::Thursday,
-            Weekday::Friday,
-            Weekday::Saturday,
-            Weekday::Sunday,
-        ];
-
-        VARIANTS.iter().copied()
-    }
-}
-
-/// The possible values of the ENCODING parameter.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Encoding {
-    /// The `8bit` text encoding defined in RFC 2045.
-    Bit8,
-    /// The `BASE64` binary encoding defined in RFC 4648.
-    Base64,
-}
-
-/// The value of the TRANSP property (RFC 5545 §3.8.2.7).
-#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
-pub enum TimeTransparency {
-    #[default]
-    Opaque,
-    Transparent,
-}
-
 /// RFC 5545 §3.2.8
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FormatType(pub(crate) mime::Mime);
@@ -342,6 +282,7 @@ impl<S> Default for ParticipationRole<S> {
     }
 }
 
+/// A unified status value covering all component types (RFC 5545 §3.8.1.11).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Status {
     Tentative,
@@ -352,28 +293,6 @@ pub enum Status {
     InProcess,
     Draft,
     Final,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum EventStatus {
-    Tentative,
-    Confirmed,
-    Cancelled,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum TodoStatus {
-    NeedsAction,
-    Completed,
-    InProcess,
-    Cancelled,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum JournalStatus {
-    Draft,
-    Final,
-    Cancelled,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Functor)]
@@ -459,12 +378,6 @@ pub enum AlarmAction<S> {
 pub enum TriggerValue {
     Duration(Duration),
     DateTime(DateTime<Utc>),
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum TriggerRelation {
-    Start,
-    End,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Functor)]
@@ -571,10 +484,6 @@ impl<S> Default for ClassValue<S> {
     }
 }
 
-/// The only possible value of the `RANGE` parameter.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-pub struct ThisAndFuture;
-
 /// Period of time.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Period<F = TimeFormat> {
@@ -642,98 +551,9 @@ pub enum DurationTime<T = usize> {
     S { seconds: T },
 }
 
-/// A latitude-longitude pair of geographic coordinates (RFC 5545 §3.8.1.6).
-///
-/// # Precision
-/// To quote directly from RFC 5545 §3.8.1.6 (_Description_):
-/// > The longitude and latitude values MAY be specified up to six decimal
-/// > places, which will allow for accuracy to within one meter of geographical
-/// > position. Receiving applications MUST accept values of this precision and
-/// > MAY truncate values of greater position.
-///
-/// And again from the next paragraph:
-/// > Whole degrees of latitude shall be represented by a two-digit decimal
-/// > number ranging from 0 through 90. Whole degrees of longitude shall be
-/// > represented by a decimal number ranging from 0 through 180.
-///
-/// So as an upper bound, we need to preserve decimal precision up to 6 digits
-/// in the range `(-181, 181)`. Without diving into immense detail[^blogpost],
-/// it will suffice to know that [`f64`] has the necessary level of precision in
-/// this range.
-///
-/// [^blogpost]: See [this blogpost](https://blog.demofox.org/2017/11/21/floating-point-precision/)
-///     for the relevant details about precision in IEEE-754.
-#[derive(Debug, Clone, Copy, PartialEq, PartialOrd)]
-pub struct Geo {
-    pub lat: f64,
-    pub lon: f64,
-}
-
 /// An integer in the range `0..=100`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub struct CompletionPercentage(pub(crate) u8);
-
-#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
-pub enum Priority {
-    #[default]
-    Zero,
-    A1,
-    A2,
-    A3,
-    B1,
-    B2,
-    B3,
-    C1,
-    C2,
-    C3,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
-pub enum PriorityClass {
-    Low,
-    Medium,
-    High,
-}
-
-impl PartialOrd for Priority {
-    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
-        if matches!(self, Self::Zero) || matches!(other, Self::Zero) {
-            None
-        } else {
-            let a = (*self) as u8;
-            let b = (*other) as u8;
-
-            match a.cmp(&b) {
-                std::cmp::Ordering::Less => Some(std::cmp::Ordering::Greater),
-                std::cmp::Ordering::Equal => Some(std::cmp::Ordering::Equal),
-                std::cmp::Ordering::Greater => Some(std::cmp::Ordering::Less),
-            }
-        }
-    }
-}
-
-impl Priority {
-    pub const fn is_low(self) -> bool {
-        matches!(self.into_class(), Some(PriorityClass::Low))
-    }
-
-    pub const fn is_medium(self) -> bool {
-        matches!(self.into_class(), Some(PriorityClass::Medium))
-    }
-
-    pub const fn is_high(self) -> bool {
-        matches!(self.into_class(), Some(PriorityClass::High))
-    }
-
-    pub const fn into_class(self) -> Option<PriorityClass> {
-        match self {
-            Self::Zero => None,
-            Self::A1 | Self::A2 | Self::A3 | Self::B1 => Some(PriorityClass::High),
-            Self::B2 => Some(PriorityClass::Medium),
-            Self::B3 | Self::C1 | Self::C2 | Self::C3 => Some(PriorityClass::Low),
-        }
-    }
-}
 
 /// A UTC offset (RFC 5545 §3.3.14).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -742,81 +562,6 @@ pub struct UtcOffset {
     pub hours: u8,
     pub minutes: u8,
     pub seconds: Option<u8>,
-}
-
-/// An ISO week ranging from W1 to W53.
-#[repr(u8)]
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
-pub enum IsoWeek {
-    W1 = 1,
-    W2,
-    W3,
-    W4,
-    W5,
-    W6,
-    W7,
-    W8,
-    W9,
-    W10,
-    W11,
-    W12,
-    W13,
-    W14,
-    W15,
-    W16,
-    W17,
-    W18,
-    W19,
-    W20,
-    W21,
-    W22,
-    W23,
-    W24,
-    W25,
-    W26,
-    W27,
-    W28,
-    W29,
-    W30,
-    W31,
-    W32,
-    W33,
-    W34,
-    W35,
-    W36,
-    W37,
-    W38,
-    W39,
-    W40,
-    W41,
-    W42,
-    W43,
-    W44,
-    W45,
-    W46,
-    W47,
-    W48,
-    W49,
-    W50,
-    W51,
-    W52,
-    W53,
-}
-
-impl IsoWeek {
-    pub const fn index(&self) -> NonZero<u8> {
-        NonZero::new(*self as u8).unwrap()
-    }
-
-    pub const fn from_index(index: u8) -> Option<Self> {
-        match index {
-            1..=53 => {
-                let week: Self = unsafe { std::mem::transmute(index) };
-                Some(week)
-            }
-            _ => None,
-        }
-    }
 }
 
 /// One of the twelve Gregorian months.

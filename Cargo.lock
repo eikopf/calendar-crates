@@ -29,6 +29,7 @@ name = "calico"
 version = "0.2.0"
 dependencies = [
  "base64",
+ "calendar-types",
  "derive_more",
  "enumflags2",
  "functor_derive",
@@ -39,6 +40,7 @@ dependencies = [
  "mime",
  "mitsein",
  "paste",
+ "rfc5545-types",
  "strum",
  "winnow",
 ]
