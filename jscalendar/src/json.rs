@@ -532,7 +532,7 @@ impl<K: fmt::Display, T: IntoJson<V>, V: ConstructibleJsonValue> IntoJson<V> for
     fn into_json(self) -> V {
         let mut obj = V::Object::with_capacity(self.len());
         for (key, value) in self {
-            obj.insert(key.to_string(), value.into_json());
+            obj.insert(key.to_string().into(), value.into_json());
         }
         V::object(obj)
     }
@@ -542,7 +542,7 @@ impl<T: fmt::Display + Eq + Hash, V: ConstructibleJsonValue> IntoJson<V> for Has
     fn into_json(self) -> V {
         let mut obj = V::Object::with_capacity(self.len());
         for item in self {
-            obj.insert(item.to_string(), V::bool(true));
+            obj.insert(item.to_string().into(), V::bool(true));
         }
         V::object(obj)
     }
@@ -743,7 +743,7 @@ pub trait ConstructibleJsonValue: Sized + JsonValue {
 
 /// A type which represents a JSON object.
 pub trait JsonObject: Sized {
-    type Key: Borrow<str>;
+    type Key: Borrow<str> + From<String> + for<'a> From<&'a str>;
     type Value;
 
     fn with_capacity(capacity: usize) -> Self;
@@ -760,7 +760,7 @@ pub trait JsonObject: Sized {
 
     fn key_into_string(key: Self::Key) -> String;
 
-    fn insert(&mut self, key: String, value: Self::Value);
+    fn insert(&mut self, key: Self::Key, value: Self::Value);
 
     fn len(&self) -> usize;
     fn iter(&self) -> impl Iterator<Item = (&Self::Key, &Self::Value)>;
@@ -809,7 +809,9 @@ pub trait JsonArray: Sized {
     }
 }
 
-impl<K: Eq + Hash + Into<String> + From<String> + Borrow<str>, V> JsonObject for HashMap<K, V> {
+impl<K: Eq + Hash + Into<String> + From<String> + for<'a> From<&'a str> + Borrow<str>, V> JsonObject
+    for HashMap<K, V>
+{
     type Key = K;
     type Value = V;
 
@@ -842,8 +844,8 @@ impl<K: Eq + Hash + Into<String> + From<String> + Borrow<str>, V> JsonObject for
     }
 
     #[inline(always)]
-    fn insert(&mut self, key: String, value: Self::Value) {
-        HashMap::insert(self, key.into(), value);
+    fn insert(&mut self, key: Self::Key, value: Self::Value) {
+        HashMap::insert(self, key, value);
     }
 
     #[inline(always)]
@@ -1137,7 +1139,7 @@ mod serde_json_impl {
         }
 
         #[inline(always)]
-        fn insert(&mut self, key: String, value: Self::Value) {
+        fn insert(&mut self, key: Self::Key, value: Self::Value) {
             Map::insert(self, key, value);
         }
 
