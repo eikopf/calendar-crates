@@ -4,6 +4,9 @@ version = "0.1.0"
 edition = "2024"
 repository.workspace = true
 license.workspace = true
+description = "iCalendar (RFC 5545) recurrence rule and component types"
+keywords = ["calendar", "icalendar", "rfc5545", "rrule"]
+categories = ["date-and-time"]
 
 [dependencies]
 calendar-types = { version = "0.1.0", path = "../calendar-types" }

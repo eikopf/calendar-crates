@@ -4,6 +4,9 @@ version = "0.1.0"
 edition = "2024"
 repository.workspace = true
 license.workspace = true
+description = "JSCalendar (RFC 8984) data model with parser-agnostic JSON support"
+keywords = ["calendar", "jscalendar", "rfc8984", "json"]
+categories = ["date-and-time", "parser-implementations"]
 
 [features]
 serde_json = ["dep:serde_json"]
