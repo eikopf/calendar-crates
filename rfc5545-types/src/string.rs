@@ -3,7 +3,8 @@
 use dizzy::DstNewtype;
 
 /// An error indicating that a string is not valid `paramtext`.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
+#[error("invalid character {c:?} at index {index}")]
 pub struct InvalidParamTextError {
     /// The index of the first invalid character.
     pub index: usize,

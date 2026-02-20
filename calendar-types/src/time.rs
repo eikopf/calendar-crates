@@ -5,7 +5,7 @@ use std::{convert::Infallible, num::NonZero};
 use thiserror::Error;
 
 /// One of the seven weekdays.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 #[repr(u8)]
 pub enum Weekday {
     Monday,
@@ -46,7 +46,7 @@ impl Weekday {
 
 /// An ISO week ranging from W1 to W53.
 #[repr(u8)]
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum IsoWeek {
     W1 = 1,
     W2,

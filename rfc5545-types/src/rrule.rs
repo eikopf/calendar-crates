@@ -148,7 +148,7 @@ impl YearDayNum {
 }
 
 /// A value corresponding to the `weekdaynum` grammar rule.
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Clone, Copy, PartialEq, Eq, Hash)]
 pub struct WeekdayNum {
     pub ordinal: Option<(Sign, IsoWeek)>,
     pub weekday: Weekday,
@@ -217,7 +217,7 @@ impl Ord for WeekdayNum {
 ///                                                                |
 ///                                                               msb
 /// ```
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Clone, Copy, PartialEq, Eq, Hash)]
 pub struct SecondSet(NonZero<u64>);
 
 impl Debug for SecondSet {
@@ -361,7 +361,7 @@ impl Second {
 ///                                                                |
 ///                                                               msb
 /// ```
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Clone, Copy, PartialEq, Eq, Hash)]
 pub struct MinuteSet(NonZero<u64>);
 
 impl Debug for MinuteSet {
@@ -504,7 +504,7 @@ impl Minute {
 ///                                |
 ///                               msb
 /// ```
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Clone, Copy, PartialEq, Eq, Hash)]
 pub struct HourSet(NonZero<u32>);
 
 impl Debug for HourSet {
@@ -612,7 +612,7 @@ impl Hour {
 /// |              |
 /// lsb           msb
 /// ```
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Clone, Copy, PartialEq, Eq, Hash)]
 pub struct MonthSet(NonZero<u16>);
 
 impl Debug for MonthSet {
@@ -662,7 +662,7 @@ impl Default for MonthSet {
 /// |                               |                              |
 /// lsb                            -1                              msb
 /// ```
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct MonthDaySet(NonZero<u64>);
 
 /// A valid index into a [`MonthDaySet`].
@@ -716,7 +716,7 @@ impl Default for MonthDaySet {
 ///  |                                                   |         |
 /// -1                                                  -53       msb
 /// ```
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct WeekNoSet(NonZero<u128>);
 
 /// A valid index into a [`WeekNoSet`].

@@ -64,7 +64,8 @@ pub fn parse_full<'i, T, Sy, Se>(
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+#[error("{error} (at index {index} of {complete_input:?})")]
 pub struct OwnedParseError<Sy, Se> {
     complete_input: Box<str>,
     index: usize,
@@ -89,12 +90,6 @@ impl<Sy, Se> OwnedParseError<Sy, Se> {
             ParseErrorKind::Semantic(error) => Some(error),
             _ => None,
         }
-    }
-}
-
-impl<Sy: std::fmt::Display, Se: std::fmt::Display> std::fmt::Display for OwnedParseError<Sy, Se> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{} (at index {} of {:?})", self.error, self.index, self.complete_input)
     }
 }
 

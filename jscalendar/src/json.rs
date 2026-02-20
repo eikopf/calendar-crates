@@ -359,7 +359,40 @@ impl<E> DocumentError<E> {
             error,
         }
     }
+
+    pub fn path(&self) -> &VecDeque<PathSegment<Box<str>>> {
+        &self.path
+    }
+
+    pub fn error(&self) -> &E {
+        &self.error
+    }
+
+    pub fn into_parts(self) -> (VecDeque<PathSegment<Box<str>>>, E) {
+        (self.path, self.error)
+    }
 }
+
+impl<E: std::fmt::Display> std::fmt::Display for DocumentError<E> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        for (i, segment) in self.path.iter().enumerate() {
+            if i > 0 {
+                write!(f, "/")?;
+            }
+            match segment {
+                PathSegment::Index(idx) => write!(f, "[{idx}]")?,
+                PathSegment::Static(s) => write!(f, "{s}")?,
+                PathSegment::String(s) => write!(f, "{s}")?,
+            }
+        }
+        if !self.path.is_empty() {
+            write!(f, ": ")?;
+        }
+        write!(f, "{}", self.error)
+    }
+}
+
+impl<E: std::fmt::Display + std::fmt::Debug> std::error::Error for DocumentError<E> {}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PathSegment<S> {

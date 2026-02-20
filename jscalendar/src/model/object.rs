@@ -3699,18 +3699,22 @@ impl<V: DestructibleJsonValue> TryFromJson<V> for TaskOrEvent<V> {
     type Error = ObjErr;
 
     fn try_from_json(value: V) -> Result<Self, Self::Error> {
-        let type_str = value
-            .try_as_object()
-            .map_err(TypeErrorOr::from)
-            .map_err(DocumentError::root)?
-            .get("@type")
-            .and_then(|v| v.try_as_string().ok())
-            .map(|s| s.as_ref().to_owned());
+        let is_event = {
+            let obj = value
+                .try_as_object()
+                .map_err(TypeErrorOr::from)
+                .map_err(DocumentError::root)?;
+            match obj.get("@type").and_then(|v| v.try_as_string().ok()) {
+                Some(s) if s.as_ref() == "Event" => true,
+                Some(s) if s.as_ref() == "Task" => false,
+                _ => return Err(missing("@type")),
+            }
+        };
 
-        match type_str.as_deref() {
-            Some("Event") => Event::try_from_json(value).map(TaskOrEvent::Event),
-            Some("Task") => Task::try_from_json(value).map(TaskOrEvent::Task),
-            _ => Err(missing("@type")),
+        if is_event {
+            Event::try_from_json(value).map(TaskOrEvent::Event)
+        } else {
+            Task::try_from_json(value).map(TaskOrEvent::Task)
         }
     }
 }
