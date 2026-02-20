@@ -15,88 +15,7 @@ impl AsRef<str> for NeverStr {
     }
 }
 
-/// A case-insensitive [`str`], guaranteed to have the same layout as `str`.
-#[derive(Debug, Eq)]
-#[repr(transparent)]
-pub struct CaselessStr(str);
-
-impl Clone for Box<CaselessStr> {
-    fn clone(&self) -> Self {
-        let buf = Box::<str>::from(&self.0);
-        CaselessStr::from_box_str(buf)
-    }
-}
-
-impl From<&str> for &CaselessStr {
-    fn from(value: &str) -> Self {
-        // SAFETY: CaselessStr is a repr(transparent) wrapper of str, so this transmute is sound
-        unsafe { std::mem::transmute::<&str, &CaselessStr>(value) }
-    }
-}
-
-impl From<&str> for Box<CaselessStr> {
-    fn from(value: &str) -> Self {
-        Box::<str>::from(value).into()
-    }
-}
-
-impl From<Box<str>> for Box<CaselessStr> {
-    fn from(value: Box<str>) -> Self {
-        CaselessStr::from_box_str(value)
-    }
-}
-
-impl From<String> for Box<CaselessStr> {
-    fn from(value: String) -> Self {
-        value.into_boxed_str().into()
-    }
-}
-
-impl CaselessStr {
-    #[inline(always)]
-    pub fn from_box_str(value: Box<str>) -> Box<CaselessStr> {
-        // NOTE: we don't actually have a guarantee that Box<str> and Box<CaselessStr> have the
-        // same layout (even though they almost certainly do), so instead we cast the underlying
-        // raw pointer from *mut str to *mut CaselessStr
-
-        // SAFETY: CaselessStr and str are guaranteed to have the same layout, so the pointer cast
-        // is sound, and the resultant raw pointer has definitely been allocated correctly because
-        // it was derived from a Box and left unaltered
-        unsafe { Box::from_raw(Box::into_raw(value) as *mut CaselessStr) }
-    }
-
-    #[inline(always)]
-    pub fn into_box_str(self: Box<Self>) -> Box<str> {
-        // SAFETY: CaselessStr and str are guaranteed to have the same layout, so the pointer cast
-        // is sound, and the resultant raw pointer has definitely been allocated correctly because
-        // it was derived from a Box and left unaltered
-        unsafe { Box::from_raw(Box::into_raw(self) as *mut str) }
-    }
-}
-
-impl PartialEq for CaselessStr {
-    fn eq(&self, other: &Self) -> bool {
-        self.0.eq_ignore_ascii_case(&other.0)
-    }
-}
-
-impl PartialEq<str> for CaselessStr {
-    fn eq(&self, other: &str) -> bool {
-        self.0.eq_ignore_ascii_case(other)
-    }
-}
-
-impl std::hash::Hash for CaselessStr {
-    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
-        // hash length as prefix
-        self.0.len().hash(state);
-
-        // then hash each byte in lowercase
-        for byte in self.0.as_bytes() {
-            byte.to_ascii_lowercase().hash(state);
-        }
-    }
-}
+pub use rfc5545_types::string::{CaselessStr, InvalidCharError};
 
 /// Helper trait for converting a reference to an unsized type into a boxed value of the type.
 trait CloneUnsized {
@@ -181,24 +100,6 @@ macro_rules! unsized_newtype {
             }
         }
     };
-}
-
-/// An error which may occur when converting strings into string newtypes.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct InvalidCharError {
-    pub byte_index: usize,
-    pub invalid_char: char,
-}
-
-impl InvalidCharError {
-    /// Constructs an [`InvalidCharError`] from the `Item` type of the iterator returned by
-    /// [`str::char_indices`].
-    pub const fn from_char_index((byte_index, invalid_char): (usize, char)) -> Self {
-        Self {
-            byte_index,
-            invalid_char,
-        }
-    }
 }
 
 unsized_newtype! {
