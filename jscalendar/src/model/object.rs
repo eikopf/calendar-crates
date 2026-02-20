@@ -70,6 +70,7 @@ pub struct Group<V: JsonValue> {
 }
 
 /// A [`Task`] or an [`Event`].
+#[non_exhaustive]
 pub enum TaskOrEvent<V: JsonValue> {
     Task(Task<V>),
     Event(Event<V>),
@@ -458,6 +459,7 @@ pub struct Alert<V: JsonValue> {
 
 /// The trigger of an [`Alert`].
 #[derive(PartialEq)]
+#[non_exhaustive]
 pub enum Trigger<V: JsonValue> {
     Offset(OffsetTrigger<V>),
     Absolute(AbsoluteTrigger<V>),
@@ -601,6 +603,7 @@ impl<V: DestructibleJsonValue> TryFromJson<V> for PatchObject<V> {
 // ============================================================================
 
 #[derive(Debug, Clone, PartialEq, Eq, Error)]
+#[non_exhaustive]
 pub enum ObjectFromJsonError {
     #[error("missing required field: {0}")]
     MissingField(&'static str),
@@ -786,6 +789,7 @@ fn parse_request_status(s: &str) -> Option<RequestStatus> {
 // ============================================================================
 
 #[derive(Debug, Clone, PartialEq, Eq, Error)]
+#[non_exhaustive]
 pub enum RRuleFromJsonError {
     #[error("missing required field: {0}")]
     MissingField(&'static str),
@@ -1094,6 +1098,7 @@ fn parse_date_or_datetime(s: &str) -> Option<DateTimeOrDate<crate::model::time::
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Error)]
+#[non_exhaustive]
 pub enum ByRuleParseError {
     #[error("invalid value in by-rule array")]
     InvalidValue,
