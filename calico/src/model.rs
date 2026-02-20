@@ -12,5 +12,8 @@ pub mod css;
 pub mod parameter;
 pub mod primitive;
 pub mod property;
-pub mod rrule;
 pub mod string;
+
+pub use rfc5545_types::rrule;
+
+// TODO: implement missing winnow::Accumulate instances
