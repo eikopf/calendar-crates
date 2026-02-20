@@ -27,7 +27,6 @@ use crate::{
         string::{
             AlphaNumeric, CalAddress, ContentId, CustomTimeZoneId, EmailAddr, GeoUri, Id,
             ImplicitJsonPointer, InvalidImplicitJsonPointerError, LanguageTag, MediaType, Uid, Uri,
-            VendorStr,
         },
         time::{
             Date, DateTime, Day, Duration, Hour, IsoWeek, Local, Minute, Month, NonLeapSecond,
@@ -66,7 +65,7 @@ pub struct Group<V: JsonValue> {
     pub time_zones: Option<HashMap<Box<CustomTimeZoneId>, TimeZone<V>>>,
 
     // Custom vendor properties (RFC 8984 §3.3)
-    #[structible(key = Box<VendorStr>)]
+    #[structible(key = Box<str>)]
     pub vendor_property: Option<V>,
 }
 
@@ -197,7 +196,7 @@ pub struct Event<V: JsonValue> {
     pub time_zones: Option<HashMap<Box<CustomTimeZoneId>, TimeZone<V>>>,
 
     // Custom vendor properties (RFC 8984 §3.3)
-    #[structible(key = Box<VendorStr>)]
+    #[structible(key = Box<str>)]
     pub vendor_property: Option<V>,
 }
 
@@ -267,7 +266,7 @@ pub struct Task<V: JsonValue> {
     pub time_zones: Option<HashMap<Box<CustomTimeZoneId>, TimeZone<V>>>,
 
     // Custom vendor properties (RFC 8984 §3.3)
-    #[structible(key = Box<VendorStr>)]
+    #[structible(key = Box<str>)]
     pub vendor_property: Option<V>,
 }
 
@@ -282,7 +281,7 @@ pub struct Location<V> {
     pub coordinates: Option<Box<GeoUri>>,
     pub links: Option<HashMap<Box<Id>, Link<V>>>,
 
-    #[structible(key = Box<VendorStr>)]
+    #[structible(key = Box<str>)]
     pub vendor_property: Option<V>,
 }
 
@@ -294,7 +293,7 @@ pub struct VirtualLocation<V> {
     pub uri: Box<Uri>,
     pub features: Option<HashSet<Token<VirtualLocationFeature>>>,
 
-    #[structible(key = Box<VendorStr>)]
+    #[structible(key = Box<str>)]
     pub vendor_property: Option<V>,
 }
 
@@ -309,7 +308,7 @@ pub struct Link<V> {
     pub display: Option<Token<DisplayPurpose>>,
     pub title: Option<String>,
 
-    #[structible(key = Box<VendorStr>)]
+    #[structible(key = Box<str>)]
     pub vendor_property: Option<V>,
 }
 
@@ -324,7 +323,7 @@ pub struct TimeZone<V> {
     pub standard: Option<Vec<TimeZoneRule<V>>>,
     pub daylight: Option<Vec<TimeZoneRule<V>>>,
 
-    #[structible(key = Box<VendorStr>)]
+    #[structible(key = Box<str>)]
     pub vendor_property: Option<V>,
 }
 
@@ -340,7 +339,7 @@ pub struct TimeZoneRule<V> {
     pub names: Option<HashSet<String>>,
     pub comments: Option<Vec<String>>,
 
-    #[structible(key = Box<VendorStr>)]
+    #[structible(key = Box<str>)]
     pub vendor_property: Option<V>,
 }
 
@@ -370,7 +369,7 @@ pub struct Participant<V> {
     pub member_of: Option<HashSet<Box<Id>>>,
     pub links: Option<HashMap<Box<Id>, Link<V>>>,
 
-    #[structible(key = Box<VendorStr>)]
+    #[structible(key = Box<str>)]
     pub vendor_property: Option<V>,
 }
 
@@ -406,7 +405,7 @@ pub struct TaskParticipant<V> {
     pub progress_updated: Option<DateTime<Utc>>,
     pub percent_complete: Option<Percent>,
 
-    #[structible(key = Box<VendorStr>)]
+    #[structible(key = Box<str>)]
     pub vendor_property: Option<V>,
 }
 
@@ -453,7 +452,7 @@ pub struct Alert<V: JsonValue> {
     pub related_to: Option<HashMap<Box<str>, Relation<V>>>,
     pub action: Option<Token<AlertAction>>,
 
-    #[structible(key = Box<VendorStr>)]
+    #[structible(key = Box<str>)]
     pub vendor_property: Option<V>,
 }
 
@@ -499,7 +498,7 @@ pub struct OffsetTrigger<V> {
     pub offset: SignedDuration,
     pub relative_to: Option<Token<AlertRelativeTo>>,
 
-    #[structible(key = Box<VendorStr>)]
+    #[structible(key = Box<str>)]
     pub vendor_property: Option<V>,
 }
 
@@ -508,7 +507,7 @@ pub struct OffsetTrigger<V> {
 pub struct AbsoluteTrigger<V> {
     pub when: DateTime<Utc>,
 
-    #[structible(key = Box<VendorStr>)]
+    #[structible(key = Box<str>)]
     pub vendor_property: Option<V>,
 }
 
@@ -517,7 +516,7 @@ pub struct AbsoluteTrigger<V> {
 pub struct Relation<V> {
     pub relations: HashSet<Token<RelationValue>>,
 
-    #[structible(key = Box<VendorStr>)]
+    #[structible(key = Box<str>)]
     pub vendor_property: Option<V>,
 }
 
@@ -1334,9 +1333,7 @@ impl<V: DestructibleJsonValue> TryFromJson<V> for Relation<V> {
         let relations = relations.unwrap_or_default();
         let mut result = Relation::new(relations);
         for (k, v) in vendor_parts {
-            if let Ok(vk) = VendorStr::new(k.as_ref()) {
-                result.insert_vendor_property(vk.into(), v);
-            }
+            result.insert_vendor_property(k, v);
         }
         Ok(result)
     }
@@ -1384,9 +1381,7 @@ impl<V: DestructibleJsonValue> TryFromJson<V> for OffsetTrigger<V> {
             result.set_relative_to(v);
         }
         for (k, v) in vendor_parts {
-            if let Ok(vk) = VendorStr::new(k.as_ref()) {
-                result.insert_vendor_property(vk.into(), v);
-            }
+            result.insert_vendor_property(k, v);
         }
         Ok(result)
     }
@@ -1424,9 +1419,7 @@ impl<V: DestructibleJsonValue> TryFromJson<V> for AbsoluteTrigger<V> {
         let when = when_val.ok_or_else(|| missing("when"))?;
         let mut result = AbsoluteTrigger::new(when);
         for (k, v) in vendor_parts {
-            if let Ok(vk) = VendorStr::new(k.as_ref()) {
-                result.insert_vendor_property(vk.into(), v);
-            }
+            result.insert_vendor_property(k, v);
         }
         Ok(result)
     }
@@ -1646,9 +1639,7 @@ impl<V: DestructibleJsonValue> TryFromJson<V> for Link<V> {
             result.set_title(v);
         }
         for (k, v) in vendor_parts {
-            if let Ok(vk) = VendorStr::new(k.as_ref()) {
-                result.insert_vendor_property(vk.into(), v);
-            }
+            result.insert_vendor_property(k, v);
         }
         Ok(result)
     }
@@ -1987,9 +1978,7 @@ impl<V: DestructibleJsonValue> TryFromJson<V> for Location<V> {
             result.set_links(v);
         }
         for (k, v) in vendor_parts {
-            if let Ok(vk) = VendorStr::new(k.as_ref()) {
-                result.insert_vendor_property(vk.into(), v);
-            }
+            result.insert_vendor_property(k, v);
         }
         Ok(result)
     }
@@ -2053,9 +2042,7 @@ impl<V: DestructibleJsonValue> TryFromJson<V> for VirtualLocation<V> {
             result.set_features(v);
         }
         for (k, v) in vendor_parts {
-            if let Ok(vk) = VendorStr::new(k.as_ref()) {
-                result.insert_vendor_property(vk.into(), v);
-            }
+            result.insert_vendor_property(k, v);
         }
         Ok(result)
     }
@@ -2122,9 +2109,7 @@ impl<V: DestructibleJsonValue> TryFromJson<V> for Alert<V> {
             result.set_action(v);
         }
         for (k, v) in vendor_parts {
-            if let Ok(vk) = VendorStr::new(k.as_ref()) {
-                result.insert_vendor_property(vk.into(), v);
-            }
+            result.insert_vendor_property(k, v);
         }
         Ok(result)
     }
@@ -2210,9 +2195,7 @@ impl<V: DestructibleJsonValue> TryFromJson<V> for TimeZoneRule<V> {
             result.set_comments(v);
         }
         for (k, v) in vendor_parts {
-            if let Ok(vk) = VendorStr::new(k.as_ref()) {
-                result.insert_vendor_property(vk.into(), v);
-            }
+            result.insert_vendor_property(k, v);
         }
         Ok(result)
     }
@@ -2303,9 +2286,7 @@ impl<V: DestructibleJsonValue> TryFromJson<V> for TimeZone<V> {
             result.set_daylight(v);
         }
         for (k, v) in vendor_parts {
-            if let Ok(vk) = VendorStr::new(k.as_ref()) {
-                result.insert_vendor_property(vk.into(), v);
-            }
+            result.insert_vendor_property(k, v);
         }
         Ok(result)
     }
@@ -2523,9 +2504,7 @@ impl<V: DestructibleJsonValue> TryFromJson<V> for Participant<V> {
             result.set_links(v);
         }
         for (k, v) in vendor_parts {
-            if let Ok(vk) = VendorStr::new(k.as_ref()) {
-                result.insert_vendor_property(vk.into(), v);
-            }
+            result.insert_vendor_property(k, v);
         }
         Ok(result)
     }
@@ -2769,9 +2748,7 @@ impl<V: DestructibleJsonValue> TryFromJson<V> for TaskParticipant<V> {
             result.set_percent_complete(v);
         }
         for (k, v) in vendor_parts {
-            if let Ok(vk) = VendorStr::new(k.as_ref()) {
-                result.insert_vendor_property(vk.into(), v);
-            }
+            result.insert_vendor_property(k, v);
         }
         Ok(result)
     }
@@ -3145,9 +3122,7 @@ impl<V: DestructibleJsonValue> TryFromJson<V> for Event<V> {
                 result.set_time_zones(v);
             }
             for (k, v) in vendor_parts {
-                if let Ok(vk) = VendorStr::new(k.as_ref()) {
-                    result.insert_vendor_property(vk.into(), v);
-                }
+                result.insert_vendor_property(k, v);
             }
             Ok(result)
     }
@@ -3550,9 +3525,7 @@ impl<V: DestructibleJsonValue> TryFromJson<V> for Task<V> {
                 result.set_time_zones(v);
             }
             for (k, v) in vendor_parts {
-                if let Ok(vk) = VendorStr::new(k.as_ref()) {
-                    result.insert_vendor_property(vk.into(), v);
-                }
+                result.insert_vendor_property(k, v);
             }
             Ok(result)
     }
@@ -3712,9 +3685,7 @@ impl<V: DestructibleJsonValue> TryFromJson<V> for Group<V> {
             result.set_time_zones(v);
         }
         for (k, v) in vendor_parts {
-            if let Ok(vk) = VendorStr::new(k.as_ref()) {
-                result.insert_vendor_property(vk.into(), v);
-            }
+            result.insert_vendor_property(k, v);
         }
         Ok(result)
     }
