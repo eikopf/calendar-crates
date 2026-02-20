@@ -144,3 +144,55 @@ fn parse_local_datetime_valid() {
 fn parse_local_datetime_rejects_z_suffix() {
     assert!(parser::parse_full(parser::local_date_time)("2024-01-15T13:00:00Z").is_err());
 }
+
+// ── Leap year boundary: divisible by 100 but not 400 ─────────────────
+
+#[test]
+fn parse_utc_datetime_century_leap_year_2100() {
+    // 2100 is not a leap year (divisible by 100 but not 400)
+    assert!(parser::parse_full(parser::utc_date_time)("2100-02-29T00:00:00Z").is_err());
+    assert!(parser::parse_full(parser::utc_date_time)("2100-02-28T00:00:00Z").is_ok());
+}
+
+#[test]
+fn parse_utc_datetime_century_leap_year_2400() {
+    // 2400 is a leap year (divisible by 400)
+    assert!(parser::parse_full(parser::utc_date_time)("2400-02-29T00:00:00Z").is_ok());
+}
+
+// ── Empty and malformed inputs ───────────────────────────────────────
+
+#[test]
+fn parse_utc_datetime_empty_string() {
+    assert!(parser::parse_full(parser::utc_date_time)("").is_err());
+}
+
+#[test]
+fn parse_duration_empty_string() {
+    assert!(parser::parse_full(parser::duration)("").is_err());
+}
+
+#[test]
+fn parse_duration_p_only() {
+    assert!(parser::parse_full(parser::duration)("P").is_err());
+}
+
+// ── Duration u32 overflow ────────────────────────────────────────────
+
+#[test]
+fn parse_duration_overflow_u32() {
+    // 4294967296 = u32::MAX + 1
+    assert!(parser::parse_full(parser::duration)("P4294967296W").is_err());
+}
+
+// ── Date-time without timezone (generic) ─────────────────────────────
+
+#[test]
+fn parse_generic_datetime_valid() {
+    assert!(parser::parse_full(parser::date_time)("2024-01-15T13:00:00").is_ok());
+}
+
+#[test]
+fn parse_generic_datetime_with_fractional() {
+    assert!(parser::parse_full(parser::date_time)("2024-06-15T12:30:00.5").is_ok());
+}

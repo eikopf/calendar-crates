@@ -2,11 +2,14 @@ use std::num::NonZero;
 
 use calendar_types::primitive::Sign;
 use calendar_types::time::{IsoWeek, Month};
+use calendar_types::time::Weekday;
 use rfc5545_types::rrule::{
     ByRuleBehavior, ByRuleName, Freq, Hour, HourSet, Interval, Minute, MinuteSet, MonthDay,
     MonthDaySet, MonthDaySetIndex, MonthSet, Second, SecondSet, WeekNoSet, WeekNoSetIndex,
     YearDayNum,
 };
+use rfc5545_types::rrule::weekday_num_set::WeekdayNumSet;
+use rfc5545_types::rrule::WeekdayNum;
 
 // ── behavior_with table ──────────────────────────────────────────
 
@@ -248,4 +251,154 @@ fn hour_from_repr_boundaries() {
     assert!(Hour::from_repr(0).is_some());
     assert!(Hour::from_repr(23).is_some());
     assert!(Hour::from_repr(24).is_none());
+}
+
+// ── WeekdayNum construction and ordering ─────────────────────────────
+
+#[test]
+fn weekday_num_plain() {
+    let wdn = WeekdayNum {
+        ordinal: None,
+        weekday: Weekday::Monday,
+    };
+    assert!(wdn.ordinal.is_none());
+    assert_eq!(wdn.weekday, Weekday::Monday);
+}
+
+#[test]
+fn weekday_num_with_ordinal() {
+    let wdn = WeekdayNum {
+        ordinal: Some((Sign::Pos, IsoWeek::W1)),
+        weekday: Weekday::Friday,
+    };
+    assert_eq!(wdn.ordinal, Some((Sign::Pos, IsoWeek::W1)));
+    assert_eq!(wdn.weekday, Weekday::Friday);
+}
+
+#[test]
+fn weekday_num_negative_ordinal() {
+    let wdn = WeekdayNum {
+        ordinal: Some((Sign::Neg, IsoWeek::W53)),
+        weekday: Weekday::Sunday,
+    };
+    assert_eq!(wdn.ordinal, Some((Sign::Neg, IsoWeek::W53)));
+}
+
+// ── WeekdayNumSet operations ─────────────────────────────────────────
+
+#[test]
+fn weekday_num_set_default_is_empty() {
+    let set = WeekdayNumSet::default();
+    assert!(set.is_empty());
+    assert_eq!(set.len(), 0);
+}
+
+#[test]
+fn weekday_num_set_insert_and_contains() {
+    let mut set = WeekdayNumSet::default();
+    let wdn = WeekdayNum {
+        ordinal: None,
+        weekday: Weekday::Monday,
+    };
+    assert!(!set.contains(wdn));
+    set.insert(wdn);
+    assert!(set.contains(wdn));
+    assert_eq!(set.len(), 1);
+}
+
+#[test]
+fn weekday_num_set_multiple_weekdays() {
+    let mut set = WeekdayNumSet::default();
+    for weekday in Weekday::iter() {
+        set.insert(WeekdayNum {
+            ordinal: None,
+            weekday,
+        });
+    }
+    assert_eq!(set.len(), 7);
+    for weekday in Weekday::iter() {
+        assert!(set.contains(WeekdayNum {
+            ordinal: None,
+            weekday,
+        }));
+    }
+}
+
+#[test]
+fn weekday_num_set_with_ordinals() {
+    let mut set = WeekdayNumSet::default();
+    let first_monday = WeekdayNum {
+        ordinal: Some((Sign::Pos, IsoWeek::W1)),
+        weekday: Weekday::Monday,
+    };
+    let last_friday = WeekdayNum {
+        ordinal: Some((Sign::Neg, IsoWeek::W1)),
+        weekday: Weekday::Friday,
+    };
+    set.insert(first_monday);
+    set.insert(last_friday);
+    assert!(set.contains(first_monday));
+    assert!(set.contains(last_friday));
+    assert!(!set.contains(WeekdayNum {
+        ordinal: None,
+        weekday: Weekday::Monday,
+    }));
+}
+
+// ── Empty set iteration via default ──────────────────────────────────
+
+#[test]
+fn second_set_default_all_unset() {
+    let set = SecondSet::default();
+    for s in Second::iter() {
+        assert!(!set.get(s));
+    }
+}
+
+#[test]
+fn minute_set_default_all_unset() {
+    let set = MinuteSet::default();
+    for m in Minute::iter() {
+        assert!(!set.get(m));
+    }
+}
+
+#[test]
+fn hour_set_default_all_unset() {
+    let set = HourSet::default();
+    for h in Hour::iter() {
+        assert!(!set.get(h));
+    }
+}
+
+#[test]
+fn month_set_default_all_unset() {
+    let set = MonthSet::default();
+    for m in Month::iter() {
+        assert!(!set.get(m));
+    }
+}
+
+// ── Full iteration for all bitset types ──────────────────────────────
+
+#[test]
+fn minute_set_full_iteration() {
+    let mut set = MinuteSet::default();
+    for m in Minute::iter() {
+        set.set(m);
+    }
+    for m in Minute::iter() {
+        assert!(set.get(m));
+    }
+}
+
+#[test]
+fn hour_set_full_iteration() {
+    let mut set = HourSet::default();
+    for h in Hour::iter() {
+        set.set(h);
+    }
+    for h in Hour::iter() {
+        assert!(set.get(h));
+    }
 }

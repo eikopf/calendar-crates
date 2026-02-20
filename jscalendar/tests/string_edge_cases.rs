@@ -1,10 +1,10 @@
 use jscalendar::model::string::{
-    CalAddress, CustomTimeZoneId, EmailAddr, GeoUri, Id, ImplicitJsonPointer,
-    InvalidCalAddressError, InvalidCustomTimeZoneIdError, InvalidEmailAddrError,
-    InvalidGeoUriError, InvalidIdError, InvalidImplicitJsonPointerError, InvalidVendorStrError,
-    MediaType, InvalidMediaTypeError, VendorStr,
+    AlphaNumeric, CalAddress, ContentId, CustomTimeZoneId, EmailAddr, GeoUri, Id,
+    ImplicitJsonPointer, InvalidCalAddressError, InvalidContentIdError,
+    InvalidCustomTimeZoneIdError, InvalidEmailAddrError, InvalidGeoUriError, InvalidIdError,
+    InvalidImplicitJsonPointerError, InvalidMediaTypeError, InvalidVendorStrError, MediaType,
+    VendorStr,
 };
-use calendar_types::string::{InvalidUidError, InvalidUriError, Uid, Uri};
 
 // Id edge cases
 
@@ -287,4 +287,50 @@ fn media_type_with_params() {
     let mt = MediaType::new("text/plain;charset=utf-8").unwrap();
     assert_eq!(mt.type_part(), "text");
     assert_eq!(mt.subtype(), "plain");
+}
+
+// ── ContentId edge cases ─────────────────────────────────────────────
+
+#[test]
+fn content_id_empty() {
+    assert_eq!(
+        ContentId::new(""),
+        Err(InvalidContentIdError::EmptyString)
+    );
+}
+
+#[test]
+fn content_id_single_char() {
+    assert!(ContentId::new("a").is_ok());
+}
+
+#[test]
+fn content_id_valid() {
+    assert!(ContentId::new("cid:part1@example.com").is_ok());
+    assert!(ContentId::new("any-string-is-valid").is_ok());
+}
+
+// ── AlphaNumeric edge cases ──────────────────────────────────────────
+
+#[test]
+fn alphanumeric_empty_is_valid() {
+    // Empty string has no non-alphanumeric chars, so it passes validation
+    assert!(AlphaNumeric::new("").is_ok());
+}
+
+#[test]
+fn alphanumeric_valid() {
+    assert!(AlphaNumeric::new("abc").is_ok());
+    assert!(AlphaNumeric::new("ABC").is_ok());
+    assert!(AlphaNumeric::new("123").is_ok());
+    assert!(AlphaNumeric::new("abc123XYZ").is_ok());
+}
+
+#[test]
+fn alphanumeric_invalid_chars() {
+    assert!(AlphaNumeric::new(" ").is_err());
+    assert!(AlphaNumeric::new("hello world").is_err());
+    assert!(AlphaNumeric::new("foo-bar").is_err());
+    assert!(AlphaNumeric::new("foo_bar").is_err());
+    assert!(AlphaNumeric::new("foo@bar").is_err());
 }

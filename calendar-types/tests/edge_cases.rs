@@ -168,3 +168,46 @@ fn uri_edge_cases() {
     assert_eq!(Uri::new("http:foo").unwrap().scheme(), "http");
     assert!(Uri::new(":").is_err());
 }
+
+// ── Month iteration ──────────────────────────────────────────────────
+
+#[test]
+fn month_iteration_count() {
+    assert_eq!(Month::iter().count(), 12);
+    assert_eq!(Month::iter().next(), Some(Month::Jan));
+    assert_eq!(Month::iter().last(), Some(Month::Dec));
+}
+
+// ── Date::maximum_day ────────────────────────────────────────────────
+
+#[test]
+fn date_maximum_day_feb_leap_vs_non_leap() {
+    assert_eq!(Date::maximum_day(Year::new(2024).unwrap(), Month::Feb), Day::D29);
+    assert_eq!(Date::maximum_day(Year::new(2023).unwrap(), Month::Feb), Day::D28);
+    assert_eq!(Date::maximum_day(Year::new(2000).unwrap(), Month::Feb), Day::D29);
+    assert_eq!(Date::maximum_day(Year::new(1900).unwrap(), Month::Feb), Day::D28);
+}
+
+#[test]
+fn date_maximum_day_30_day_months() {
+    let year = Year::new(2024).unwrap();
+    for month in [Month::Apr, Month::Jun, Month::Sep, Month::Nov] {
+        assert_eq!(Date::maximum_day(year, month), Day::D30);
+    }
+}
+
+#[test]
+fn date_maximum_day_31_day_months() {
+    let year = Year::new(2024).unwrap();
+    for month in [Month::Jan, Month::Mar, Month::May, Month::Jul, Month::Aug, Month::Oct, Month::Dec] {
+        assert_eq!(Date::maximum_day(year, month), Day::D31);
+    }
+}
+
+// ── Month::number ────────────────────────────────────────────────────
+
+#[test]
+fn month_number_values() {
+    assert_eq!(Month::Jan.number().get(), 1);
+    assert_eq!(Month::Dec.number().get(), 12);
+}
