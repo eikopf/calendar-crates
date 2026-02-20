@@ -524,6 +524,33 @@ pub struct Relation<V> {
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct PatchObject<V>(HashMap<Box<ImplicitJsonPointer>, V>);
 
+impl<V> PatchObject<V> {
+    /// Returns a reference to the value for the given pointer, if present.
+    pub fn get(&self, key: &ImplicitJsonPointer) -> Option<&V> {
+        self.0.get(key)
+    }
+
+    /// Returns the number of patches.
+    pub fn len(&self) -> usize {
+        self.0.len()
+    }
+
+    /// Returns `true` if there are no patches.
+    pub fn is_empty(&self) -> bool {
+        self.0.is_empty()
+    }
+
+    /// Iterates over all (pointer, value) pairs.
+    pub fn iter(&self) -> impl Iterator<Item = (&ImplicitJsonPointer, &V)> {
+        self.0.iter().map(|(k, v)| (&**k, v))
+    }
+
+    /// Consumes the `PatchObject` and returns the underlying map.
+    pub fn into_inner(self) -> HashMap<Box<ImplicitJsonPointer>, V> {
+        self.0
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Error)]
 #[error("the key {key} is not an implicit JSON pointer")]
 pub struct InvalidPatchObjectError {
