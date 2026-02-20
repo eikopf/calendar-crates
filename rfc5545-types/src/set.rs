@@ -1,4 +1,8 @@
 //! Types representing the members of finite sets.
+//!
+//! These are the "known value" enums for RFC 5545 property values and parameters.
+//! All extensible enums are `#[non_exhaustive]` — callers that need to handle unknown
+//! values should wrap them with a discriminated union (e.g. `Token<T, S>`).
 
 use strum::{Display, EnumString};
 
@@ -109,3 +113,270 @@ impl Priority {
         }
     }
 }
+
+// ============================================================================
+// Version / Gregorian
+// ============================================================================
+
+/// The iCalendar version (RFC 5545 §3.7.4).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum Version {
+    /// iCalendar version 2.0.
+    V2_0,
+}
+
+/// The single allowed value of the CALSCALE property (RFC 5545 §3.7.1).
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct Gregorian;
+
+// ============================================================================
+// Encoding
+// ============================================================================
+
+/// The possible values of the ENCODING parameter (RFC 5545 §3.2.7).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, EnumString, Display)]
+#[non_exhaustive]
+#[strum(ascii_case_insensitive)]
+pub enum Encoding {
+    /// The `8BIT` text encoding (RFC 2045).
+    #[strum(serialize = "8BIT")]
+    Bit8,
+    /// The `BASE64` binary encoding (RFC 4648).
+    #[strum(serialize = "BASE64")]
+    Base64,
+}
+
+// ============================================================================
+// TimeTransparency
+// ============================================================================
+
+/// The value of the TRANSP property (RFC 5545 §3.8.2.7).
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Hash, EnumString, Display)]
+#[non_exhaustive]
+#[strum(ascii_case_insensitive)]
+pub enum TimeTransparency {
+    /// The event is opaque (consumes time on the calendar).
+    #[default]
+    #[strum(serialize = "OPAQUE")]
+    Opaque,
+    /// The event is transparent (does not consume time).
+    #[strum(serialize = "TRANSPARENT")]
+    Transparent,
+}
+
+// ============================================================================
+// Status enums
+// ============================================================================
+
+/// The status of a VEVENT component (RFC 5545 §3.8.1.11).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, EnumString, Display)]
+#[non_exhaustive]
+#[strum(ascii_case_insensitive)]
+pub enum EventStatus {
+    #[strum(serialize = "TENTATIVE")]
+    Tentative,
+    #[strum(serialize = "CONFIRMED")]
+    Confirmed,
+    #[strum(serialize = "CANCELLED")]
+    Cancelled,
+}
+
+/// The status of a VTODO component (RFC 5545 §3.8.1.11).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, EnumString, Display)]
+#[non_exhaustive]
+#[strum(ascii_case_insensitive)]
+pub enum TodoStatus {
+    #[strum(serialize = "NEEDS-ACTION")]
+    NeedsAction,
+    #[strum(serialize = "COMPLETED")]
+    Completed,
+    #[strum(serialize = "IN-PROCESS")]
+    InProcess,
+    #[strum(serialize = "CANCELLED")]
+    Cancelled,
+}
+
+/// The status of a VJOURNAL component (RFC 5545 §3.8.1.11).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, EnumString, Display)]
+#[non_exhaustive]
+#[strum(ascii_case_insensitive)]
+pub enum JournalStatus {
+    #[strum(serialize = "DRAFT")]
+    Draft,
+    #[strum(serialize = "FINAL")]
+    Final,
+    #[strum(serialize = "CANCELLED")]
+    Cancelled,
+}
+
+// ============================================================================
+// CLASS property value
+// ============================================================================
+
+/// The value of the CLASS property (RFC 5545 §3.8.1.3).
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Hash, EnumString, Display)]
+#[non_exhaustive]
+#[strum(ascii_case_insensitive)]
+pub enum ClassValue {
+    #[default]
+    #[strum(serialize = "PUBLIC")]
+    Public,
+    #[strum(serialize = "PRIVATE")]
+    Private,
+    #[strum(serialize = "CONFIDENTIAL")]
+    Confidential,
+}
+
+// ============================================================================
+// Parameter value enums
+// ============================================================================
+
+/// The CUTYPE parameter value (RFC 5545 §3.2.3).
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Hash, EnumString, Display)]
+#[non_exhaustive]
+#[strum(ascii_case_insensitive)]
+pub enum CalendarUserType {
+    #[default]
+    #[strum(serialize = "INDIVIDUAL")]
+    Individual,
+    #[strum(serialize = "GROUP")]
+    Group,
+    #[strum(serialize = "RESOURCE")]
+    Resource,
+    #[strum(serialize = "ROOM")]
+    Room,
+    #[strum(serialize = "UNKNOWN")]
+    Unknown,
+}
+
+/// The ROLE parameter value (RFC 5545 §3.2.16).
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Hash, EnumString, Display)]
+#[non_exhaustive]
+#[strum(ascii_case_insensitive)]
+pub enum ParticipationRole {
+    #[strum(serialize = "CHAIR")]
+    Chair,
+    #[default]
+    #[strum(serialize = "REQ-PARTICIPANT")]
+    ReqParticipant,
+    #[strum(serialize = "OPT-PARTICIPANT")]
+    OptParticipant,
+    #[strum(serialize = "NON-PARTICIPANT")]
+    NonParticipant,
+}
+
+/// The PARTSTAT parameter value (RFC 5545 §3.2.12).
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Hash, EnumString, Display)]
+#[non_exhaustive]
+#[strum(ascii_case_insensitive)]
+pub enum ParticipationStatus {
+    #[default]
+    #[strum(serialize = "NEEDS-ACTION")]
+    NeedsAction,
+    #[strum(serialize = "ACCEPTED")]
+    Accepted,
+    #[strum(serialize = "DECLINED")]
+    Declined,
+    #[strum(serialize = "TENTATIVE")]
+    Tentative,
+    #[strum(serialize = "DELEGATED")]
+    Delegated,
+    #[strum(serialize = "COMPLETED")]
+    Completed,
+    #[strum(serialize = "IN-PROCESS")]
+    InProcess,
+}
+
+/// The FBTYPE parameter value (RFC 5545 §3.2.9).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, EnumString, Display)]
+#[non_exhaustive]
+#[strum(ascii_case_insensitive)]
+pub enum FreeBusyType {
+    #[strum(serialize = "FREE")]
+    Free,
+    #[strum(serialize = "BUSY")]
+    Busy,
+    #[strum(serialize = "BUSY-UNAVAILABLE")]
+    BusyUnavailable,
+    #[strum(serialize = "BUSY-TENTATIVE")]
+    BusyTentative,
+}
+
+/// The RELTYPE parameter value (RFC 5545 §3.2.15).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, EnumString, Display)]
+#[non_exhaustive]
+#[strum(ascii_case_insensitive)]
+pub enum RelationshipType {
+    #[strum(serialize = "PARENT")]
+    Parent,
+    #[strum(serialize = "CHILD")]
+    Child,
+    #[strum(serialize = "SIBLING")]
+    Sibling,
+    /// RFC 9074 §7.1.
+    #[strum(serialize = "SNOOZE")]
+    Snooze,
+}
+
+/// The ACTION property value for alarms (RFC 5545 §3.8.6.1).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, EnumString, Display)]
+#[non_exhaustive]
+#[strum(ascii_case_insensitive)]
+pub enum AlarmAction {
+    #[strum(serialize = "AUDIO")]
+    Audio,
+    #[strum(serialize = "DISPLAY")]
+    Display,
+    #[strum(serialize = "EMAIL")]
+    Email,
+}
+
+/// The RELATED parameter value for TRIGGER (RFC 5545 §3.8.6.3).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, EnumString, Display)]
+#[non_exhaustive]
+#[strum(ascii_case_insensitive)]
+pub enum TriggerRelation {
+    #[strum(serialize = "START")]
+    Start,
+    #[strum(serialize = "END")]
+    End,
+}
+
+/// The VALUE parameter value (RFC 5545 §3.2.20).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, EnumString, Display)]
+#[non_exhaustive]
+#[strum(ascii_case_insensitive)]
+pub enum ValueType {
+    #[strum(serialize = "BINARY")]
+    Binary,
+    #[strum(serialize = "BOOLEAN")]
+    Boolean,
+    #[strum(serialize = "CAL-ADDRESS")]
+    CalAddress,
+    #[strum(serialize = "DATE")]
+    Date,
+    #[strum(serialize = "DATE-TIME")]
+    DateTime,
+    #[strum(serialize = "DURATION")]
+    Duration,
+    #[strum(serialize = "FLOAT")]
+    Float,
+    #[strum(serialize = "INTEGER")]
+    Integer,
+    #[strum(serialize = "PERIOD")]
+    Period,
+    #[strum(serialize = "RECUR")]
+    Recur,
+    #[strum(serialize = "TEXT")]
+    Text,
+    #[strum(serialize = "TIME")]
+    Time,
+    #[strum(serialize = "URI")]
+    Uri,
+    #[strum(serialize = "UTC-OFFSET")]
+    UtcOffset,
+}
+
+/// The only possible value of the RANGE parameter (RFC 5545 §3.2.13).
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct ThisAndFuture;
