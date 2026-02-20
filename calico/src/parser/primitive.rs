@@ -22,8 +22,8 @@ use crate::{
         primitive::{
             AlarmAction, CalendarUserType, Class, ClassValue, CompletionPercentage, Date, DateTime,
             DateTimeOrDate, Day, DisplayType, Duration, Encoding, ExactDuration, FeatureType,
-            Float, FormatType, FormatTypeBuf, FreeBusyType, Geo, Gregorian, Hour, Integer, IsoWeek, Language,
-            Method, Minute, Month, NominalDuration, NonLeapSecond, ParticipantType,
+            Float, FormatType, FormatTypeBuf, FreeBusyType, Geo, Gregorian, Hour, Integer, IsoWeek,
+            Language, Method, Minute, Month, NominalDuration, NonLeapSecond, ParticipantType,
             ParticipationRole, ParticipationStatus, Period, PositiveInteger, Priority,
             ProximityValue, RelationshipType, RequestStatus, RequestStatusCode, ResourceType,
             Second, Sign, SignedDuration, Status, Time, TimeFormat, TimeTransparency, Token,
@@ -143,10 +143,15 @@ where
     )
         .parse_next(input)?;
 
-    let class = Class::from_u8(class_byte)
-        .ok_or_else(|| E::from_external_error(input, CalendarParseError::InvalidStatusClass(class_byte)))?;
+    let class = Class::from_u8(class_byte).ok_or_else(|| {
+        E::from_external_error(input, CalendarParseError::InvalidStatusClass(class_byte))
+    })?;
 
-    Ok(RequestStatusCode { class, major, minor })
+    Ok(RequestStatusCode {
+        class,
+        major,
+        minor,
+    })
 }
 
 /// Parses an [`AlarmAction`].
@@ -292,8 +297,7 @@ where
 
     // TODO: this throws away the allocation produced by the name parser; find a way to reuse the
     // allocation here instead
-    Language::parse(name.as_str())
-        .map_err(|err| E::from_external_error(input, err.into()))
+    Language::parse(name.as_str()).map_err(|err| E::from_external_error(input, err.into()))
 }
 
 /// Parses an RFC 3986 URI. The description of the grammar in RFC 5545 is
@@ -357,7 +361,7 @@ where
             // SAFETY: the parser guarantees that this string is a valid URI
             unsafe { Uri::from_boxed_unchecked(s.into_boxed_str()) }
         })
-        .map_err(|e| E::from_external_error(input, e.into()))
+        .map_err(|e| E::from_external_error(input, e))
 }
 
 /// Parses a base64-encoded binary blob.
@@ -855,13 +859,26 @@ where
         'P',
         alt((
             dur_time.map(|exact| Duration::Exact(exact)),
-            separated_pair(lz_dec_uint::<I, u32, E>, 'D', opt(dur_time))
-                .map(|(days, exact)| Duration::Nominal(NominalDuration { weeks: 0, days, exact })),
-            terminated(lz_dec_uint::<I, u32, E>, 'W')
-                .map(|weeks| Duration::Nominal(NominalDuration { weeks, days: 0, exact: None })),
+            separated_pair(lz_dec_uint::<I, u32, E>, 'D', opt(dur_time)).map(|(days, exact)| {
+                Duration::Nominal(NominalDuration {
+                    weeks: 0,
+                    days,
+                    exact,
+                })
+            }),
+            terminated(lz_dec_uint::<I, u32, E>, 'W').map(|weeks| {
+                Duration::Nominal(NominalDuration {
+                    weeks,
+                    days: 0,
+                    exact: None,
+                })
+            }),
         )),
     )
-    .map(|(s, dur)| SignedDuration { sign: s.unwrap_or(Sign::Pos), duration: dur })
+    .map(|(s, dur)| SignedDuration {
+        sign: s.unwrap_or(Sign::Pos),
+        duration: dur,
+    })
     .parse_next(input)
 }
 
@@ -902,7 +919,11 @@ where
     E: ParserError<I> + FromExternalError<I, CalendarParseError<I::Slice>>,
 {
     (date, 'T', time_utc)
-        .map(|(date, _, time)| DateTime { date, time, marker: Utc })
+        .map(|(date, _, time)| DateTime {
+            date,
+            time,
+            marker: Utc,
+        })
         .parse_next(input)
 }
 
@@ -1556,6 +1577,8 @@ const fn str_has_extension_prefix(s: &str) -> bool {
 
 #[cfg(test)]
 mod tests {
+    use strum::IntoEnumIterator;
+
     use crate::date;
     use crate::parser::escaped::{AsEscaped, Escaped};
 
@@ -1565,12 +1588,26 @@ mod tests {
     fn status_code_parser() {
         assert_eq!(
             status_code::<_, ()>.parse_peek("3.1"),
-            Ok(("", RequestStatusCode { class: Class::C3, major: 1, minor: None })),
+            Ok((
+                "",
+                RequestStatusCode {
+                    class: Class::C3,
+                    major: 1,
+                    minor: None
+                }
+            )),
         );
 
         assert_eq!(
             status_code::<_, ()>.parse_peek("3.1.12"),
-            Ok(("", RequestStatusCode { class: Class::C3, major: 1, minor: Some(12) })),
+            Ok((
+                "",
+                RequestStatusCode {
+                    class: Class::C3,
+                    major: 1,
+                    minor: Some(12)
+                }
+            )),
         );
     }
 
@@ -1593,18 +1630,12 @@ mod tests {
 
         assert_eq!(
             alarm_action::<_, ()>.parse_peek("X-extension"),
-            Ok((
-                "",
-                Token::Unknown(Name::new("X-extension").unwrap().into())
-            ))
+            Ok(("", Token::Unknown(Name::new("X-extension").unwrap().into())))
         );
 
         assert_eq!(
             alarm_action::<_, ()>.parse_peek("iana-token"),
-            Ok((
-                "",
-                Token::Unknown(Name::new("iana-token").unwrap().into())
-            ))
+            Ok(("", Token::Unknown(Name::new("iana-token").unwrap().into())))
         );
     }
 
@@ -1753,18 +1784,12 @@ mod tests {
 
         assert_eq!(
             class_value::<_, ()>.parse_peek("X-SOMETHING"),
-            Ok((
-                "",
-                Token::Unknown(Name::new("X-SOMETHING").unwrap().into())
-            ))
+            Ok(("", Token::Unknown(Name::new("X-SOMETHING").unwrap().into())))
         );
 
         assert_eq!(
             class_value::<_, ()>.parse_peek("IANA-TOKEN"),
-            Ok((
-                "",
-                Token::Unknown(Name::new("IANA-TOKEN").unwrap().into())
-            ))
+            Ok(("", Token::Unknown(Name::new("IANA-TOKEN").unwrap().into())))
         );
     }
 
@@ -1825,7 +1850,9 @@ mod tests {
             format_type::<_, ()>.parse_peek("application/postscript"),
             Ok((
                 "",
-                FormatType::new("application/postscript").unwrap().to_owned(),
+                FormatType::new("application/postscript")
+                    .unwrap()
+                    .to_owned(),
             ))
         );
     }
@@ -1925,10 +1952,7 @@ mod tests {
 
         assert_eq!(
             participation_role::<_, ()>.parse_peek("X-ANYTHING"),
-            Ok((
-                "",
-                Token::Unknown(Name::new("X-ANYTHING").unwrap().into())
-            )),
+            Ok(("", Token::Unknown(Name::new("X-ANYTHING").unwrap().into()))),
         );
     }
 
@@ -1983,7 +2007,11 @@ mod tests {
                 "",
                 SignedDuration {
                     sign: Sign::Pos,
-                    duration: Duration::Nominal(NominalDuration { weeks: 7, days: 0, exact: None }),
+                    duration: Duration::Nominal(NominalDuration {
+                        weeks: 7,
+                        days: 0,
+                        exact: None
+                    }),
                 }
             )),
         );
@@ -2093,18 +2121,12 @@ mod tests {
     fn utc_offset_parser() {
         assert_eq!(
             utc_offset::<_, ()>.parse_peek("+235959"),
-            Ok((
-                "",
-                crate::utc_offset!(+23;59;59)
-            ))
+            Ok(("", crate::utc_offset!(+23;59;59)))
         );
 
         assert_eq!(
             utc_offset::<_, ()>.parse_peek("-2340"),
-            Ok((
-                "",
-                crate::utc_offset!(-23;40)
-            ))
+            Ok(("", crate::utc_offset!(-23;40)))
         );
 
         assert!(utc_offset::<_, ()>.parse_peek("-0000").is_err());
@@ -2290,8 +2312,8 @@ mod tests {
     fn color_parser() {
         for c in Css3Color::iter() {
             dbg![c];
-            let input = c.as_str();
-            let (tail, res) = color::<_, ()>.parse_peek(input).unwrap();
+            let input = c.to_string();
+            let (tail, res) = color::<_, ()>.parse_peek(input.as_str()).unwrap();
             dbg![tail];
             assert!(tail.is_empty());
             assert_eq!(c, res);

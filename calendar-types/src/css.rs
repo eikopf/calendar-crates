@@ -1,9 +1,11 @@
 //! CSS3 color names.
 
-use strum::EnumString;
+use strum::{EnumIter, EnumString};
 
 /// CSS3 colors as defined by [the W3C recommendation.](https://www.w3.org/TR/css-color-3/)
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, EnumString, strum::Display)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, EnumString, EnumIter, strum::Display,
+)]
 #[repr(u8)]
 #[strum(ascii_case_insensitive, serialize_all = "lowercase")]
 pub enum Css3Color {
@@ -155,3 +157,4 @@ pub enum Css3Color {
     Yellow,
     YellowGreen,
 }
+

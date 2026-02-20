@@ -8,7 +8,6 @@
 //! documents include [RFC 6868](https://www.rfc-editor.org/rfc/rfc6868) and [RFC 7529](https://www.rfc-editor.org/rfc/rfc7529).
 
 pub mod component;
-pub mod css;
 pub mod parameter;
 pub mod primitive;
 pub mod property;
@@ -16,4 +15,4 @@ pub mod string;
 
 pub use rfc5545_types::rrule;
 
-// TODO: implement missing winnow::Accumulate instances
+pub use calendar_types::css;
