@@ -14,7 +14,7 @@ use calendar_types::{
     set::Token,
     time::{DateTime, InvalidDateTimeError, Local, Utc},
 };
-use rfc5545_types::set::{Percent, Priority};
+use crate::model::set::{Percent, Priority};
 use thiserror::Error;
 
 use crate::parser::{
