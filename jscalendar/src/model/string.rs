@@ -153,6 +153,12 @@ impl std::fmt::Debug for Id {
     }
 }
 
+impl std::fmt::Display for Id {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
 impl Id {
     const fn check_slice(value: &[IdChar]) -> Result<(), InvalidIdError> {
         match value.len() {
@@ -395,6 +401,12 @@ impl<V: DestructibleJsonValue> TryFromJson<V> for Box<CustomTimeZoneId> {
     }
 }
 
+impl std::fmt::Display for CustomTimeZoneId {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.0)
+    }
+}
+
 impl CustomTimeZoneId {
     fn str_is_custom_time_zone_id(s: &str) -> Result<(), InvalidCustomTimeZoneIdError> {
         let body = s.strip_prefix('/').ok_or(if s.is_empty() {
@@ -442,6 +454,12 @@ pub enum InvalidImplicitJsonPointerError {
 #[dizzy(derive_owned(Debug, IntoBoxed))]
 #[repr(transparent)]
 pub struct ImplicitJsonPointer(str);
+
+impl std::fmt::Display for ImplicitJsonPointer {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.0)
+    }
+}
 
 impl ImplicitJsonPointer {
     fn str_is_implicit_json_pointer(s: &str) -> Result<(), InvalidImplicitJsonPointerError> {
@@ -520,6 +538,12 @@ pub enum InvalidVendorStrError {
 #[dizzy(derive_owned(Debug, IntoBoxed))]
 #[repr(transparent)]
 pub struct VendorStr(str);
+
+impl std::fmt::Display for VendorStr {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
 
 impl VendorStr {
     const fn is_vendor_str(s: &str) -> Result<(), InvalidVendorStrError> {
@@ -610,6 +634,12 @@ impl<V: DestructibleJsonValue> TryFromJson<V> for Box<CalAddress> {
     }
 }
 
+impl std::fmt::Display for CalAddress {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
 impl CalAddress {
     fn str_is_cal_address(s: &str) -> Result<(), InvalidCalAddressError> {
         if s.is_empty() {
@@ -668,6 +698,12 @@ impl<V: DestructibleJsonValue> TryFromJson<V> for Box<EmailAddr> {
                 error,
             })
             .map_err(TypeErrorOr::Other)
+    }
+}
+
+impl std::fmt::Display for EmailAddr {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.as_str())
     }
 }
 
@@ -757,6 +793,12 @@ impl<V: DestructibleJsonValue> TryFromJson<V> for Box<GeoUri> {
     }
 }
 
+impl std::fmt::Display for GeoUri {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
 impl GeoUri {
     fn str_is_geo_uri(s: &str) -> Result<(), InvalidGeoUriError> {
         if s.is_empty() {
@@ -828,6 +870,12 @@ impl<V: DestructibleJsonValue> TryFromJson<V> for Box<ContentId> {
     }
 }
 
+impl std::fmt::Display for ContentId {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
 impl ContentId {
     fn str_is_content_id(s: &str) -> Result<(), InvalidContentIdError> {
         if s.is_empty() {
@@ -874,6 +922,12 @@ impl<V: DestructibleJsonValue> TryFromJson<V> for Box<MediaType> {
                 error,
             })
             .map_err(TypeErrorOr::Other)
+    }
+}
+
+impl std::fmt::Display for MediaType {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.as_str())
     }
 }
 
@@ -933,6 +987,12 @@ impl MediaType {
 #[dizzy(derive(Debug, CloneBoxed, IntoBoxed))]
 #[repr(transparent)]
 pub struct AlphaNumeric(str);
+
+impl std::fmt::Display for AlphaNumeric {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
 
 impl AlphaNumeric {
     pub fn str_is_alphanumeric(s: &str) -> Result<(), InvalidAlphaNumericError> {

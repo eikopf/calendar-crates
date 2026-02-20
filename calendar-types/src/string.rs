@@ -25,6 +25,12 @@ pub enum InvalidUidError {
 #[repr(transparent)]
 pub struct Uid(str);
 
+impl std::fmt::Display for Uid {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
 impl Uid {
     fn str_is_uid(s: &str) -> Result<(), InvalidUidError> {
         if s.is_empty() {
@@ -62,6 +68,12 @@ pub enum InvalidUriError {
 #[dizzy(derive_owned(Debug, IntoBoxed))]
 #[repr(transparent)]
 pub struct Uri(str);
+
+impl std::fmt::Display for Uri {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
 
 impl Uri {
     fn str_is_uri(s: &str) -> Result<(), InvalidUriError> {
