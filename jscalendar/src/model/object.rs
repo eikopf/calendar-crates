@@ -12,8 +12,9 @@ use thiserror::Error;
 use crate::parser::{local_date_time, parse_full};
 use crate::{
     json::{
-        DestructibleJsonValue, DocumentError, Int, IntoDocumentError, JsonArray, JsonObject,
-        JsonValue, PathSegment, TryFromJson, TypeError, TypeErrorOr, UnsignedInt,
+        ConstructibleJsonValue, DestructibleJsonValue, DocumentError, IntoJson, Int,
+        IntoDocumentError, JsonArray, JsonObject, JsonValue, PathSegment, TryFromJson, TypeError,
+        TypeErrorOr, UnsignedInt,
     },
     model::{
         request_status::{RequestStatus, StatusCode},
@@ -3748,6 +3749,673 @@ impl<V: DestructibleJsonValue> TryFromJson<V> for TaskOrEvent<V> {
         } else {
             Task::try_from_json(value).map(TaskOrEvent::Task)
         }
+    }
+}
+
+// ============================================================================
+// IntoJson implementations
+// ============================================================================
+
+/// Helper: insert an optional field into a JSON object, skipping if None.
+macro_rules! insert_optional {
+    ($obj:expr, $key:expr, $val:expr) => {
+        if let Some(v) = $val {
+            $obj.insert($key.into(), v.into_json());
+        }
+    };
+}
+
+/// Helper: insert a required field into a JSON object.
+macro_rules! insert_required {
+    ($obj:expr, $key:expr, $val:expr) => {
+        $obj.insert($key.into(), $val.into_json());
+    };
+}
+
+/// Helper: insert vendor properties (consuming) into a JSON object.
+macro_rules! insert_vendor_properties {
+    ($obj:expr, $fields:expr) => {
+        for (key, value) in $fields.drain_vendor_property() {
+            $obj.insert(String::from(key).into(), value);
+        }
+    };
+}
+
+impl<V: ConstructibleJsonValue> IntoJson<V> for UtcOffset {
+    fn into_json(self) -> V {
+        V::string(self.to_string())
+    }
+}
+
+impl<V: ConstructibleJsonValue> IntoJson<V> for StatusCode {
+    fn into_json(self) -> V {
+        V::string(self.to_string())
+    }
+}
+
+impl<V: ConstructibleJsonValue> IntoJson<V> for RequestStatus {
+    fn into_json(self) -> V {
+        V::string(self.to_string())
+    }
+}
+
+impl<V: ConstructibleJsonValue> IntoJson<V> for PatchObject<V> {
+    fn into_json(self) -> V {
+        let inner = self.into_inner();
+        let mut obj = V::Object::with_capacity(inner.len());
+        for (key, value) in inner {
+            obj.insert(key.to_string().into(), value);
+        }
+        V::object(obj)
+    }
+}
+
+impl<V: ConstructibleJsonValue> IntoJson<V> for Relation<V> {
+    fn into_json(self) -> V {
+        let mut f = self.into_fields();
+        let mut obj = V::Object::new();
+        obj.insert("@type".into(), V::str("Relation"));
+        if let Some(relations) = f.take_relations()
+            && !relations.is_empty()
+        {
+            insert_required!(obj, "relation", relations);
+        }
+        insert_vendor_properties!(obj, f);
+        V::object(obj)
+    }
+}
+
+impl<V: ConstructibleJsonValue> IntoJson<V> for OffsetTrigger<V> {
+    fn into_json(self) -> V {
+        let mut f = self.into_fields();
+        let mut obj = V::Object::new();
+        obj.insert("@type".into(), V::str("OffsetTrigger"));
+        insert_required!(obj, "offset", f.take_offset().unwrap());
+        insert_optional!(obj, "relativeTo", f.take_relative_to());
+        insert_vendor_properties!(obj, f);
+        V::object(obj)
+    }
+}
+
+impl<V: ConstructibleJsonValue> IntoJson<V> for AbsoluteTrigger<V> {
+    fn into_json(self) -> V {
+        let mut f = self.into_fields();
+        let mut obj = V::Object::new();
+        obj.insert("@type".into(), V::str("AbsoluteTrigger"));
+        insert_required!(obj, "when", f.take_when().unwrap());
+        insert_vendor_properties!(obj, f);
+        V::object(obj)
+    }
+}
+
+impl<V: ConstructibleJsonValue> IntoJson<V> for Trigger<V> {
+    fn into_json(self) -> V {
+        match self {
+            Trigger::Offset(t) => t.into_json(),
+            Trigger::Absolute(t) => t.into_json(),
+            Trigger::Unknown(obj) => V::object(obj),
+        }
+    }
+}
+
+impl<V: ConstructibleJsonValue> IntoJson<V> for ReplyTo {
+    fn into_json(self) -> V {
+        let mut f = self.into_fields();
+        let mut obj = V::Object::new();
+        insert_optional!(obj, "imip", f.take_imip());
+        insert_optional!(obj, "web", f.take_web());
+        for (key, value) in f.drain_other() {
+            obj.insert(key.as_str().into(), value.into_json());
+        }
+        V::object(obj)
+    }
+}
+
+impl<V: ConstructibleJsonValue> IntoJson<V> for SendToParticipant {
+    fn into_json(self) -> V {
+        let mut f = self.into_fields();
+        let mut obj = V::Object::new();
+        insert_optional!(obj, "imip", f.take_imip());
+        for (key, value) in f.drain_other() {
+            obj.insert(key.as_str().into(), value.into_json());
+        }
+        V::object(obj)
+    }
+}
+
+impl<V: ConstructibleJsonValue> IntoJson<V> for Link<V> {
+    fn into_json(self) -> V {
+        let mut f = self.into_fields();
+        let mut obj = V::Object::new();
+        obj.insert("@type".into(), V::str("Link"));
+        insert_required!(obj, "href", f.take_href().unwrap());
+        insert_optional!(obj, "contentId", f.take_content_id());
+        insert_optional!(obj, "mediaType", f.take_media_type());
+        insert_optional!(obj, "size", f.take_size());
+        if let Some(rel) = f.take_relation() {
+            obj.insert("rel".into(), V::string(rel.to_string()));
+        }
+        insert_optional!(obj, "display", f.take_display());
+        insert_optional!(obj, "title", f.take_title());
+        insert_vendor_properties!(obj, f);
+        V::object(obj)
+    }
+}
+
+impl<V: ConstructibleJsonValue> IntoJson<V> for Location<V> {
+    fn into_json(self) -> V {
+        let mut f = self.into_fields();
+        let mut obj = V::Object::new();
+        obj.insert("@type".into(), V::str("Location"));
+        insert_optional!(obj, "name", f.take_name());
+        insert_optional!(obj, "description", f.take_description());
+        insert_optional!(obj, "locationTypes", f.take_location_types());
+        insert_optional!(obj, "relativeTo", f.take_relative_to());
+        insert_optional!(obj, "timeZone", f.take_time_zone());
+        insert_optional!(obj, "coordinates", f.take_coordinates());
+        insert_optional!(obj, "links", f.take_links());
+        insert_vendor_properties!(obj, f);
+        V::object(obj)
+    }
+}
+
+impl<V: ConstructibleJsonValue> IntoJson<V> for VirtualLocation<V> {
+    fn into_json(self) -> V {
+        let mut f = self.into_fields();
+        let mut obj = V::Object::new();
+        obj.insert("@type".into(), V::str("VirtualLocation"));
+        insert_optional!(obj, "name", f.take_name());
+        insert_optional!(obj, "description", f.take_description());
+        insert_required!(obj, "uri", f.take_uri().unwrap());
+        insert_optional!(obj, "features", f.take_features());
+        insert_vendor_properties!(obj, f);
+        V::object(obj)
+    }
+}
+
+impl<V: ConstructibleJsonValue> IntoJson<V> for Alert<V> {
+    fn into_json(self) -> V {
+        let mut f = self.into_fields();
+        let mut obj = V::Object::new();
+        obj.insert("@type".into(), V::str("Alert"));
+        insert_required!(obj, "trigger", f.take_trigger().unwrap());
+        insert_optional!(obj, "acknowledged", f.take_acknowledged());
+        insert_optional!(obj, "relatedTo", f.take_related_to());
+        insert_optional!(obj, "action", f.take_action());
+        insert_vendor_properties!(obj, f);
+        V::object(obj)
+    }
+}
+
+impl<V: ConstructibleJsonValue> IntoJson<V> for TimeZoneRule<V> {
+    fn into_json(self) -> V {
+        let mut f = self.into_fields();
+        let mut obj = V::Object::new();
+        obj.insert("@type".into(), V::str("TimeZoneRule"));
+        insert_required!(obj, "start", f.take_start().unwrap());
+        insert_required!(obj, "offsetFrom", f.take_offset_from().unwrap());
+        insert_required!(obj, "offsetTo", f.take_offset_to().unwrap());
+        insert_optional!(obj, "recurrenceRules", f.take_recurrence_rules());
+        insert_optional!(obj, "recurrenceOverrides", f.take_recurrence_overrides());
+        insert_optional!(obj, "names", f.take_names());
+        insert_optional!(obj, "comments", f.take_comments());
+        insert_vendor_properties!(obj, f);
+        V::object(obj)
+    }
+}
+
+impl<V: ConstructibleJsonValue> IntoJson<V> for TimeZone<V> {
+    fn into_json(self) -> V {
+        let mut f = self.into_fields();
+        let mut obj = V::Object::new();
+        obj.insert("@type".into(), V::str("TimeZone"));
+        insert_required!(obj, "tzId", f.take_tz_id().unwrap());
+        insert_optional!(obj, "updated", f.take_updated());
+        insert_optional!(obj, "url", f.take_url());
+        insert_optional!(obj, "validUntil", f.take_valid_until());
+        insert_optional!(obj, "aliases", f.take_aliases());
+        insert_optional!(obj, "standard", f.take_standard());
+        insert_optional!(obj, "daylight", f.take_daylight());
+        insert_vendor_properties!(obj, f);
+        V::object(obj)
+    }
+}
+
+fn serialize_participant_fields<V: ConstructibleJsonValue>(
+    obj: &mut V::Object,
+    f: &mut ParticipantFields<V>,
+) {
+    insert_optional!(obj, "name", f.take_name());
+    insert_optional!(obj, "email", f.take_email());
+    insert_optional!(obj, "description", f.take_description());
+    insert_optional!(obj, "sendTo", f.take_send_to());
+    insert_optional!(obj, "kind", f.take_kind());
+    insert_optional!(obj, "roles", f.take_roles());
+    insert_optional!(obj, "locationId", f.take_location_id());
+    insert_optional!(obj, "language", f.take_language());
+    insert_optional!(obj, "participationStatus", f.take_participation_status());
+    insert_optional!(obj, "participationComment", f.take_participation_comment());
+    insert_optional!(obj, "expectReply", f.take_expect_reply());
+    insert_optional!(obj, "scheduleAgent", f.take_schedule_agent());
+    insert_optional!(obj, "scheduleForceSend", f.take_schedule_force_send());
+    insert_optional!(obj, "scheduleSequence", f.take_schedule_sequence());
+    insert_optional!(obj, "scheduleStatus", f.take_schedule_status());
+    insert_optional!(obj, "scheduleUpdated", f.take_schedule_updated());
+    insert_optional!(obj, "sentBy", f.take_sent_by());
+    insert_optional!(obj, "invitedBy", f.take_invited_by());
+    insert_optional!(obj, "delegatedTo", f.take_delegated_to());
+    insert_optional!(obj, "delegatedFrom", f.take_delegated_from());
+    insert_optional!(obj, "memberOf", f.take_member_of());
+    insert_optional!(obj, "links", f.take_links());
+}
+
+impl<V: ConstructibleJsonValue> IntoJson<V> for Participant<V> {
+    fn into_json(self) -> V {
+        let mut f = self.into_fields();
+        let mut obj = V::Object::new();
+        obj.insert("@type".into(), V::str("Participant"));
+        serialize_participant_fields::<V>(&mut obj, &mut f);
+        insert_vendor_properties!(obj, f);
+        V::object(obj)
+    }
+}
+
+impl<V: ConstructibleJsonValue> IntoJson<V> for TaskParticipant<V> {
+    fn into_json(self) -> V {
+        let mut f = self.into_fields();
+        let mut obj = V::Object::new();
+        obj.insert("@type".into(), V::str("Participant"));
+        // Common participant fields
+        insert_optional!(obj, "name", f.take_name());
+        insert_optional!(obj, "email", f.take_email());
+        insert_optional!(obj, "description", f.take_description());
+        insert_optional!(obj, "sendTo", f.take_send_to());
+        insert_optional!(obj, "kind", f.take_kind());
+        insert_optional!(obj, "roles", f.take_roles());
+        insert_optional!(obj, "locationId", f.take_location_id());
+        insert_optional!(obj, "language", f.take_language());
+        insert_optional!(obj, "participationStatus", f.take_participation_status());
+        insert_optional!(obj, "participationComment", f.take_participation_comment());
+        insert_optional!(obj, "expectReply", f.take_expect_reply());
+        insert_optional!(obj, "scheduleAgent", f.take_schedule_agent());
+        insert_optional!(obj, "scheduleForceSend", f.take_schedule_force_send());
+        insert_optional!(obj, "scheduleSequence", f.take_schedule_sequence());
+        insert_optional!(obj, "scheduleStatus", f.take_schedule_status());
+        insert_optional!(obj, "scheduleUpdated", f.take_schedule_updated());
+        insert_optional!(obj, "sentBy", f.take_sent_by());
+        insert_optional!(obj, "invitedBy", f.take_invited_by());
+        insert_optional!(obj, "delegatedTo", f.take_delegated_to());
+        insert_optional!(obj, "delegatedFrom", f.take_delegated_from());
+        insert_optional!(obj, "memberOf", f.take_member_of());
+        insert_optional!(obj, "links", f.take_links());
+        // Task-specific fields
+        insert_optional!(obj, "progress", f.take_progress());
+        insert_optional!(obj, "progressUpdated", f.take_progress_updated());
+        insert_optional!(obj, "percentComplete", f.take_percent_complete());
+        insert_vendor_properties!(obj, f);
+        V::object(obj)
+    }
+}
+
+impl<V: ConstructibleJsonValue> IntoJson<V> for Event<V> {
+    fn into_json(self) -> V {
+        let mut f = self.into_fields();
+        let mut obj = V::Object::new();
+        obj.insert("@type".into(), V::str("Event"));
+        insert_required!(obj, "uid", f.take_uid().unwrap());
+        insert_required!(obj, "start", f.take_start().unwrap());
+        insert_optional!(obj, "duration", f.take_duration());
+        insert_optional!(obj, "status", f.take_status());
+        insert_optional!(obj, "relatedTo", f.take_related_to());
+        insert_optional!(obj, "prodId", f.take_prod_id());
+        insert_optional!(obj, "created", f.take_created());
+        insert_optional!(obj, "updated", f.take_updated());
+        insert_optional!(obj, "sequence", f.take_sequence());
+        insert_optional!(obj, "method", f.take_method());
+        insert_optional!(obj, "title", f.take_title());
+        insert_optional!(obj, "description", f.take_description());
+        insert_optional!(obj, "descriptionContentType", f.take_description_content_type());
+        insert_optional!(obj, "showWithoutTime", f.take_show_without_time());
+        insert_optional!(obj, "locations", f.take_locations());
+        insert_optional!(obj, "virtualLocations", f.take_virtual_locations());
+        insert_optional!(obj, "links", f.take_links());
+        insert_optional!(obj, "locale", f.take_locale());
+        insert_optional!(obj, "keywords", f.take_keywords());
+        insert_optional!(obj, "categories", f.take_categories());
+        insert_optional!(obj, "color", f.take_color());
+        insert_optional!(obj, "recurrenceId", f.take_recurrence_id());
+        insert_optional!(obj, "recurrenceIdTimeZone", f.take_recurrence_id_time_zone());
+        insert_optional!(obj, "recurrenceRules", f.take_recurrence_rules());
+        insert_optional!(obj, "excludedRecurrenceRules", f.take_excluded_recurrence_rules());
+        insert_optional!(obj, "recurrenceOverrides", f.take_recurrence_overrides());
+        insert_optional!(obj, "excluded", f.take_excluded());
+        insert_optional!(obj, "priority", f.take_priority());
+        insert_optional!(obj, "freeBusyStatus", f.take_free_busy_status());
+        insert_optional!(obj, "privacy", f.take_privacy());
+        insert_optional!(obj, "replyTo", f.take_reply_to());
+        insert_optional!(obj, "sentBy", f.take_sent_by());
+        insert_optional!(obj, "participants", f.take_participants());
+        insert_optional!(obj, "requestStatus", f.take_request_status());
+        insert_optional!(obj, "useDefaultAlerts", f.take_use_default_alerts());
+        insert_optional!(obj, "alerts", f.take_alerts());
+        insert_optional!(obj, "localizations", f.take_localizations());
+        insert_optional!(obj, "timeZone", f.take_time_zone());
+        insert_optional!(obj, "timeZones", f.take_time_zones());
+        insert_vendor_properties!(obj, f);
+        V::object(obj)
+    }
+}
+
+impl<V: ConstructibleJsonValue> IntoJson<V> for Task<V> {
+    fn into_json(self) -> V {
+        let mut f = self.into_fields();
+        let mut obj = V::Object::new();
+        obj.insert("@type".into(), V::str("Task"));
+        insert_required!(obj, "uid", f.take_uid().unwrap());
+        insert_optional!(obj, "due", f.take_due());
+        insert_optional!(obj, "start", f.take_start());
+        insert_optional!(obj, "estimatedDuration", f.take_estimated_duration());
+        insert_optional!(obj, "percentComplete", f.take_percent_complete());
+        insert_optional!(obj, "progress", f.take_progress());
+        insert_optional!(obj, "progressUpdated", f.take_progress_updated());
+        insert_optional!(obj, "relatedTo", f.take_related_to());
+        insert_optional!(obj, "prodId", f.take_prod_id());
+        insert_optional!(obj, "created", f.take_created());
+        insert_optional!(obj, "updated", f.take_updated());
+        insert_optional!(obj, "sequence", f.take_sequence());
+        insert_optional!(obj, "method", f.take_method());
+        insert_optional!(obj, "title", f.take_title());
+        insert_optional!(obj, "description", f.take_description());
+        insert_optional!(obj, "descriptionContentType", f.take_description_content_type());
+        insert_optional!(obj, "showWithoutTime", f.take_show_without_time());
+        insert_optional!(obj, "locations", f.take_locations());
+        insert_optional!(obj, "virtualLocations", f.take_virtual_locations());
+        insert_optional!(obj, "links", f.take_links());
+        insert_optional!(obj, "locale", f.take_locale());
+        insert_optional!(obj, "keywords", f.take_keywords());
+        insert_optional!(obj, "categories", f.take_categories());
+        insert_optional!(obj, "color", f.take_color());
+        insert_optional!(obj, "recurrenceId", f.take_recurrence_id());
+        insert_optional!(obj, "recurrenceIdTimeZone", f.take_recurrence_id_time_zone());
+        insert_optional!(obj, "recurrenceRules", f.take_recurrence_rules());
+        insert_optional!(obj, "excludedRecurrenceRules", f.take_excluded_recurrence_rules());
+        insert_optional!(obj, "recurrenceOverrides", f.take_recurrence_overrides());
+        insert_optional!(obj, "excluded", f.take_excluded());
+        insert_optional!(obj, "priority", f.take_priority());
+        insert_optional!(obj, "freeBusyStatus", f.take_free_busy_status());
+        insert_optional!(obj, "privacy", f.take_privacy());
+        insert_optional!(obj, "replyTo", f.take_reply_to());
+        insert_optional!(obj, "sentBy", f.take_sent_by());
+        insert_optional!(obj, "participants", f.take_participants());
+        insert_optional!(obj, "requestStatus", f.take_request_status());
+        insert_optional!(obj, "useDefaultAlerts", f.take_use_default_alerts());
+        insert_optional!(obj, "alerts", f.take_alerts());
+        insert_optional!(obj, "localizations", f.take_localizations());
+        insert_optional!(obj, "timeZone", f.take_time_zone());
+        insert_optional!(obj, "timeZones", f.take_time_zones());
+        insert_vendor_properties!(obj, f);
+        V::object(obj)
+    }
+}
+
+impl<V: ConstructibleJsonValue> IntoJson<V> for Group<V> {
+    fn into_json(self) -> V {
+        let mut f = self.into_fields();
+        let mut obj = V::Object::new();
+        obj.insert("@type".into(), V::str("Group"));
+        insert_required!(obj, "uid", f.take_uid().unwrap());
+        if let Some(entries) = f.take_entries()
+            && !entries.is_empty()
+        {
+            insert_required!(obj, "entries", entries);
+        }
+        insert_optional!(obj, "source", f.take_source());
+        insert_optional!(obj, "prodId", f.take_prod_id());
+        insert_optional!(obj, "created", f.take_created());
+        insert_optional!(obj, "updated", f.take_updated());
+        insert_optional!(obj, "title", f.take_title());
+        insert_optional!(obj, "description", f.take_description());
+        insert_optional!(obj, "descriptionContentType", f.take_description_content_type());
+        insert_optional!(obj, "links", f.take_links());
+        insert_optional!(obj, "locale", f.take_locale());
+        insert_optional!(obj, "keywords", f.take_keywords());
+        insert_optional!(obj, "categories", f.take_categories());
+        insert_optional!(obj, "color", f.take_color());
+        insert_optional!(obj, "timeZones", f.take_time_zones());
+        insert_vendor_properties!(obj, f);
+        V::object(obj)
+    }
+}
+
+impl<V: ConstructibleJsonValue> IntoJson<V> for TaskOrEvent<V> {
+    fn into_json(self) -> V {
+        match self {
+            TaskOrEvent::Task(t) => t.into_json(),
+            TaskOrEvent::Event(e) => e.into_json(),
+        }
+    }
+}
+
+// ============================================================================
+// RRule IntoJson
+// ============================================================================
+
+fn weekday_code(w: Weekday) -> &'static str {
+    match w {
+        Weekday::Monday => "mo",
+        Weekday::Tuesday => "tu",
+        Weekday::Wednesday => "we",
+        Weekday::Thursday => "th",
+        Weekday::Friday => "fr",
+        Weekday::Saturday => "sa",
+        Weekday::Sunday => "su",
+    }
+}
+
+fn serialize_by_day<V: ConstructibleJsonValue>(set: &WeekdayNumSet) -> V {
+    let mut arr = V::Array::with_capacity(set.len());
+    for wdn in set.iter() {
+        let mut day_obj = V::Object::new();
+        day_obj.insert("@type".into(), V::str("NDay"));
+        day_obj.insert("day".into(), V::str(weekday_code(wdn.weekday)));
+        if let Some((sign, week)) = wdn.ordinal {
+            let n = (sign as i64) * (week as i64);
+            day_obj.insert("nthOfPeriod".into(), V::int(crate::json::Int::new(n).unwrap()));
+        }
+        arr.push(V::object(day_obj));
+    }
+    V::array(arr)
+}
+
+fn serialize_second_set<V: ConstructibleJsonValue>(set: &rfc5545_types::rrule::SecondSet) -> V {
+    let mut arr = V::Array::new();
+    for sec in rfc5545_types::rrule::Second::iter() {
+        if set.get(sec) {
+            arr.push(V::unsigned_int(UnsignedInt::new(sec as u64).unwrap()));
+        }
+    }
+    V::array(arr)
+}
+
+fn serialize_minute_set<V: ConstructibleJsonValue>(set: &rfc5545_types::rrule::MinuteSet) -> V {
+    let mut arr = V::Array::new();
+    for min in rfc5545_types::rrule::Minute::iter() {
+        if set.get(min) {
+            arr.push(V::unsigned_int(UnsignedInt::new(min as u64).unwrap()));
+        }
+    }
+    V::array(arr)
+}
+
+fn serialize_hour_set<V: ConstructibleJsonValue>(set: &rfc5545_types::rrule::HourSet) -> V {
+    let mut arr = V::Array::new();
+    for hr in rfc5545_types::rrule::Hour::iter() {
+        if set.get(hr) {
+            arr.push(V::unsigned_int(UnsignedInt::new(hr as u64).unwrap()));
+        }
+    }
+    V::array(arr)
+}
+
+fn serialize_month_set<V: ConstructibleJsonValue>(set: &rfc5545_types::rrule::MonthSet) -> V {
+    let mut arr = V::Array::new();
+    for m in Month::iter() {
+        if set.get(m) {
+            arr.push(V::unsigned_int(UnsignedInt::new(m.number().get() as u64).unwrap()));
+        }
+    }
+    V::array(arr)
+}
+
+fn serialize_month_day_set<V: ConstructibleJsonValue>(set: &rfc5545_types::rrule::MonthDaySet) -> V {
+    use rfc5545_types::rrule::{MonthDay, MonthDaySetIndex};
+    let mut arr = V::Array::new();
+    // Positive days 1..=31
+    for d in 1..=31u8 {
+        if let Some(md) = MonthDay::from_repr(d) {
+            let idx = MonthDaySetIndex::from_signed_month_day(Sign::Pos, md);
+            if set.get(idx) {
+                arr.push(V::int(crate::json::Int::new(d as i64).unwrap()));
+            }
+        }
+    }
+    // Negative days -31..=-1
+    for d in 1..=31u8 {
+        if let Some(md) = MonthDay::from_repr(d) {
+            let idx = MonthDaySetIndex::from_signed_month_day(Sign::Neg, md);
+            if set.get(idx) {
+                arr.push(V::int(crate::json::Int::new(-(d as i64)).unwrap()));
+            }
+        }
+    }
+    V::array(arr)
+}
+
+fn serialize_year_day_nums<V: ConstructibleJsonValue>(set: &BTreeSet<rfc5545_types::rrule::YearDayNum>) -> V {
+    let mut arr = V::Array::with_capacity(set.len());
+    for ydn in set {
+        // YearDayNum wraps a NonZero<i16>
+        let n = ydn.get();
+        arr.push(V::int(crate::json::Int::new(n as i64).unwrap()));
+    }
+    V::array(arr)
+}
+
+fn serialize_week_no_set<V: ConstructibleJsonValue>(set: &rfc5545_types::rrule::WeekNoSet) -> V {
+    use rfc5545_types::rrule::WeekNoSetIndex;
+    let mut arr = V::Array::new();
+    // Positive weeks 1..=53
+    for w in 1..=53u8 {
+        if let Some(iw) = IsoWeek::from_index(w) {
+            let idx = WeekNoSetIndex::from_signed_week(Sign::Pos, iw);
+            if set.get(idx) {
+                arr.push(V::int(crate::json::Int::new(w as i64).unwrap()));
+            }
+        }
+    }
+    // Negative weeks -53..=-1
+    for w in 1..=53u8 {
+        if let Some(iw) = IsoWeek::from_index(w) {
+            let idx = WeekNoSetIndex::from_signed_week(Sign::Neg, iw);
+            if set.get(idx) {
+                arr.push(V::int(crate::json::Int::new(-(w as i64)).unwrap()));
+            }
+        }
+    }
+    V::array(arr)
+}
+
+fn serialize_date_or_datetime(dod: &DateTimeOrDate<Local>) -> String {
+    match dod {
+        DateTimeOrDate::DateTime(dt) => dt.to_string(),
+        DateTimeOrDate::Date(d) => d.to_string(),
+    }
+}
+
+impl<V: ConstructibleJsonValue> IntoJson<V> for RRule {
+    fn into_json(self) -> V {
+        let mut obj = V::Object::new();
+        obj.insert("@type".into(), V::str("RecurrenceRule"));
+
+        // Frequency and freq-dependent by-rules
+        let (freq_str, by_month_day, by_year_day, by_week_no) = match self.freq {
+            rfc5545_types::rrule::FreqByRules::Secondly(r) => {
+                ("secondly", r.by_month_day, r.by_year_day, None)
+            }
+            rfc5545_types::rrule::FreqByRules::Minutely(r) => {
+                ("minutely", r.by_month_day, r.by_year_day, None)
+            }
+            rfc5545_types::rrule::FreqByRules::Hourly(r) => {
+                ("hourly", r.by_month_day, r.by_year_day, None)
+            }
+            rfc5545_types::rrule::FreqByRules::Daily(r) => ("daily", r.by_month_day, None, None),
+            rfc5545_types::rrule::FreqByRules::Weekly => ("weekly", None, None, None),
+            rfc5545_types::rrule::FreqByRules::Monthly(r) => {
+                ("monthly", r.by_month_day, None, None)
+            }
+            rfc5545_types::rrule::FreqByRules::Yearly(r) => {
+                ("yearly", r.by_month_day, r.by_year_day, r.by_week_no)
+            }
+        };
+
+        obj.insert("frequency".into(), V::str(freq_str));
+
+        if let Some(interval) = self.interval {
+            obj.insert(
+                "interval".into(),
+                V::unsigned_int(UnsignedInt::new(interval.get().get()).unwrap()),
+            );
+        }
+
+        match self.termination {
+            Some(rfc5545_types::rrule::Termination::Count(c)) => {
+                obj.insert(
+                    "count".into(),
+                    V::unsigned_int(UnsignedInt::new(c).unwrap()),
+                );
+            }
+            Some(rfc5545_types::rrule::Termination::Until(ref u)) => {
+                obj.insert("until".into(), V::string(serialize_date_or_datetime(u)));
+            }
+            None => {}
+        }
+
+        if let Some(ws) = self.week_start {
+            obj.insert("firstDayOfWeek".into(), V::str(weekday_code(ws)));
+        }
+
+        // Core by-rules
+        if let Some(ref set) = self.core_by_rules.by_second {
+            obj.insert("bySecond".into(), serialize_second_set::<V>(set));
+        }
+        if let Some(ref set) = self.core_by_rules.by_minute {
+            obj.insert("byMinute".into(), serialize_minute_set::<V>(set));
+        }
+        if let Some(ref set) = self.core_by_rules.by_hour {
+            obj.insert("byHour".into(), serialize_hour_set::<V>(set));
+        }
+        if let Some(ref set) = self.core_by_rules.by_month {
+            obj.insert("byMonth".into(), serialize_month_set::<V>(set));
+        }
+        if let Some(ref set) = self.core_by_rules.by_day {
+            obj.insert("byDay".into(), serialize_by_day::<V>(set));
+        }
+        if let Some(ref set) = self.core_by_rules.by_set_pos {
+            obj.insert("bySetPosition".into(), serialize_year_day_nums::<V>(set));
+        }
+
+        // Freq-dependent by-rules
+        if let Some(ref set) = by_month_day {
+            obj.insert("byMonthDay".into(), serialize_month_day_set::<V>(set));
+        }
+        if let Some(ref set) = by_year_day {
+            obj.insert("byYearDay".into(), serialize_year_day_nums::<V>(set));
+        }
+        if let Some(ref set) = by_week_no {
+            obj.insert("byWeekNo".into(), serialize_week_no_set::<V>(set));
+        }
+
+        V::object(obj)
     }
 }
 

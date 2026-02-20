@@ -133,6 +133,11 @@ pub struct YearlyByRules {
 pub struct YearDayNum(NonZero<i16>);
 
 impl YearDayNum {
+    /// Returns the signed year-day value (-366..=-1 or 1..=366).
+    pub const fn get(self) -> i16 {
+        self.0.get()
+    }
+
     pub const fn from_signed_index(sign: Sign, index: u16) -> Option<Self> {
         match index {
             1..=366 => {

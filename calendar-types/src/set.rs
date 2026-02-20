@@ -1,8 +1,8 @@
 //! Types for finite set values.
 
-use std::{convert::Infallible, str::FromStr};
+use std::{convert::Infallible, fmt, str::FromStr};
 
-use strum::EnumString;
+use strum::{Display, EnumString};
 
 /// A token which may be a statically [`Known`] value of type `T` or else an unknown value of type
 /// `S`.
@@ -49,10 +49,19 @@ impl<T, S> Token<T, S> {
     }
 }
 
+impl<T: fmt::Display, S: fmt::Display> fmt::Display for Token<T, S> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Token::Known(t) => fmt::Display::fmt(t, f),
+            Token::Unknown(s) => fmt::Display::fmt(s, f),
+        }
+    }
+}
+
 /// A link relation from the [IANA Link Relations Registry].
 ///
 /// [IANA Link Relations Registry]: https://www.iana.org/assignments/link-relations/
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, EnumString)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, EnumString, Display)]
 #[non_exhaustive]
 #[strum(ascii_case_insensitive)]
 pub enum LinkRelation {
@@ -728,7 +737,7 @@ pub enum LinkRelation {
 /// A location type from the [IANA Location Types Registry].
 ///
 /// [IANA Location Types Registry]: https://www.iana.org/assignments/location-type-registry/
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, EnumString)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, EnumString, Display)]
 #[non_exhaustive]
 #[strum(ascii_case_insensitive)]
 pub enum LocationType {

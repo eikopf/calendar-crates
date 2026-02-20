@@ -19,3 +19,20 @@ pub struct UtcOffset {
     pub minute: Minute,
     pub second: NonLeapSecond,
 }
+
+impl std::fmt::Display for UtcOffset {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "{}{:02}:{:02}",
+            self.sign.as_char(),
+            self.hour as u8,
+            self.minute as u8
+        )?;
+        let sec = self.second as u8;
+        if sec != 0 {
+            write!(f, ":{sec:02}")?;
+        }
+        Ok(())
+    }
+}

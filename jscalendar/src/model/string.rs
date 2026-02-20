@@ -1010,6 +1010,90 @@ pub struct InvalidAlphaNumericError {
     index: usize,
 }
 
+// ============================================================================
+// IntoJson impls for string newtypes
+// ============================================================================
+
+use crate::json::{ConstructibleJsonValue, IntoJson};
+
+impl<V: ConstructibleJsonValue> IntoJson<V> for LanguageTag {
+    fn into_json(self) -> V {
+        V::string(self.as_str().to_owned())
+    }
+}
+
+impl<V: ConstructibleJsonValue> IntoJson<V> for Box<Id> {
+    fn into_json(self) -> V {
+        V::string(self.as_str().to_owned())
+    }
+}
+
+impl<V: ConstructibleJsonValue> IntoJson<V> for Box<Uid> {
+    fn into_json(self) -> V {
+        V::string(self.as_str().to_owned())
+    }
+}
+
+impl<V: ConstructibleJsonValue> IntoJson<V> for Box<Uri> {
+    fn into_json(self) -> V {
+        V::string(self.as_str().to_owned())
+    }
+}
+
+impl<V: ConstructibleJsonValue> IntoJson<V> for Box<VendorStr> {
+    fn into_json(self) -> V {
+        V::string(self.as_str().to_owned())
+    }
+}
+
+impl<V: ConstructibleJsonValue> IntoJson<V> for Box<CalAddress> {
+    fn into_json(self) -> V {
+        V::string(self.as_str().to_owned())
+    }
+}
+
+impl<V: ConstructibleJsonValue> IntoJson<V> for Box<EmailAddr> {
+    fn into_json(self) -> V {
+        V::string(self.as_str().to_owned())
+    }
+}
+
+impl<V: ConstructibleJsonValue> IntoJson<V> for Box<GeoUri> {
+    fn into_json(self) -> V {
+        V::string(self.as_str().to_owned())
+    }
+}
+
+impl<V: ConstructibleJsonValue> IntoJson<V> for Box<ContentId> {
+    fn into_json(self) -> V {
+        V::string(self.as_str().to_owned())
+    }
+}
+
+impl<V: ConstructibleJsonValue> IntoJson<V> for Box<MediaType> {
+    fn into_json(self) -> V {
+        V::string(self.as_str().to_owned())
+    }
+}
+
+impl<V: ConstructibleJsonValue> IntoJson<V> for Box<AlphaNumeric> {
+    fn into_json(self) -> V {
+        V::string(self.as_str().to_owned())
+    }
+}
+
+impl<V: ConstructibleJsonValue> IntoJson<V> for Box<CustomTimeZoneId> {
+    fn into_json(self) -> V {
+        V::string(self.to_string())
+    }
+}
+
+impl<V: ConstructibleJsonValue> IntoJson<V> for Box<ImplicitJsonPointer> {
+    fn into_json(self) -> V {
+        V::string(self.to_string())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

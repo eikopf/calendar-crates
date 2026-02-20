@@ -5,15 +5,15 @@ pub use calendar_types::{
     set::{LinkRelation, LocationType, Token},
 };
 pub use rfc5545_types::set::{Method, Percent, Priority};
-use strum::EnumString;
+use strum::{Display, EnumString};
 use thiserror::Error;
 
-use crate::json::{DestructibleJsonValue, TryFromJson, TypeErrorOr, UnsignedInt};
+use crate::json::{ConstructibleJsonValue, DestructibleJsonValue, IntoJson, TryFromJson, TypeErrorOr, UnsignedInt};
 
 /// A value which may appear in the `relation` field of a `Relation` object (RFC 8984 §1.4.10).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, EnumString)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, EnumString, Display)]
 #[non_exhaustive]
-#[strum(ascii_case_insensitive)]
+#[strum(ascii_case_insensitive, serialize_all = "lowercase")]
 pub enum RelationValue {
     First,
     Next,
@@ -22,9 +22,9 @@ pub enum RelationValue {
 }
 
 /// The intended purpose of a link to an image (RFC 8984 §1.4.11).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, EnumString)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, EnumString, Display)]
 #[non_exhaustive]
-#[strum(ascii_case_insensitive)]
+#[strum(ascii_case_insensitive, serialize_all = "lowercase")]
 pub enum DisplayPurpose {
     Badge,
     Graphic,
@@ -33,18 +33,18 @@ pub enum DisplayPurpose {
 }
 
 /// A free/busy status (RFC 8984 §4.4.2).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, EnumString)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, EnumString, Display)]
 #[non_exhaustive]
-#[strum(ascii_case_insensitive)]
+#[strum(ascii_case_insensitive, serialize_all = "lowercase")]
 pub enum FreeBusyStatus {
     Free,
     Busy,
 }
 
 /// A privacy level (RFC 8984 §4.4.3).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, EnumString)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, EnumString, Display)]
 #[non_exhaustive]
-#[strum(ascii_case_insensitive)]
+#[strum(ascii_case_insensitive, serialize_all = "lowercase")]
 pub enum Privacy {
     Public,
     Private,
@@ -52,9 +52,9 @@ pub enum Privacy {
 }
 
 /// An event status (RFC 8984 §5.1.3).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, EnumString)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, EnumString, Display)]
 #[non_exhaustive]
-#[strum(ascii_case_insensitive)]
+#[strum(ascii_case_insensitive, serialize_all = "lowercase")]
 pub enum EventStatus {
     Confirmed,
     Cancelled,
@@ -62,9 +62,9 @@ pub enum EventStatus {
 }
 
 /// A task progress status (RFC 8984 §5.2.5).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, EnumString)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, EnumString, Display)]
 #[non_exhaustive]
-#[strum(ascii_case_insensitive)]
+#[strum(ascii_case_insensitive, serialize_all = "lowercase")]
 pub enum TaskProgress {
     #[strum(serialize = "needs-action")]
     NeedsAction,
@@ -75,9 +75,9 @@ pub enum TaskProgress {
 }
 
 /// A feature supported by a virutal location (RFC 8984 §4.2.6).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, EnumString)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, EnumString, Display)]
 #[non_exhaustive]
-#[strum(ascii_case_insensitive)]
+#[strum(ascii_case_insensitive, serialize_all = "lowercase")]
 pub enum VirtualLocationFeature {
     Audio,
     Chat,
@@ -89,9 +89,9 @@ pub enum VirtualLocationFeature {
 }
 
 /// The kind of a participant (RFC 8984 §4.4.6).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, EnumString)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, EnumString, Display)]
 #[non_exhaustive]
-#[strum(ascii_case_insensitive)]
+#[strum(ascii_case_insensitive, serialize_all = "lowercase")]
 pub enum ParticipantKind {
     Individual,
     Group,
@@ -100,9 +100,9 @@ pub enum ParticipantKind {
 }
 
 /// The role of a participant (RFC 8984 §4.4.6).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, EnumString)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, EnumString, Display)]
 #[non_exhaustive]
-#[strum(ascii_case_insensitive)]
+#[strum(ascii_case_insensitive, serialize_all = "lowercase")]
 pub enum ParticipantRole {
     Owner,
     Attendee,
@@ -113,9 +113,9 @@ pub enum ParticipantRole {
 }
 
 /// The status of a participant (RFC 8984 §4.4.6).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, EnumString)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, EnumString, Display)]
 #[non_exhaustive]
-#[strum(ascii_case_insensitive)]
+#[strum(ascii_case_insensitive, serialize_all = "lowercase")]
 pub enum ParticipationStatus {
     #[strum(serialize = "needs-action")]
     NeedsAction,
@@ -126,9 +126,9 @@ pub enum ParticipationStatus {
 }
 
 /// The agent responsible for sending scheduling messages to a participant (RFC 8984 §4.4.6).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, EnumString)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, EnumString, Display)]
 #[non_exhaustive]
-#[strum(ascii_case_insensitive)]
+#[strum(ascii_case_insensitive, serialize_all = "lowercase")]
 pub enum ScheduleAgent {
     Server,
     Client,
@@ -136,18 +136,18 @@ pub enum ScheduleAgent {
 }
 
 /// The time property that an alert is relative to (RFC 8984 §4.5.2).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, EnumString)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, EnumString, Display)]
 #[non_exhaustive]
-#[strum(ascii_case_insensitive)]
+#[strum(ascii_case_insensitive, serialize_all = "lowercase")]
 pub enum AlertRelativeTo {
     Start,
     End,
 }
 
 /// The action by which an alert is conveyed (RFC 8984 §4.5.2).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, EnumString)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, EnumString, Display)]
 #[non_exhaustive]
-#[strum(ascii_case_insensitive)]
+#[strum(ascii_case_insensitive, serialize_all = "lowercase")]
 pub enum AlertAction {
     Display,
     Email,
@@ -174,6 +174,12 @@ impl std::fmt::Display for Color {
             Color::Css(css) => write!(f, "{css}"),
             Color::Rgb(rgb) => write!(f, "#{:02x}{:02x}{:02x}", rgb.red, rgb.green, rgb.blue),
         }
+    }
+}
+
+impl<V: ConstructibleJsonValue> IntoJson<V> for Color {
+    fn into_json(self) -> V {
+        V::string(self.to_string())
     }
 }
 
