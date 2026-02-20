@@ -15,9 +15,13 @@ use crate::json::{ConstructibleJsonValue, DestructibleJsonValue, IntoJson, TryFr
 #[non_exhaustive]
 #[strum(ascii_case_insensitive, serialize_all = "lowercase")]
 pub enum RelationValue {
+    /// The first object in a series.
     First,
+    /// The next object in a series.
     Next,
+    /// A child of the referencing object.
     Child,
+    /// A parent of the referencing object.
     Parent,
 }
 
@@ -26,9 +30,13 @@ pub enum RelationValue {
 #[non_exhaustive]
 #[strum(ascii_case_insensitive, serialize_all = "lowercase")]
 pub enum DisplayPurpose {
+    /// A small icon or badge.
     Badge,
+    /// A banner or header graphic.
     Graphic,
+    /// The full-size image.
     FullSize,
+    /// A reduced-size preview.
     Thumbnail,
 }
 
@@ -37,7 +45,9 @@ pub enum DisplayPurpose {
 #[non_exhaustive]
 #[strum(ascii_case_insensitive, serialize_all = "lowercase")]
 pub enum FreeBusyStatus {
+    /// The user is available during this time.
     Free,
+    /// The user is not available during this time.
     Busy,
 }
 
@@ -46,8 +56,11 @@ pub enum FreeBusyStatus {
 #[non_exhaustive]
 #[strum(ascii_case_insensitive, serialize_all = "lowercase")]
 pub enum Privacy {
+    /// The object is fully visible.
     Public,
+    /// Only time and basic metadata are visible.
     Private,
+    /// The object is completely hidden.
     Secret,
 }
 
@@ -56,8 +69,11 @@ pub enum Privacy {
 #[non_exhaustive]
 #[strum(ascii_case_insensitive, serialize_all = "lowercase")]
 pub enum EventStatus {
+    /// The event is definite.
     Confirmed,
+    /// The event has been cancelled.
     Cancelled,
+    /// The event is tentative.
     Tentative,
 }
 
@@ -66,11 +82,15 @@ pub enum EventStatus {
 #[non_exhaustive]
 #[strum(ascii_case_insensitive, serialize_all = "lowercase")]
 pub enum TaskProgress {
+    /// The task has not been started.
     #[strum(serialize = "needs-action")]
     NeedsAction,
+    /// The task is in progress.
     #[strum(serialize = "in-process")]
     InProcess,
+    /// The task is finished.
     Completed,
+    /// The task has been cancelled.
     Cancelled,
 }
 
@@ -79,12 +99,19 @@ pub enum TaskProgress {
 #[non_exhaustive]
 #[strum(ascii_case_insensitive, serialize_all = "lowercase")]
 pub enum VirtualLocationFeature {
+    /// Audio conferencing.
     Audio,
+    /// Text chat.
     Chat,
+    /// A data feed (e.g. webinar).
     Feed,
+    /// Moderator access.
     Moderator,
+    /// Phone conferencing.
     Phone,
+    /// Screen sharing.
     Screen,
+    /// Video conferencing.
     Video,
 }
 
@@ -93,9 +120,13 @@ pub enum VirtualLocationFeature {
 #[non_exhaustive]
 #[strum(ascii_case_insensitive, serialize_all = "lowercase")]
 pub enum ParticipantKind {
+    /// A single person.
     Individual,
+    /// A group of people.
     Group,
+    /// A physical location.
     Location,
+    /// A schedulable resource (e.g. a projector).
     Resource,
 }
 
@@ -104,11 +135,17 @@ pub enum ParticipantKind {
 #[non_exhaustive]
 #[strum(ascii_case_insensitive, serialize_all = "lowercase")]
 pub enum ParticipantRole {
+    /// The calendar owner of this object.
     Owner,
+    /// A required attendee.
     Attendee,
+    /// An optional attendee.
     Optional,
+    /// A non-participant copied for information.
     Informational,
+    /// The chair of the event.
     Chair,
+    /// A contact for the event.
     Contact,
 }
 
@@ -117,11 +154,16 @@ pub enum ParticipantRole {
 #[non_exhaustive]
 #[strum(ascii_case_insensitive, serialize_all = "lowercase")]
 pub enum ParticipationStatus {
+    /// No response yet.
     #[strum(serialize = "needs-action")]
     NeedsAction,
+    /// The participant has accepted.
     Accepted,
+    /// The participant has declined.
     Declined,
+    /// The participant has tentatively accepted.
     Tentative,
+    /// The participant has delegated attendance.
     Delegated,
 }
 
@@ -130,8 +172,11 @@ pub enum ParticipationStatus {
 #[non_exhaustive]
 #[strum(ascii_case_insensitive, serialize_all = "lowercase")]
 pub enum ScheduleAgent {
+    /// The server sends scheduling messages.
     Server,
+    /// The client sends scheduling messages.
     Client,
+    /// No scheduling messages are sent.
     None,
 }
 
@@ -140,7 +185,9 @@ pub enum ScheduleAgent {
 #[non_exhaustive]
 #[strum(ascii_case_insensitive, serialize_all = "lowercase")]
 pub enum AlertRelativeTo {
+    /// Relative to the start of the calendar object.
     Start,
+    /// Relative to the end of the calendar object.
     End,
 }
 
@@ -149,7 +196,9 @@ pub enum AlertRelativeTo {
 #[non_exhaustive]
 #[strum(ascii_case_insensitive, serialize_all = "lowercase")]
 pub enum AlertAction {
+    /// Display an on-screen alert.
     Display,
+    /// Send an email notification.
     Email,
 }
 
@@ -164,7 +213,9 @@ pub struct Rgb {
 /// A color, which may be either a CSS3 color name or an RGB value.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum Color {
+    /// A named CSS3 color.
     Css(Css3Color),
+    /// An `#RRGGBB` hex color.
     Rgb(Rgb),
 }
 
