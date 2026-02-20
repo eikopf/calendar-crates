@@ -6,7 +6,7 @@ use weekday_num_set::WeekdayNumSet;
 
 use calendar_types::{
     primitive::Sign,
-    time::{IsoWeek, Local, Month, Weekday},
+    time::{IsoWeek, Month, Weekday},
 };
 
 use crate::time::DateTimeOrDate;
@@ -34,7 +34,7 @@ pub struct RRule {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Termination {
     Count(u64),
-    Until(DateTimeOrDate<Local>),
+    Until(DateTimeOrDate),
 }
 
 /// The value of the INTERVAL rule part.
@@ -944,7 +944,7 @@ impl ByRuleName {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Part {
     Freq(Freq),
-    Until(DateTimeOrDate<Local>),
+    Until(DateTimeOrDate),
     Count(u64),
     Interval(Interval),
     BySecond(SecondSet),

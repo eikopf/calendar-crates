@@ -7,7 +7,7 @@ use winnow::{
     ascii::Caseless,
     combinator::{alt, opt, preceded, separated, terminated},
     error::{FromExternalError, ParserError},
-    stream::{AsBStr, AsChar, Compare, Stream, StreamIsPartial},
+    stream::{AsBStr, Accumulate, AsChar, Compare, Stream, StreamIsPartial},
     token::any,
 };
 
@@ -28,6 +28,31 @@ use crate::{
 };
 
 use super::{error::CalendarParseError, primitive::datetime_or_date};
+
+/// Implements [`Accumulate`] for a bitset type via a newtype wrapper.
+macro_rules! impl_accumulate {
+    ($wrapper:ident wraps $Set:ty, element $Item:ty, via $method:ident) => {
+        struct $wrapper($Set);
+
+        impl Accumulate<$Item> for $wrapper {
+            fn initial(_capacity: Option<usize>) -> Self {
+                Self(<$Set>::default())
+            }
+
+            fn accumulate(&mut self, item: $Item) {
+                self.0.$method(item);
+            }
+        }
+    };
+}
+
+impl_accumulate!(AccSecondSet   wraps SecondSet,      element Second,         via set);
+impl_accumulate!(AccMinuteSet   wraps MinuteSet,      element Minute,         via set);
+impl_accumulate!(AccHourSet     wraps HourSet,        element Hour,           via set);
+impl_accumulate!(AccMonthSet    wraps MonthSet,       element Month,          via set);
+impl_accumulate!(AccMonthDaySet wraps MonthDaySet,    element MonthDaySetIndex, via set);
+impl_accumulate!(AccWeekNoSet   wraps WeekNoSet,      element WeekNoSetIndex, via set);
+impl_accumulate!(AccWeekdayNums wraps WeekdayNumSet,  element WeekdayNum,     via insert);
 
 /// Parses an [`RRule`].
 pub fn rrule<I, E>(input: &mut I) -> Result<RRule, E>
@@ -412,23 +437,23 @@ where
             Part::Interval(interval)
         }
         PartName::BySecond => {
-            let set = separated(1.., second, ',').parse_next(input)?;
+            let AccSecondSet(set) = separated(1.., second, ',').parse_next(input)?;
             Part::BySecond(set)
         }
         PartName::ByMinute => {
-            let set = separated(1.., minute, ',').parse_next(input)?;
+            let AccMinuteSet(set) = separated(1.., minute, ',').parse_next(input)?;
             Part::ByMinute(set)
         }
         PartName::ByHour => {
-            let set = separated(1.., hour, ',').parse_next(input)?;
+            let AccHourSet(set) = separated(1.., hour, ',').parse_next(input)?;
             Part::ByHour(set)
         }
         PartName::ByDay => {
-            let weekday_nums = separated(1.., weekday_num, ',').parse_next(input)?;
-            Part::ByDay(weekday_nums)
+            let AccWeekdayNums(set) = separated(1.., weekday_num, ',').parse_next(input)?;
+            Part::ByDay(set)
         }
         PartName::ByMonthDay => {
-            let set = separated(1.., month_day_num, ',').parse_next(input)?;
+            let AccMonthDaySet(set) = separated(1.., month_day_num, ',').parse_next(input)?;
             Part::ByMonthDay(set)
         }
         PartName::ByYearDay => {
@@ -436,11 +461,11 @@ where
             Part::ByYearDay(set)
         }
         PartName::ByWeekNo => {
-            let set = separated(1.., week_num, ',').parse_next(input)?;
+            let AccWeekNoSet(set) = separated(1.., week_num, ',').parse_next(input)?;
             Part::ByWeekNo(set)
         }
         PartName::ByMonth => {
-            let set = separated(1.., month_num, ',').parse_next(input)?;
+            let AccMonthSet(set) = separated(1.., month_num, ',').parse_next(input)?;
             Part::ByMonth(set)
         }
         PartName::BySetPos => {
@@ -508,7 +533,7 @@ where
     let value: u64 = lz_dec_uint.parse_next(input)?;
 
     match NonZero::new(value) {
-        Some(interval) => Ok(Interval(interval)),
+        Some(interval) => Ok(Interval::new(interval)),
         None => Err(E::from_external_error(
             input,
             CalendarParseError::ZeroInterval,
@@ -819,7 +844,7 @@ mod tests {
             }
         );
 
-        assert_eq!(interval, Some(Interval(2.try_into().unwrap())));
+        assert_eq!(interval, Some(Interval::new(2.try_into().unwrap())));
         assert!(termination.is_none());
         assert!(week_start.is_none());
     }
@@ -849,7 +874,7 @@ mod tests {
 
         let expected_parts = vec![
             Part::Freq(Freq::Yearly),
-            Part::Interval(Interval(NonZero::new(2).ok_or(())?)),
+            Part::Interval(Interval::new(NonZero::new(2).ok_or(())?)),
             Part::ByMonth(month_set),
             Part::ByDay(by_day_set),
             Part::ByHour(hour_set),
@@ -1004,7 +1029,7 @@ mod tests {
     fn interval_parser() {
         assert_eq!(
             interval::<_, ()>.parse_peek("1"),
-            Ok(("", Interval(std::num::NonZeroU64::MIN)))
+            Ok(("", Interval::new(std::num::NonZeroU64::MIN)))
         );
 
         assert!(interval::<_, ()>.parse_peek("0").is_err());
