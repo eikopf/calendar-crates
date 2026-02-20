@@ -1,5 +1,5 @@
 [workspace]
-members = ["calendar-types","jscalendar", "rfc5545-types"]
+members = ["calendar-types", "calico", "jscalendar", "rfc5545-types"]
 resolver = "2"
 
 [workspace.package]
