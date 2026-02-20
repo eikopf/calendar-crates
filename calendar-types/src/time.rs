@@ -235,6 +235,76 @@ impl Year {
             Err(InvalidYearError(value))
         }
     }
+
+    #[inline(always)]
+    pub const fn get(self) -> u16 {
+        self.0
+    }
+}
+
+impl std::fmt::Display for Year {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{:04}", self.0)
+    }
+}
+
+impl std::fmt::Display for Date {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "{:04}-{:02}-{:02}",
+            self.year.0,
+            self.month as u8,
+            self.day as u8,
+        )
+    }
+}
+
+impl std::fmt::Display for Time {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "{:02}:{:02}:{:02}",
+            self.hour as u8,
+            self.minute as u8,
+            self.second as u8,
+        )?;
+        if let Some(frac) = self.frac {
+            // Format as ".NNN..." with trailing zeros stripped
+            let nanos = frac.get().get();
+            let mut s = format!("{nanos:09}");
+            let trimmed = s.trim_end_matches('0');
+            s.truncate(trimmed.len());
+            write!(f, ".{s}")?;
+        }
+        Ok(())
+    }
+}
+
+impl<M> std::fmt::Display for DateTime<M>
+where
+    M: DateTimeMarker,
+{
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}T{}{}", self.date, self.time, M::SUFFIX)
+    }
+}
+
+/// Marker trait for timezone markers in [`DateTime`] formatting.
+pub trait DateTimeMarker {
+    const SUFFIX: &'static str;
+}
+
+impl DateTimeMarker for Utc {
+    const SUFFIX: &'static str = "Z";
+}
+
+impl DateTimeMarker for Local {
+    const SUFFIX: &'static str = "";
+}
+
+impl DateTimeMarker for () {
+    const SUFFIX: &'static str = "";
 }
 
 #[derive(Debug, Clone, Copy, Error, PartialEq, Eq)]

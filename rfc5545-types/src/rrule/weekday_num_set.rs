@@ -77,6 +77,73 @@ impl WeekdayNumSet {
     }
 }
 
+impl WeekdayNumSet {
+    /// Returns an iterator over the [`WeekdayNum`] values in the set.
+    pub fn iter(&self) -> WeekdayNumSetIter<'_> {
+        WeekdayNumSetIter(match &self.0 {
+            InnerWDNSet::Small(set) => InnerIter::Small(set.iter()),
+            InnerWDNSet::Large(set) => InnerIter::Large {
+                set,
+                byte_index: 0,
+                day: 0,
+            },
+        })
+    }
+}
+
+impl<'a> IntoIterator for &'a WeekdayNumSet {
+    type Item = WeekdayNum;
+    type IntoIter = WeekdayNumSetIter<'a>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.iter()
+    }
+}
+
+/// An iterator over the [`WeekdayNum`] values in a [`WeekdayNumSet`].
+pub struct WeekdayNumSetIter<'a>(InnerIter<'a>);
+
+enum InnerIter<'a> {
+    Small(std::collections::btree_set::Iter<'a, WeekdayNum>),
+    Large {
+        set: &'a FixedWeekdayNumSet,
+        byte_index: u8,
+        day: u8,
+    },
+}
+
+impl Iterator for WeekdayNumSetIter<'_> {
+    type Item = WeekdayNum;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        match &mut self.0 {
+            InnerIter::Small(iter) => iter.next().copied(),
+            InnerIter::Large {
+                set,
+                byte_index,
+                day,
+            } => {
+                while (*byte_index as usize) < set.0.len() {
+                    let byte = set.0[*byte_index as usize].get();
+                    while *day < 7 {
+                        let current_day = *day;
+                        *day += 1;
+                        let mask = 1 << current_day;
+                        if (byte & mask) != 0
+                            && let Some(wdn) = index_to_weekday_num((*byte_index, current_day))
+                        {
+                            return Some(wdn);
+                        }
+                    }
+                    *day = 0;
+                    *byte_index += 1;
+                }
+                None
+            }
+        }
+    }
+}
+
 impl Default for WeekdayNumSet {
     fn default() -> Self {
         Self(InnerWDNSet::Small(Default::default()))

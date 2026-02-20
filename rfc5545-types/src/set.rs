@@ -1,9 +1,9 @@
 //! Types representing the members of finite sets.
 
-use strum::EnumString;
+use strum::{Display, EnumString};
 
 /// An iTIP method (RFC 5546 §1.4).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, EnumString)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, EnumString, Display)]
 #[non_exhaustive]
 #[strum(ascii_case_insensitive)]
 pub enum Method {

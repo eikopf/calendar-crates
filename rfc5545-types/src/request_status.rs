@@ -8,11 +8,31 @@ pub struct RequestStatus {
     pub exception_data: Option<Box<str>>,
 }
 
+impl std::fmt::Display for RequestStatus {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{};{}", self.code, self.description)?;
+        if let Some(data) = &self.exception_data {
+            write!(f, ";{data}")?;
+        }
+        Ok(())
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct StatusCode {
     pub class: Class,
     pub major: u8,
     pub minor: Option<u8>,
+}
+
+impl std::fmt::Display for StatusCode {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}.{}", self.class.as_u8(), self.major)?;
+        if let Some(minor) = self.minor {
+            write!(f, ".{minor}")?;
+        }
+        Ok(())
+    }
 }
 
 /// The class of a [`StatusCode`].
@@ -43,4 +63,16 @@ pub enum Class {
     /// The request was not successful because a service either did not exist, was not available,
     /// or was unsupported.
     C5,
+}
+
+impl Class {
+    pub const fn as_u8(self) -> u8 {
+        match self {
+            Class::C1 => 1,
+            Class::C2 => 2,
+            Class::C3 => 3,
+            Class::C4 => 4,
+            Class::C5 => 5,
+        }
+    }
 }

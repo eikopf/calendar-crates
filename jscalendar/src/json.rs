@@ -4,6 +4,7 @@ use std::{
     borrow::{Borrow, Cow},
     collections::{HashMap, HashSet, VecDeque},
     convert::Infallible,
+    fmt,
     hash::Hash,
     str::FromStr,
 };
@@ -13,6 +14,7 @@ use calendar_types::{
     set::Token,
     time::{DateTime, InvalidDateTimeError, Local, Utc},
 };
+use rfc5545_types::set::{Percent, Priority};
 use thiserror::Error;
 
 use crate::parser::{
@@ -462,6 +464,90 @@ impl<V: ConstructibleJsonValue> IntoJson<V> for Int {
     }
 }
 
+impl<V: ConstructibleJsonValue> IntoJson<V> for bool {
+    fn into_json(self) -> V {
+        V::bool(self)
+    }
+}
+
+impl<V: ConstructibleJsonValue> IntoJson<V> for String {
+    fn into_json(self) -> V {
+        V::string(self)
+    }
+}
+
+impl<V: ConstructibleJsonValue> IntoJson<V> for DateTime<Local> {
+    fn into_json(self) -> V {
+        V::string(self.to_string())
+    }
+}
+
+impl<V: ConstructibleJsonValue> IntoJson<V> for DateTime<Utc> {
+    fn into_json(self) -> V {
+        V::string(self.to_string())
+    }
+}
+
+impl<V: ConstructibleJsonValue> IntoJson<V> for Duration {
+    fn into_json(self) -> V {
+        V::string(self.to_string())
+    }
+}
+
+impl<V: ConstructibleJsonValue> IntoJson<V> for SignedDuration {
+    fn into_json(self) -> V {
+        V::string(self.to_string())
+    }
+}
+
+impl<T: fmt::Display, S: fmt::Display, V: ConstructibleJsonValue> IntoJson<V> for Token<T, S> {
+    fn into_json(self) -> V {
+        V::string(self.to_string())
+    }
+}
+
+impl<V: ConstructibleJsonValue> IntoJson<V> for Priority {
+    fn into_json(self) -> V {
+        V::unsigned_int(UnsignedInt::new(self as u64).unwrap())
+    }
+}
+
+impl<V: ConstructibleJsonValue> IntoJson<V> for Percent {
+    fn into_json(self) -> V {
+        V::unsigned_int(UnsignedInt::new(self.get() as u64).unwrap())
+    }
+}
+
+impl<T: IntoJson<V>, V: ConstructibleJsonValue> IntoJson<V> for Vec<T> {
+    fn into_json(self) -> V {
+        let mut arr = V::Array::with_capacity(self.len());
+        for item in self {
+            arr.push(item.into_json());
+        }
+        V::array(arr)
+    }
+}
+
+impl<K: fmt::Display, T: IntoJson<V>, V: ConstructibleJsonValue> IntoJson<V> for HashMap<K, T> {
+    fn into_json(self) -> V {
+        let mut obj = V::Object::with_capacity(self.len());
+        for (key, value) in self {
+            obj.insert(key.to_string(), value.into_json());
+        }
+        V::object(obj)
+    }
+}
+
+impl<T: fmt::Display + Eq + Hash, V: ConstructibleJsonValue> IntoJson<V> for HashSet<T> {
+    fn into_json(self) -> V {
+        let mut obj = V::Object::with_capacity(self.len());
+        for item in self {
+            obj.insert(item.to_string(), V::bool(true));
+        }
+        V::object(obj)
+    }
+}
+
 impl<V: DestructibleJsonValue> TryFromJson<V> for Int {
     type Error = TypeErrorOr<IntoIntError>;
 
@@ -674,6 +760,8 @@ pub trait JsonObject: Sized {
 
     fn key_into_string(key: Self::Key) -> String;
 
+    fn insert(&mut self, key: String, value: Self::Value);
+
     fn len(&self) -> usize;
     fn iter(&self) -> impl Iterator<Item = (&Self::Key, &Self::Value)>;
     fn into_iter(self) -> impl Iterator<Item = (Self::Key, Self::Value)>;
@@ -704,6 +792,7 @@ pub trait JsonArray: Sized {
     type Elem;
 
     fn with_capacity(capacity: usize) -> Self;
+    fn push(&mut self, elem: Self::Elem);
     fn get(&self, index: usize) -> Option<&Self::Elem>;
     fn len(&self) -> usize;
     fn iter(&self) -> impl Iterator<Item = &Self::Elem>;
@@ -720,7 +809,7 @@ pub trait JsonArray: Sized {
     }
 }
 
-impl<K: Eq + Hash + Into<String> + Borrow<str>, V> JsonObject for HashMap<K, V> {
+impl<K: Eq + Hash + Into<String> + From<String> + Borrow<str>, V> JsonObject for HashMap<K, V> {
     type Key = K;
     type Value = V;
 
@@ -753,6 +842,11 @@ impl<K: Eq + Hash + Into<String> + Borrow<str>, V> JsonObject for HashMap<K, V> 
     }
 
     #[inline(always)]
+    fn insert(&mut self, key: String, value: Self::Value) {
+        HashMap::insert(self, key.into(), value);
+    }
+
+    #[inline(always)]
     fn len(&self) -> usize {
         self.len()
     }
@@ -774,6 +868,11 @@ impl<T> JsonArray for Vec<T> {
     #[inline(always)]
     fn with_capacity(capacity: usize) -> Self {
         Vec::with_capacity(capacity)
+    }
+
+    #[inline(always)]
+    fn push(&mut self, elem: Self::Elem) {
+        Vec::push(self, elem);
     }
 
     #[inline(always)]
@@ -1035,6 +1134,11 @@ mod serde_json_impl {
         #[inline(always)]
         fn key_into_string(key: Self::Key) -> String {
             key
+        }
+
+        #[inline(always)]
+        fn insert(&mut self, key: String, value: Self::Value) {
+            Map::insert(self, key, value);
         }
 
         #[inline(always)]
