@@ -4,6 +4,9 @@ version = "0.1.0"
 edition = "2024"
 repository.workspace = true
 license.workspace = true
+description = "Date, time, and string primitive types for calendar data"
+keywords = ["calendar", "date", "time", "rfc3339"]
+categories = ["date-and-time"]
 
 [dependencies]
 dizzy.workspace = true
