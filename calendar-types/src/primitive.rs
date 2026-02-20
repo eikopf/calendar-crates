@@ -17,3 +17,13 @@ impl Sign {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn sign_ord_impl() {
+        assert!(Sign::Neg < Sign::Pos);
+    }
+}

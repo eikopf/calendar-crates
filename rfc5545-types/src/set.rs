@@ -557,3 +557,66 @@ impl<S> UnknownAction<S> {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    #[allow(clippy::neg_cmp_op_on_partial_ord)]
+    fn priority_partial_ord() {
+        assert_eq!(Priority::Zero.partial_cmp(&Priority::Zero), None);
+        assert_eq!(Priority::Zero.partial_cmp(&Priority::A1), None);
+        assert_eq!(Priority::A1.partial_cmp(&Priority::Zero), None);
+
+        assert!(Priority::A1 > Priority::A2);
+        assert!(Priority::A2 > Priority::A3);
+        assert!(Priority::A1 > Priority::A3);
+
+        assert!(Priority::A1 > Priority::B1);
+        assert!(Priority::B1 > Priority::C1);
+        assert!(Priority::A1 > Priority::C1);
+
+        assert!(!(Priority::Zero > Priority::C2));
+        assert!(!(Priority::Zero < Priority::C2));
+        assert!(Priority::Zero != Priority::C2);
+    }
+
+    #[test]
+    fn priority_class_predicates() {
+        assert!(!Priority::Zero.is_low());
+        assert!(!Priority::Zero.is_medium());
+        assert!(!Priority::Zero.is_high());
+
+        assert!(Priority::A1.is_high());
+        assert!(Priority::A2.is_high());
+        assert!(Priority::A3.is_high());
+        assert!(Priority::B1.is_high());
+
+        assert!(!Priority::B2.is_high());
+        assert!(Priority::B2.is_medium());
+        assert!(!Priority::B2.is_low());
+
+        assert!(Priority::B3.is_low());
+        assert!(Priority::C1.is_low());
+        assert!(Priority::C2.is_low());
+        assert!(Priority::C3.is_low());
+    }
+
+    #[test]
+    fn priority_class_projection() {
+        assert_eq!(Priority::Zero.into_class(), None);
+
+        assert_eq!(Priority::A1.into_class(), Some(PriorityClass::High));
+        assert_eq!(Priority::A2.into_class(), Some(PriorityClass::High));
+        assert_eq!(Priority::A3.into_class(), Some(PriorityClass::High));
+        assert_eq!(Priority::B1.into_class(), Some(PriorityClass::High));
+
+        assert_eq!(Priority::B2.into_class(), Some(PriorityClass::Medium));
+
+        assert_eq!(Priority::B3.into_class(), Some(PriorityClass::Low));
+        assert_eq!(Priority::C1.into_class(), Some(PriorityClass::Low));
+        assert_eq!(Priority::C2.into_class(), Some(PriorityClass::Low));
+        assert_eq!(Priority::C3.into_class(), Some(PriorityClass::Low));
+    }
+}

@@ -915,3 +915,31 @@ pub enum InvalidFractionalSecondError {
     #[error("{0} has more than nine decimal digits")]
     TooManyDigits(NonZero<u32>),
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn iso_week_from_index() {
+        assert_eq!(IsoWeek::from_index(0), None);
+        assert_eq!(IsoWeek::from_index(1), Some(IsoWeek::W1));
+        assert_eq!(IsoWeek::from_index(2), Some(IsoWeek::W2));
+        assert_eq!(IsoWeek::from_index(3), Some(IsoWeek::W3));
+        assert_eq!(IsoWeek::from_index(4), Some(IsoWeek::W4));
+        assert_eq!(IsoWeek::from_index(5), Some(IsoWeek::W5));
+        // ...
+        assert_eq!(IsoWeek::from_index(25), Some(IsoWeek::W25));
+        assert_eq!(IsoWeek::from_index(26), Some(IsoWeek::W26));
+        assert_eq!(IsoWeek::from_index(27), Some(IsoWeek::W27));
+        // ...
+        assert_eq!(IsoWeek::from_index(51), Some(IsoWeek::W51));
+        assert_eq!(IsoWeek::from_index(52), Some(IsoWeek::W52));
+        assert_eq!(IsoWeek::from_index(53), Some(IsoWeek::W53));
+        assert_eq!(IsoWeek::from_index(54), None);
+        assert_eq!(IsoWeek::from_index(55), None);
+        //...
+        assert_eq!(IsoWeek::from_index(254), None);
+        assert_eq!(IsoWeek::from_index(255), None);
+    }
+}

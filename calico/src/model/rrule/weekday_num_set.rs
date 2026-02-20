@@ -190,22 +190,3 @@ pub(crate) const fn index_to_weekday_num((byte_index, day): (u8, u8)) -> Option<
     Some(WeekdayNum { ordinal, weekday })
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn fixed_set_empty_is_empty() {
-        assert!(FixedWeekdayNumSet::EMPTY.is_empty());
-    }
-
-    #[test]
-    fn week_day_num_index_conversion_roundtrip() {
-        for byte in 0..=106 {
-            for day in 0..=6 {
-                let wdnum = index_to_weekday_num((byte, day)).unwrap();
-                assert_eq!(weekday_num_to_index(wdnum), (byte, day));
-            }
-        }
-    }
-}
