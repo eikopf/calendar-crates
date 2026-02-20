@@ -47,6 +47,14 @@ impl<T, S> Token<T, S> {
             Err(_) => s.try_into().map(Token::Unknown),
         }
     }
+
+    /// Maps the unknown value of a `Token`, leaving known values unchanged.
+    pub fn map_unknown<U>(self, f: impl FnOnce(S) -> U) -> Token<T, U> {
+        match self {
+            Token::Known(t) => Token::Known(t),
+            Token::Unknown(s) => Token::Unknown(f(s)),
+        }
+    }
 }
 
 impl<T: fmt::Display, S: fmt::Display> fmt::Display for Token<T, S> {

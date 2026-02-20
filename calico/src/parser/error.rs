@@ -11,7 +11,7 @@ use crate::{
     model::{
         component::TzRuleKind,
         parameter::{KnownParam, SDParamsFromParamsError, StaticParam},
-        primitive::{Integer, Sign, Status, ValueType},
+        primitive::{Integer, Sign, Status, Token, ValueType},
         rrule,
     },
     parser::property::PropName,
@@ -28,6 +28,7 @@ pub enum CalendarParseError<S> {
     InvalidCharInParamValue(char),
     // primitive parser errors
     InvalidFormatType(S),
+    InvalidStatusClass(u8),
     InvalidPositiveInteger(Integer),
     InvalidRawTime(InvalidRawTimeError),
     InvalidUtcOffset(InvalidUtcOffsetError),
@@ -72,7 +73,7 @@ pub enum CalendarParseError<S> {
     /// A VALUE parameter was expected but did not occur.
     MissingValueType,
     /// A VALUE parameter was present but had an invalid value for the property.
-    InvalidValueType(ValueType<S>),
+    InvalidValueType(Token<ValueType, S>),
     /// A property with the BINARY value did not also have the ENCODING parameter.
     MissingEncodingOnBinaryValue,
     /// A property with the BINARY value had ENCODING=8bit as a parameter.
@@ -213,7 +214,7 @@ pub struct InvalidCompletionPercentageError(pub(crate) Integer);
 pub struct InvalidPriorityError(pub(crate) Integer);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct InvalidDurationTimeError<T = usize> {
+pub struct InvalidDurationTimeError<T = u32> {
     pub(crate) hours: Option<T>,
     pub(crate) seconds: Option<T>,
 }

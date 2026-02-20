@@ -92,8 +92,32 @@ impl std::fmt::Display for FormatType {
     }
 }
 
+impl PartialEq for FormatTypeBuf {
+    fn eq(&self, other: &Self) -> bool {
+        **self == **other
+    }
+}
+
+impl Eq for FormatTypeBuf {}
+
 impl std::fmt::Display for FormatTypeBuf {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_str(self.as_str())
     }
+}
+
+/// A value of the STRUCTURED-DATA property (RFC 9073 §6.6).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum StructuredDataValue {
+    Text(String),
+    Binary(Vec<u8>),
+    Uri(Box<Uri>),
+}
+
+/// A value of the STYLED-DESCRIPTION property (RFC 9073 §6.5).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum StyledDescriptionValue {
+    Text(String),
+    Uri(Box<Uri>),
+    Iana { value_type: String, value: String },
 }

@@ -169,6 +169,21 @@ impl Date {
         }
     }
 
+    #[inline(always)]
+    pub const fn year(&self) -> Year {
+        self.year
+    }
+
+    #[inline(always)]
+    pub const fn month(&self) -> Month {
+        self.month
+    }
+
+    #[inline(always)]
+    pub const fn day(&self) -> Day {
+        self.day
+    }
+
     /// Returns the maximum day of `month` in `year`, based on the table given in RFC 3339 §5.7.
     pub const fn maximum_day(year: Year, month: Month) -> Day {
         match month {
@@ -325,6 +340,39 @@ impl DateTimeMarker for () {
     const SUFFIX: &'static str = "";
 }
 
+/// Runtime discrimination between local time and UTC.
+///
+/// This is used as the timezone marker `M` in `DateTime<M>` when the format is
+/// not statically known.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
+pub enum TimeFormat {
+    #[default]
+    Local,
+    Utc,
+}
+
+impl From<Utc> for TimeFormat {
+    fn from(_: Utc) -> Self {
+        Self::Utc
+    }
+}
+
+impl From<Local> for TimeFormat {
+    fn from(_: Local) -> Self {
+        Self::Local
+    }
+}
+
+impl std::fmt::Display for DateTime<TimeFormat> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let suffix = match self.marker {
+            TimeFormat::Utc => "Z",
+            TimeFormat::Local => "",
+        };
+        write!(f, "{}T{}{}", self.date, self.time, suffix)
+    }
+}
+
 #[derive(Debug, Clone, Copy, Error, PartialEq, Eq)]
 #[error("expected an integer of at most 9999 but received {0} instead")]
 pub struct InvalidYearError(u16);
@@ -467,6 +515,26 @@ impl Time {
             second,
             frac,
         })
+    }
+
+    #[inline(always)]
+    pub const fn hour(&self) -> Hour {
+        self.hour
+    }
+
+    #[inline(always)]
+    pub const fn minute(&self) -> Minute {
+        self.minute
+    }
+
+    #[inline(always)]
+    pub const fn second(&self) -> Second {
+        self.second
+    }
+
+    #[inline(always)]
+    pub const fn frac(&self) -> Option<FractionalSecond> {
+        self.frac
     }
 }
 

@@ -98,8 +98,8 @@ impl Default for WeekdayNumSet {
 /// `2 * 53 + 1 == 107` such bitsets in the overall set.
 ///
 /// The mapping from `Option<(Sign, IsoWeek)>` to `u16` index is relatively
-/// simple: `None` is defined as 0, `(Sign::Negative, week)` is assigned to
-/// `week as u16` (the range from 0 through 53), and `(Sign::Positive, week)`
+/// simple: `None` is defined as 0, `(Sign::Neg, week)` is assigned to
+/// `week as u16` (the range from 0 through 53), and `(Sign::Pos, week)`
 /// is assigned to `53 + (week as u16)` (the range from 54 through 106). Within
 /// each byte, a [`Weekday`] is mapped to an index from 0 through 6 by its
 /// discriminant.
@@ -154,8 +154,8 @@ pub(crate) const fn weekday_num_to_index(weekday_num: WeekdayNum) -> (u8, u8) {
 
     let byte = match weekday_num.ordinal {
         None => 0,
-        Some((Sign::Negative, week)) => week as u8,
-        Some((Sign::Positive, week)) => 53 + (week as u8),
+        Some((Sign::Neg, week)) => week as u8,
+        Some((Sign::Pos, week)) => 53 + (week as u8),
     };
 
     (byte, day)
@@ -171,14 +171,14 @@ pub(crate) const fn index_to_weekday_num((byte_index, day): (u8, u8)) -> Option<
                 return None;
             };
 
-            Some((Sign::Negative, week))
+            Some((Sign::Neg, week))
         }
         54..=106 => {
             let Some(week) = IsoWeek::from_index(byte_index - 53) else {
                 return None;
             };
 
-            Some((Sign::Positive, week))
+            Some((Sign::Pos, week))
         }
         _ => return None,
     };

@@ -380,3 +380,180 @@ pub enum ValueType {
 /// The only possible value of the RANGE parameter (RFC 5545 §3.2.13).
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct ThisAndFuture;
+
+// ============================================================================
+// RFC 7986 enums
+// ============================================================================
+
+/// The DISPLAY parameter value (RFC 7986 §6.1).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, EnumString, Display)]
+#[non_exhaustive]
+#[strum(ascii_case_insensitive)]
+pub enum DisplayType {
+    #[strum(serialize = "BADGE")]
+    Badge,
+    #[strum(serialize = "GRAPHIC")]
+    Graphic,
+    #[strum(serialize = "FULLSIZE")]
+    Fullsize,
+    #[strum(serialize = "THUMBNAIL")]
+    Thumbnail,
+}
+
+/// The FEATURE parameter value (RFC 7986 §6.3).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, EnumString, Display)]
+#[non_exhaustive]
+#[strum(ascii_case_insensitive)]
+pub enum FeatureType {
+    #[strum(serialize = "AUDIO")]
+    Audio,
+    #[strum(serialize = "CHAT")]
+    Chat,
+    #[strum(serialize = "FEED")]
+    Feed,
+    #[strum(serialize = "MODERATOR")]
+    Moderator,
+    #[strum(serialize = "PHONE")]
+    Phone,
+    #[strum(serialize = "SCREEN")]
+    Screen,
+    #[strum(serialize = "VIDEO")]
+    Video,
+}
+
+// ============================================================================
+// RFC 9073 enums
+// ============================================================================
+
+/// The RESOURCE-TYPE property value (RFC 9073 §6.3).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, EnumString, Display)]
+#[non_exhaustive]
+#[strum(ascii_case_insensitive)]
+pub enum ResourceType {
+    #[strum(serialize = "ROOM")]
+    Room,
+    #[strum(serialize = "PROJECTOR")]
+    Projector,
+    #[strum(serialize = "REMOTE-CONFERENCE-AUDIO")]
+    RemoteConferenceAudio,
+    #[strum(serialize = "REMOTE-CONFERENCE-VIDEO")]
+    RemoteConferenceVideo,
+}
+
+/// The PARTICIPANT-TYPE property value (RFC 9073 §6.2).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, EnumString, Display)]
+#[non_exhaustive]
+#[strum(ascii_case_insensitive)]
+pub enum ParticipantType {
+    #[strum(serialize = "ACTIVE")]
+    Active,
+    #[strum(serialize = "INACTIVE")]
+    Inactive,
+    #[strum(serialize = "SPONSOR")]
+    Sponsor,
+    #[strum(serialize = "CONTACT")]
+    Contact,
+    #[strum(serialize = "BOOKING-CONTACT")]
+    BookingContact,
+    #[strum(serialize = "EMERGENCY-CONTACT")]
+    EmergencyContact,
+    #[strum(serialize = "PUBLICITY-CONTACT")]
+    PublicityContact,
+    #[strum(serialize = "PLANNER-CONTACT")]
+    PlannerContact,
+    #[strum(serialize = "PERFORMER")]
+    Performer,
+    #[strum(serialize = "SPEAKER")]
+    Speaker,
+}
+
+// ============================================================================
+// RFC 9074 enums
+// ============================================================================
+
+/// A proximity value (RFC 9074 §8.1).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, EnumString, Display)]
+#[non_exhaustive]
+#[strum(ascii_case_insensitive)]
+pub enum ProximityValue {
+    #[strum(serialize = "ARRIVE")]
+    Arrive,
+    #[strum(serialize = "DEPART")]
+    Depart,
+    #[strum(serialize = "CONNECT")]
+    Connect,
+    #[strum(serialize = "DISCONNECT")]
+    Disconnect,
+}
+
+// ============================================================================
+// Unified status
+// ============================================================================
+
+/// A unified status value covering events, todos, and journals (RFC 5545 §3.8.1.11).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, EnumString, Display)]
+#[non_exhaustive]
+#[strum(ascii_case_insensitive)]
+pub enum Status {
+    #[strum(serialize = "TENTATIVE")]
+    Tentative,
+    #[strum(serialize = "CONFIRMED")]
+    Confirmed,
+    #[strum(serialize = "CANCELLED")]
+    Cancelled,
+    #[strum(serialize = "NEEDS-ACTION")]
+    NeedsAction,
+    #[strum(serialize = "COMPLETED")]
+    Completed,
+    #[strum(serialize = "IN-PROCESS")]
+    InProcess,
+    #[strum(serialize = "DRAFT")]
+    Draft,
+    #[strum(serialize = "FINAL")]
+    Final,
+}
+
+// ============================================================================
+// Alarm action markers
+// ============================================================================
+
+/// The AUDIO alarm action marker.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Default, Hash)]
+pub struct AudioAction;
+
+/// The DISPLAY alarm action marker.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Default, Hash)]
+pub struct DisplayAction;
+
+/// The EMAIL alarm action marker.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Default, Hash)]
+pub struct EmailAction;
+
+/// An unknown alarm action, either IANA-registered or experimental.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum UnknownAction<S> {
+    Iana(S),
+    X(S),
+}
+
+impl<S> UnknownAction<S> {
+    pub const fn as_ref(&self) -> UnknownAction<&S> {
+        match self {
+            UnknownAction::Iana(action) => UnknownAction::Iana(action),
+            UnknownAction::X(action) => UnknownAction::X(action),
+        }
+    }
+
+    pub const fn kind(&self) -> crate::string::NameKind {
+        match self {
+            UnknownAction::Iana(_) => crate::string::NameKind::Iana,
+            UnknownAction::X(_) => crate::string::NameKind::X,
+        }
+    }
+
+    pub fn into_inner(self) -> S {
+        match self {
+            UnknownAction::Iana(action) | UnknownAction::X(action) => action,
+        }
+    }
+}

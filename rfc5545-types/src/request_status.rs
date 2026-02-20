@@ -75,4 +75,15 @@ impl Class {
             Class::C5 => 5,
         }
     }
+
+    pub const fn from_u8(value: u8) -> Option<Self> {
+        match value {
+            1 => Some(Class::C1),
+            2 => Some(Class::C2),
+            3 => Some(Class::C3),
+            4 => Some(Class::C4),
+            5 => Some(Class::C5),
+            _ => None,
+        }
+    }
 }

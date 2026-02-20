@@ -20,13 +20,14 @@ use crate::{
     model::{
         css::Css3Color,
         primitive::{
-            AlarmAction, CalendarUserType, ClassValue, CompletionPercentage, Date, DateTime,
-            DateTimeOrDate, DisplayType, Duration, DurationKind, DurationTime, Encoding,
-            FeatureType, Float, FormatType, FreeBusyType, Geo, Gregorian, Integer, IsoWeek,
-            Language, Method, ParticipantType, ParticipationRole, ParticipationStatus, Period,
-            PositiveInteger, Priority, ProximityValue, RawTime, RelationshipType, RequestStatus,
-            RequestStatusCode, ResourceType, Sign, Status, Time, TimeFormat, TimeTransparency,
-            TriggerRelation, Utc, UtcOffset, ValueType, Version,
+            AlarmAction, CalendarUserType, Class, ClassValue, CompletionPercentage, Date, DateTime,
+            DateTimeOrDate, Day, DisplayType, Duration, Encoding, ExactDuration, FeatureType,
+            Float, FormatType, FormatTypeBuf, FreeBusyType, Geo, Gregorian, Hour, Integer, IsoWeek, Language,
+            Method, Minute, Month, NominalDuration, NonLeapSecond, ParticipantType,
+            ParticipationRole, ParticipationStatus, Period, PositiveInteger, Priority,
+            ProximityValue, RelationshipType, RequestStatus, RequestStatusCode, ResourceType,
+            Second, Sign, SignedDuration, Status, Time, TimeFormat, TimeTransparency, Token,
+            TriggerRelation, Utc, UtcOffset, ValueType, Version, Year,
         },
         string::{InvalidCharError, Name, ParamValue, TextBuf, TzId, Uid, Uri},
     },
@@ -62,19 +63,15 @@ macro_rules! match_iana_token {
     ($input:ident, $enum_name:ident, $($lhs:literal => $rhs:ident),* $(,)?) => {{
         let name = name.parse_next($input)?;
 
-        if name.kind() == $crate::model::string::NameKind::X {
-            return Ok($enum_name::Other(name));
-        }
-
         let res = ::hashify::map_ignore_case!(
             name.as_str().as_bytes(),
-            $enum_name ::<::std::convert::Infallible>,
+            $enum_name,
             $($lhs => $enum_name::$rhs,)*
         );
 
         match res {
-            Some(&res) => Ok(res.fmap(|_| unreachable!())),
-            None => Ok($enum_name::Other(name)),
+            Some(&res) => Ok($crate::model::primitive::Token::Known(res)),
+            None => Ok($crate::model::primitive::Token::Unknown(name)),
         }
     }};
 }
@@ -89,14 +86,14 @@ where
     Ok(RequestStatus {
         code: status_code.parse_next(input)?,
         description: preceded(';', text)
-            .map(TextBuf::into_boxed_text)
+            .map(Box::<str>::from)
             .parse_next(input)?,
-        exception_data: opt(preceded(';', text).map(TextBuf::into_boxed_text)).parse_next(input)?,
+        exception_data: opt(preceded(';', text).map(Box::<str>::from)).parse_next(input)?,
     })
 }
 
 /// Parses a [`ParticipantType`].
-pub fn participant_type<I, E>(input: &mut I) -> Result<ParticipantType<Box<Name>>, E>
+pub fn participant_type<I, E>(input: &mut I) -> Result<Token<ParticipantType, Box<Name>>, E>
 where
     I: InputStream,
     I::Token: AsChar,
@@ -117,7 +114,7 @@ where
 }
 
 /// Parses a [`ResourceType`].
-pub fn resource_type<I, E>(input: &mut I) -> Result<ResourceType<Box<Name>>, E>
+pub fn resource_type<I, E>(input: &mut I) -> Result<Token<ResourceType, Box<Name>>, E>
 where
     I: InputStream,
     I::Token: AsChar,
@@ -138,7 +135,7 @@ where
     <I as Stream>::Token: AsChar + Clone,
     E: ParserError<I> + FromExternalError<I, CalendarParseError<I::Slice>>,
 {
-    let (a, _, b, c) = (
+    let (class_byte, _, major, minor) = (
         lz_dec_uint::<I, u8, E>,
         '.',
         lz_dec_uint::<I, u8, E>,
@@ -146,11 +143,14 @@ where
     )
         .parse_next(input)?;
 
-    Ok(RequestStatusCode(a, b, c))
+    let class = Class::from_u8(class_byte)
+        .ok_or_else(|| E::from_external_error(input, CalendarParseError::InvalidStatusClass(class_byte)))?;
+
+    Ok(RequestStatusCode { class, major, minor })
 }
 
 /// Parses an [`AlarmAction`].
-pub fn alarm_action<I, E>(input: &mut I) -> Result<AlarmAction<Box<Name>>, E>
+pub fn alarm_action<I, E>(input: &mut I) -> Result<Token<AlarmAction, Box<Name>>, E>
 where
     I: InputStream,
     I::Token: AsChar,
@@ -196,7 +196,7 @@ where
 }
 
 /// Parses a [`FeatureType`].
-pub fn feature_type<I, E>(input: &mut I) -> Result<FeatureType<Box<Name>>, E>
+pub fn feature_type<I, E>(input: &mut I) -> Result<Token<FeatureType, Box<Name>>, E>
 where
     I: InputStream,
     I::Token: AsChar,
@@ -214,7 +214,7 @@ where
 }
 
 /// Parses a [`DisplayType`].
-pub fn display_type<I, E>(input: &mut I) -> Result<DisplayType<Box<Name>>, E>
+pub fn display_type<I, E>(input: &mut I) -> Result<Token<DisplayType, Box<Name>>, E>
 where
     I: InputStream,
     I::Token: AsChar,
@@ -251,7 +251,7 @@ where
 }
 
 /// Parses a [`Method`].
-pub fn method<I, E>(input: &mut I) -> Result<Method<Box<Name>>, E>
+pub fn method<I, E>(input: &mut I) -> Result<Token<Method, Box<Name>>, E>
 where
     I: InputStream,
     I::Token: AsChar,
@@ -292,8 +292,7 @@ where
 
     // TODO: this throws away the allocation produced by the name parser; find a way to reuse the
     // allocation here instead
-    language_tags::LanguageTag::parse(name.as_str())
-        .map(Language)
+    Language::parse(name.as_str())
         .map_err(|err| E::from_external_error(input, err.into()))
 }
 
@@ -391,7 +390,7 @@ where
         .map_err(|err| E::from_external_error(input, err.into()))
 }
 
-pub fn class_value<I, E>(input: &mut I) -> Result<ClassValue<Box<Name>>, E>
+pub fn class_value<I, E>(input: &mut I) -> Result<Token<ClassValue, Box<Name>>, E>
 where
     I: InputStream,
     I::Token: AsChar,
@@ -405,7 +404,7 @@ where
 }
 
 /// Parses a calendar user type value (RFC 5545 §3.2.3).
-pub fn calendar_user_type<I, E>(input: &mut I) -> Result<CalendarUserType<Box<Name>>, E>
+pub fn calendar_user_type<I, E>(input: &mut I) -> Result<Token<CalendarUserType, Box<Name>>, E>
 where
     I: InputStream,
     I::Token: AsChar,
@@ -433,8 +432,8 @@ where
     .parse_next(input)
 }
 
-/// Parses a [`FormatType`] (effectively a MIME type).
-pub fn format_type<I, E>(input: &mut I) -> Result<FormatType, E>
+/// Parses a [`FormatTypeBuf`] (effectively a MIME type).
+pub fn format_type<I, E>(input: &mut I) -> Result<FormatTypeBuf, E>
 where
     I: InputStream,
     I::Token: AsChar + Clone,
@@ -470,13 +469,13 @@ where
     let slice = (reg_name, '/', reg_name).take().parse_next(input)?;
     let s = I::try_into_str(&slice).map_err(|e| E::from_external_error(input, e.into()))?;
 
-    <mime::Mime as std::str::FromStr>::from_str(s.as_ref())
-        .map(FormatType)
+    FormatType::new(s.as_ref())
+        .map(FormatType::to_owned)
         .map_err(|_| E::from_external_error(input, CalendarParseError::InvalidFormatType(slice)))
 }
 
 /// Parses a [`FreeBusyType`].
-pub fn free_busy_type<I, E>(input: &mut I) -> Result<FreeBusyType<Box<Name>>, E>
+pub fn free_busy_type<I, E>(input: &mut I) -> Result<Token<FreeBusyType, Box<Name>>, E>
 where
     I: InputStream,
     I::Token: AsChar,
@@ -519,7 +518,7 @@ where
 }
 
 /// Parses a [`ParticipationStatus`].
-pub fn participation_status<I, E>(input: &mut I) -> Result<ParticipationStatus<Box<Name>>, E>
+pub fn participation_status<I, E>(input: &mut I) -> Result<Token<ParticipationStatus, Box<Name>>, E>
 where
     I: InputStream,
     I::Token: AsChar,
@@ -550,7 +549,7 @@ where
 }
 
 /// Parses a [`RelationshipType`].
-pub fn relationship_type<I, E>(input: &mut I) -> Result<RelationshipType<Box<Name>>, E>
+pub fn relationship_type<I, E>(input: &mut I) -> Result<Token<RelationshipType, Box<Name>>, E>
 where
     I: InputStream,
     I::Token: AsChar,
@@ -565,7 +564,7 @@ where
 }
 
 /// Parses a [`ProximityValue`].
-pub fn proximity_value<I, E>(input: &mut I) -> Result<ProximityValue<Box<Name>>, E>
+pub fn proximity_value<I, E>(input: &mut I) -> Result<Token<ProximityValue, Box<Name>>, E>
 where
     I: InputStream,
     I::Token: AsChar,
@@ -580,7 +579,7 @@ where
 }
 
 /// Parses a [`ParticipationRole`].
-pub fn participation_role<I, E>(input: &mut I) -> Result<ParticipationRole<Box<Name>>, E>
+pub fn participation_role<I, E>(input: &mut I) -> Result<Token<ParticipationRole, Box<Name>>, E>
 where
     I: InputStream,
     I::Token: AsChar,
@@ -595,7 +594,7 @@ where
 }
 
 /// Parses a [`ValueType`].
-pub fn value_type<I, E>(input: &mut I) -> Result<ValueType<Box<Name>>, E>
+pub fn value_type<I, E>(input: &mut I) -> Result<Token<ValueType, Box<Name>>, E>
 where
     I: InputStream,
     I::Token: AsChar,
@@ -777,14 +776,17 @@ where
     E: ParserError<I> + FromExternalError<I, CalendarParseError<I::Slice>>,
 {
     enum DtOrDur {
-        Dt(DateTime),
+        Dt(DateTime<TimeFormat>),
         Dur(Duration),
     }
 
     separated_pair(
         datetime,
         '/',
-        alt((datetime.map(DtOrDur::Dt), duration.map(DtOrDur::Dur))),
+        alt((
+            datetime.map(DtOrDur::Dt),
+            duration.map(|sd| DtOrDur::Dur(sd.duration)),
+        )),
     )
     .map(|(start, end)| match end {
         DtOrDur::Dt(end) => Period::Explicit { start, end },
@@ -793,14 +795,14 @@ where
     .parse_next(input)
 }
 
-/// Parses a [`Duration`].
-pub fn duration<I, E>(input: &mut I) -> Result<Duration, E>
+/// Parses a [`SignedDuration`].
+pub fn duration<I, E>(input: &mut I) -> Result<SignedDuration, E>
 where
     I: InputStream,
     <I as Stream>::Token: AsChar,
     E: ParserError<I> + FromExternalError<I, CalendarParseError<I::Slice>>,
 {
-    fn time<I, E>(input: &mut I) -> Result<DurationTime, E>
+    fn dur_time<I, E>(input: &mut I) -> Result<ExactDuration, E>
     where
         I: InputStream,
         <I as Stream>::Token: AsChar,
@@ -811,35 +813,40 @@ where
         let components = preceded(
             'T',
             (
-                opt(terminated(lz_dec_uint, 'H')),
-                opt(terminated(lz_dec_uint, 'M')),
-                opt(terminated(lz_dec_uint, 'S')),
+                opt(terminated(lz_dec_uint::<I, u32, E>, 'H')),
+                opt(terminated(lz_dec_uint::<I, u32, E>, 'M')),
+                opt(terminated(lz_dec_uint::<I, u32, E>, 'S')),
             ),
         )
         .parse_next(input)?;
 
         match components {
-            (Some(hours), Some(minutes), Some(seconds)) => Ok(DurationTime::HMS {
-                hours,
-                minutes,
-                seconds,
-            }),
-            (Some(hours), Some(minutes), None) => Ok(DurationTime::HM { hours, minutes }),
-            (None, Some(minutes), Some(seconds)) => Ok(DurationTime::MS { minutes, seconds }),
-            (Some(hours), None, None) => Ok(DurationTime::H { hours }),
-            (None, Some(minutes), None) => Ok(DurationTime::M { minutes }),
-            (None, None, Some(seconds)) => Ok(DurationTime::S { seconds }),
-            (hours, None, seconds) => {
+            (hours, None, seconds) if hours.is_none() && seconds.is_none() => {
                 input.reset(&checkpoint);
-
                 Err(E::from_external_error(
                     input,
                     CalendarParseError::InvalidDurationTime(InvalidDurationTimeError {
-                        hours,
-                        seconds,
+                        hours: None::<u32>,
+                        seconds: None::<u32>,
                     }),
                 ))
             }
+            (Some(_), None, Some(_)) => {
+                input.reset(&checkpoint);
+                Err(E::from_external_error(
+                    input,
+                    CalendarParseError::InvalidDurationTime(InvalidDurationTimeError {
+                        hours: components.0,
+                        seconds: components.2,
+                    }),
+                ))
+            }
+            (hours, minutes, seconds) => Ok(ExactDuration {
+                hours: hours.unwrap_or(0),
+                minutes: minutes.unwrap_or(0),
+                seconds: seconds.unwrap_or(0),
+                frac: None,
+            }),
         }
     }
 
@@ -847,13 +854,14 @@ where
         opt(sign),
         'P',
         alt((
-            time.map(|time| DurationKind::Time { time }),
-            separated_pair(lz_dec_uint, 'D', opt(time))
-                .map(|(days, time)| DurationKind::Date { days, time }),
-            terminated(lz_dec_uint, 'W').map(|weeks| DurationKind::Week { weeks }),
+            dur_time.map(|exact| Duration::Exact(exact)),
+            separated_pair(lz_dec_uint::<I, u32, E>, 'D', opt(dur_time))
+                .map(|(days, exact)| Duration::Nominal(NominalDuration { weeks: 0, days, exact })),
+            terminated(lz_dec_uint::<I, u32, E>, 'W')
+                .map(|weeks| Duration::Nominal(NominalDuration { weeks, days: 0, exact: None })),
         )),
     )
-    .map(|(sign, kind)| Duration { sign, kind })
+    .map(|(s, dur)| SignedDuration { sign: s.unwrap_or(Sign::Pos), duration: dur })
     .parse_next(input)
 }
 
@@ -867,7 +875,7 @@ where
     let (date, time) = (date, opt(preceded('T', time))).parse_next(input)?;
 
     Ok(match time {
-        Some(time) => DateTimeOrDate::DateTime(DateTime { date, time }),
+        Some((time, marker)) => DateTimeOrDate::DateTime(DateTime { date, time, marker }),
         None => DateTimeOrDate::Date(date),
     })
 }
@@ -881,7 +889,7 @@ where
     E: ParserError<I> + FromExternalError<I, CalendarParseError<I::Slice>>,
 {
     (date, 'T', time)
-        .map(|(date, _, time)| DateTime { date, time })
+        .map(|(date, _, (time, marker))| DateTime { date, time, marker })
         .parse_next(input)
 }
 
@@ -894,7 +902,7 @@ where
     E: ParserError<I> + FromExternalError<I, CalendarParseError<I::Slice>>,
 {
     (date, 'T', time_utc)
-        .map(|(date, _, time)| DateTime { date, time })
+        .map(|(date, _, time)| DateTime { date, time, marker: Utc })
         .parse_next(input)
 }
 
@@ -924,11 +932,23 @@ where
         .map(|(x, y)| x * 10 + y)
         .parse_next(input)?;
 
-    match Date::from_ymd_opt(year, month, day) {
-        Some(date) => Ok(date),
-        None => {
-            input.reset(&checkpoint);
+    let y = Year::new(year);
+    let m = Month::new(month);
+    let d = Day::new(day);
 
+    match (y, m, d) {
+        (Ok(y), Ok(m), Ok(d)) => match Date::new(y, m, d) {
+            Ok(date) => Ok(date),
+            Err(_) => {
+                input.reset(&checkpoint);
+                Err(E::from_external_error(
+                    input,
+                    CalendarParseError::InvalidDate(InvalidDateError { year, month, day }),
+                ))
+            }
+        },
+        _ => {
+            input.reset(&checkpoint);
             Err(E::from_external_error(
                 input,
                 CalendarParseError::InvalidDate(InvalidDateError { year, month, day }),
@@ -984,7 +1004,7 @@ where
     }
 
     match seconds {
-        Some(0) | None if hours == 0 && minutes == 0 && sign == Sign::Negative => {
+        Some(0) | None if hours == 0 && minutes == 0 && sign == Sign::Neg => {
             Err(E::from_external_error(
                 input,
                 CalendarParseError::InvalidUtcOffset(InvalidUtcOffsetError::NegativeZero),
@@ -996,27 +1016,25 @@ where
         )),
         _ => Ok(UtcOffset {
             sign,
-            hours,
-            minutes,
-            seconds,
+            hour: Hour::new(hours).unwrap(),
+            minute: Minute::new(minutes).unwrap(),
+            second: NonLeapSecond::new(seconds.unwrap_or(0)).unwrap(),
         }),
     }
 }
 
-/// Parses a [`Time<TimeFormat>`].
-pub fn time<I, E>(input: &mut I) -> Result<Time<TimeFormat>, E>
+/// Parses a [`Time`] followed by a [`TimeFormat`] suffix.
+pub fn time<I, E>(input: &mut I) -> Result<(Time, TimeFormat), E>
 where
     I: StreamIsPartial + Stream + Compare<char>,
     <I as Stream>::Token: AsChar + Clone,
     E: ParserError<I> + FromExternalError<I, CalendarParseError<I::Slice>>,
 {
-    (raw_time, time_format)
-        .parse_next(input)
-        .map(|(raw, format)| Time { raw, format })
+    (raw_time, time_format).parse_next(input)
 }
 
-/// Parses a [`Time<Utc>`].
-pub fn time_utc<I, E>(input: &mut I) -> Result<Time<Utc>, E>
+/// Parses a [`Time`] followed by the mandatory UTC marker.
+pub fn time_utc<I, E>(input: &mut I) -> Result<Time, E>
 where
     I: StreamIsPartial + Stream + Compare<char>,
     <I as Stream>::Token: AsChar + Clone,
@@ -1024,11 +1042,11 @@ where
 {
     (raw_time, utc_marker)
         .parse_next(input)
-        .map(|(raw, ())| Time { raw, format: Utc })
+        .map(|(time, ())| time)
 }
 
-/// Parses a [`RawTime`].
-pub fn raw_time<I, E>(input: &mut I) -> Result<RawTime, E>
+/// Parses a [`Time`] (without time format suffix).
+pub fn raw_time<I, E>(input: &mut I) -> Result<Time, E>
 where
     I: StreamIsPartial + Stream,
     <I as Stream>::Token: AsChar,
@@ -1048,15 +1066,27 @@ where
         .map(|(tens, ones)| tens * 10 + ones)
         .parse_next(input)?;
 
-    match hours < 24 && minutes < 60 && seconds < 61 {
-        true => Ok(RawTime {
-            hours,
-            minutes,
-            seconds,
-        }),
-        false => {
-            input.reset(&checkpoint);
+    let h = Hour::new(hours);
+    let m = Minute::new(minutes);
+    let s = Second::new(seconds);
 
+    match (h, m, s) {
+        (Ok(h), Ok(m), Ok(s)) => match Time::new(h, m, s, None) {
+            Ok(time) => Ok(time),
+            Err(_) => {
+                input.reset(&checkpoint);
+                Err(E::from_external_error(
+                    input,
+                    CalendarParseError::InvalidRawTime(InvalidRawTimeError {
+                        hours,
+                        minutes,
+                        seconds,
+                    }),
+                ))
+            }
+        },
+        _ => {
+            input.reset(&checkpoint);
             Err(E::from_external_error(
                 input,
                 CalendarParseError::InvalidRawTime(InvalidRawTimeError {
@@ -1151,7 +1181,7 @@ where
     let value = integer.parse_next(input)?;
 
     match value {
-        pct @ 0..=100 => Ok(CompletionPercentage(pct as u8)),
+        pct @ 0..=100 => Ok(CompletionPercentage::new(pct as u8).unwrap()),
         other => Err(E::from_external_error(
             input,
             CalendarParseError::InvalidCompletionPercentage(InvalidCompletionPercentageError(
@@ -1215,9 +1245,7 @@ where
     E: ParserError<I> + FromExternalError<I, CalendarParseError<I::Slice>>,
 {
     let int = integer.parse_next(input)?;
-    let res = NonZero::<i32>::try_from(int)
-        .and_then(PositiveInteger::try_from)
-        .ok();
+    let res = u32::try_from(int).ok().and_then(NonZero::new);
 
     match res {
         Some(value) => Ok(value),
@@ -1292,7 +1320,7 @@ where
     I: StreamIsPartial + Stream + Compare<char>,
     E: ParserError<I>,
 {
-    alt(('+'.value(Sign::Positive), '-'.value(Sign::Negative))).parse_next(input)
+    alt(('+'.value(Sign::Pos), '-'.value(Sign::Neg))).parse_next(input)
 }
 
 pub fn color<I, E>(input: &mut I) -> Result<Css3Color, E>
@@ -1528,8 +1556,6 @@ const fn str_has_extension_prefix(s: &str) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use std::str::FromStr;
-
     use crate::date;
     use crate::parser::escaped::{AsEscaped, Escaped};
 
@@ -1539,12 +1565,12 @@ mod tests {
     fn status_code_parser() {
         assert_eq!(
             status_code::<_, ()>.parse_peek("3.1"),
-            Ok(("", (3, 1).into())),
+            Ok(("", RequestStatusCode { class: Class::C3, major: 1, minor: None })),
         );
 
         assert_eq!(
             status_code::<_, ()>.parse_peek("3.1.12"),
-            Ok(("", (3, 1, 12).into())),
+            Ok(("", RequestStatusCode { class: Class::C3, major: 1, minor: Some(12) })),
         );
     }
 
@@ -1552,24 +1578,24 @@ mod tests {
     fn alarm_action_parser() {
         assert_eq!(
             alarm_action::<_, ()>.parse_peek("audio"),
-            Ok(("", AlarmAction::Audio))
+            Ok(("", Token::Known(AlarmAction::Audio)))
         );
 
         assert_eq!(
             alarm_action::<_, ()>.parse_peek("DISPLAY"),
-            Ok(("", AlarmAction::Display))
+            Ok(("", Token::Known(AlarmAction::Display)))
         );
 
         assert_eq!(
             alarm_action::<_, ()>.parse_peek("Email"),
-            Ok(("", AlarmAction::Email))
+            Ok(("", Token::Known(AlarmAction::Email)))
         );
 
         assert_eq!(
             alarm_action::<_, ()>.parse_peek("X-extension"),
             Ok((
                 "",
-                AlarmAction::Other(Name::new("X-extension").unwrap().into())
+                Token::Unknown(Name::new("X-extension").unwrap().into())
             ))
         );
 
@@ -1577,7 +1603,7 @@ mod tests {
             alarm_action::<_, ()>.parse_peek("iana-token"),
             Ok((
                 "",
-                AlarmAction::Other(Name::new("iana-token").unwrap().into())
+                Token::Unknown(Name::new("iana-token").unwrap().into())
             ))
         );
     }
@@ -1611,12 +1637,12 @@ mod tests {
     fn feature_type_parser() {
         assert_eq!(
             feature_type::<_, ()>.parse_peek("chat").unwrap().1,
-            FeatureType::Chat
+            Token::Known(FeatureType::Chat)
         );
 
         assert_eq!(
             feature_type::<_, ()>.parse_peek("SCREEN").unwrap().1,
-            FeatureType::Screen
+            Token::Known(FeatureType::Screen)
         );
 
         assert_eq!(
@@ -1624,7 +1650,7 @@ mod tests {
                 .parse_peek(Escaped("vi\r\n\tdeo".as_bytes()))
                 .unwrap()
                 .1,
-            FeatureType::Video
+            Token::Known(FeatureType::Video)
         );
 
         assert_eq!(
@@ -1632,7 +1658,7 @@ mod tests {
                 .parse_peek(Escaped("\r\n\tX-TH\r\n\tING".as_bytes()))
                 .unwrap()
                 .1,
-            FeatureType::Other(Name::new("X-THING").unwrap().into()),
+            Token::Unknown(Name::new("X-THING").unwrap().into()),
         );
     }
 
@@ -1640,15 +1666,15 @@ mod tests {
     fn display_type_parser() {
         assert_eq!(
             display_type::<_, ()>.parse_peek("badge").unwrap().1,
-            DisplayType::Badge
+            Token::Known(DisplayType::Badge)
         );
         assert_eq!(
             display_type::<_, ()>.parse_peek("GRAPHIC").unwrap().1,
-            DisplayType::Graphic
+            Token::Known(DisplayType::Graphic)
         );
         assert_eq!(
             display_type::<_, ()>.parse_peek("X-OTHER").unwrap().1,
-            DisplayType::Other(Name::new("X-OTHER").unwrap().into()),
+            Token::Unknown(Name::new("X-OTHER").unwrap().into()),
         );
     }
 
@@ -1717,19 +1743,19 @@ mod tests {
     fn class_value_parser() {
         assert_eq!(
             class_value::<_, ()>.parse_peek("CONFIDENTIAL"),
-            Ok(("", ClassValue::Confidential))
+            Ok(("", Token::Known(ClassValue::Confidential)))
         );
 
         assert_eq!(
             class_value::<_, ()>.parse_peek("public"),
-            Ok(("", ClassValue::Public))
+            Ok(("", Token::Known(ClassValue::Public)))
         );
 
         assert_eq!(
             class_value::<_, ()>.parse_peek("X-SOMETHING"),
             Ok((
                 "",
-                ClassValue::Other(Name::new("X-SOMETHING").unwrap().into())
+                Token::Unknown(Name::new("X-SOMETHING").unwrap().into())
             ))
         );
 
@@ -1737,7 +1763,7 @@ mod tests {
             class_value::<_, ()>.parse_peek("IANA-TOKEN"),
             Ok((
                 "",
-                ClassValue::Other(Name::new("IANA-TOKEN").unwrap().into())
+                Token::Unknown(Name::new("IANA-TOKEN").unwrap().into())
             ))
         );
     }
@@ -1749,12 +1775,12 @@ mod tests {
                 .parse_peek("INDIVIDUAL")
                 .unwrap()
                 .1,
-            CalendarUserType::Individual,
+            Token::Known(CalendarUserType::Individual),
         );
 
         assert_eq!(
             calendar_user_type::<_, ()>.parse_peek("room").unwrap().1,
-            CalendarUserType::Room,
+            Token::Known(CalendarUserType::Room),
         );
 
         assert_eq!(
@@ -1762,7 +1788,7 @@ mod tests {
                 .parse_peek("iana-token")
                 .unwrap()
                 .1,
-            CalendarUserType::Other(Name::new("iana-token").unwrap().into()),
+            Token::Unknown(Name::new("iana-token").unwrap().into()),
         );
     }
 
@@ -1799,7 +1825,7 @@ mod tests {
             format_type::<_, ()>.parse_peek("application/postscript"),
             Ok((
                 "",
-                FormatType(mime::Mime::from_str("application/postscript").unwrap()),
+                FormatType::new("application/postscript").unwrap().to_owned(),
             ))
         );
     }
@@ -1808,11 +1834,11 @@ mod tests {
     fn free_busy_type_parser() {
         assert_eq!(
             free_busy_type::<_, ()>.parse_peek("busy"),
-            Ok(("", FreeBusyType::Busy))
+            Ok(("", Token::Known(FreeBusyType::Busy)))
         );
         assert_eq!(
             free_busy_type::<_, ()>.parse_peek("Free"),
-            Ok(("", FreeBusyType::Free))
+            Ok(("", Token::Known(FreeBusyType::Free)))
         );
     }
 
@@ -1863,24 +1889,24 @@ mod tests {
     fn relationship_type_parser() {
         assert_eq!(
             relationship_type::<_, ()>.parse_peek("SIBLING"),
-            Ok(("", RelationshipType::Sibling)),
+            Ok(("", Token::Known(RelationshipType::Sibling))),
         );
 
         assert_eq!(
             relationship_type::<_, ()>.parse_peek("parent"),
-            Ok(("", RelationshipType::Parent)),
+            Ok(("", Token::Known(RelationshipType::Parent))),
         );
 
         assert_eq!(
             relationship_type::<_, ()>.parse_peek("Child"),
-            Ok(("", RelationshipType::Child)),
+            Ok(("", Token::Known(RelationshipType::Child))),
         );
 
         assert_eq!(
             relationship_type::<_, ()>.parse_peek("X-SOMETHING-ELSE"),
             Ok((
                 "",
-                RelationshipType::Other(Name::new("X-SOMETHING-ELSE").unwrap().into())
+                Token::Unknown(Name::new("X-SOMETHING-ELSE").unwrap().into())
             )),
         );
     }
@@ -1889,19 +1915,19 @@ mod tests {
     fn participation_role_parser() {
         assert_eq!(
             participation_role::<_, ()>.parse_peek("req-participant"),
-            Ok(("", ParticipationRole::ReqParticipant)),
+            Ok(("", Token::Known(ParticipationRole::ReqParticipant))),
         );
 
         assert_eq!(
             participation_role::<_, ()>.parse_peek("Chair"),
-            Ok(("", ParticipationRole::Chair)),
+            Ok(("", Token::Known(ParticipationRole::Chair))),
         );
 
         assert_eq!(
             participation_role::<_, ()>.parse_peek("X-ANYTHING"),
             Ok((
                 "",
-                ParticipationRole::Other(Name::new("X-ANYTHING").unwrap().into())
+                Token::Unknown(Name::new("X-ANYTHING").unwrap().into())
             )),
         );
     }
@@ -1910,27 +1936,27 @@ mod tests {
     fn value_type_parser() {
         assert_eq!(
             value_type::<_, ()>.parse_peek("float"),
-            Ok(("", ValueType::Float))
+            Ok(("", Token::Known(ValueType::Float)))
         );
         assert_eq!(
             value_type::<_, ()>.parse_peek("TIME"),
-            Ok(("", ValueType::Time))
+            Ok(("", Token::Known(ValueType::Time)))
         );
         assert_eq!(
             value_type::<_, ()>.parse_peek("Recur"),
-            Ok(("", ValueType::Recur))
+            Ok(("", Token::Known(ValueType::Recur)))
         );
         assert_eq!(
             value_type::<_, ()>
                 .parse_peek("BOO\r\n\tLEAN".as_escaped())
                 .map(|(_, v)| v),
-            Ok(ValueType::Boolean)
+            Ok(Token::Known(ValueType::Boolean))
         );
         assert_eq!(
             value_type::<_, ()>
                 .parse_peek("\r\n X-TY\r\n\tPE".as_escaped())
                 .map(|(_, v)| v),
-            Ok(ValueType::Other(Name::new("X-TYPE").unwrap().into()))
+            Ok(Token::Unknown(Name::new("X-TYPE").unwrap().into()))
         );
     }
 
@@ -1955,9 +1981,9 @@ mod tests {
             duration::<_, ()>.parse_peek("P7W"),
             Ok((
                 "",
-                Duration {
-                    sign: None,
-                    kind: DurationKind::Week { weeks: 7 }
+                SignedDuration {
+                    sign: Sign::Pos,
+                    duration: Duration::Nominal(NominalDuration { weeks: 7, days: 0, exact: None }),
                 }
             )),
         );
@@ -1966,16 +1992,18 @@ mod tests {
             duration::<_, ()>.parse_peek("+P15DT5H0M20S"),
             Ok((
                 "",
-                Duration {
-                    sign: Some(Sign::Positive),
-                    kind: DurationKind::Date {
+                SignedDuration {
+                    sign: Sign::Pos,
+                    duration: Duration::Nominal(NominalDuration {
+                        weeks: 0,
                         days: 15,
-                        time: Some(DurationTime::HMS {
+                        exact: Some(ExactDuration {
                             hours: 5,
                             minutes: 0,
-                            seconds: 20
+                            seconds: 20,
+                            frac: None,
                         }),
-                    },
+                    }),
                 }
             )),
         );
@@ -2007,14 +2035,8 @@ mod tests {
                 .is_ok_and(|(_tail, dt)| {
                     dt == DateTime {
                         date: date!(1997;7;14),
-                        time: Time {
-                            raw: RawTime {
-                                hours: 4,
-                                minutes: 50,
-                                seconds: 15,
-                            },
-                            format: TimeFormat::Local,
-                        },
+                        time: crate::time!(4;50;15),
+                        marker: TimeFormat::Local,
                     }
                 })
         );
@@ -2029,7 +2051,7 @@ mod tests {
     #[test]
     fn date_parser() {
         assert!(date::<_, ()>.parse_peek("19970714").is_ok());
-        assert!(date::<_, ()>.parse_peek("20150229").is_ok()); // this day isn't real!
+        assert!(date::<_, ()>.parse_peek("20150229").is_err()); // 2015 is not a leap year
 
         assert_eq!(
             date::<_, ()>.parse_peek("20040620"),
@@ -2041,14 +2063,7 @@ mod tests {
     fn time_parser() {
         assert_eq!(
             time::<_, ()>.parse_peek("111111Z").unwrap().1,
-            Time {
-                raw: RawTime {
-                    hours: 11,
-                    minutes: 11,
-                    seconds: 11
-                },
-                format: TimeFormat::Utc,
-            },
+            (crate::time!(11;11;11), TimeFormat::Utc),
         );
 
         assert!(time::<_, ()>.parse_peek("123456").is_ok());
@@ -2064,11 +2079,7 @@ mod tests {
     fn raw_time_parser() {
         assert_eq!(
             raw_time::<_, ()>.parse_peek("123456".as_bytes()).unwrap().1,
-            RawTime {
-                hours: 12,
-                minutes: 34,
-                seconds: 56
-            },
+            crate::time!(12;34;56),
         );
 
         assert!(raw_time::<_, ()>.parse_peek("123456").is_ok());
@@ -2084,12 +2095,7 @@ mod tests {
             utc_offset::<_, ()>.parse_peek("+235959"),
             Ok((
                 "",
-                UtcOffset {
-                    sign: Sign::Positive,
-                    hours: 23,
-                    minutes: 59,
-                    seconds: Some(59),
-                }
+                crate::utc_offset!(+23;59;59)
             ))
         );
 
@@ -2097,12 +2103,7 @@ mod tests {
             utc_offset::<_, ()>.parse_peek("-2340"),
             Ok((
                 "",
-                UtcOffset {
-                    sign: Sign::Negative,
-                    hours: 23,
-                    minutes: 40,
-                    seconds: None,
-                }
+                crate::utc_offset!(-23;40)
             ))
         );
 
@@ -2257,18 +2258,18 @@ mod tests {
 
     #[test]
     fn sign_parser() {
-        assert_eq!(sign::<_, ()>.parse_peek("+"), Ok(("", Sign::Positive)));
-        assert_eq!(sign::<_, ()>.parse_peek("-"), Ok(("", Sign::Negative)));
+        assert_eq!(sign::<_, ()>.parse_peek("+"), Ok(("", Sign::Pos)));
+        assert_eq!(sign::<_, ()>.parse_peek("-"), Ok(("", Sign::Neg)));
         assert!(sign::<_, ()>.parse_peek("0").is_err());
 
         assert_eq!(
             sign::<_, ()>.parse_peek(Escaped("\r\n\t+".as_bytes())),
-            Ok((Escaped("".as_bytes()), Sign::Positive))
+            Ok((Escaped("".as_bytes()), Sign::Pos))
         );
 
         assert_eq!(
             sign::<_, ()>.parse_peek(Escaped("\r\n -".as_bytes())),
-            Ok((Escaped("".as_bytes()), Sign::Negative))
+            Ok((Escaped("".as_bytes()), Sign::Neg))
         );
     }
 

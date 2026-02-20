@@ -608,9 +608,9 @@ where
         None => a,
     };
 
-    match Month::from_number(value) {
-        Some(month) => Ok(month),
-        None => Err(E::from_external_error(
+    match Month::new(value) {
+        Ok(month) => Ok(month),
+        Err(_) => Err(E::from_external_error(
             input,
             CalendarParseError::InvalidMonthNumber(value),
         )),
@@ -759,7 +759,7 @@ mod tests {
         });
 
         let mut year_day_num_set = BTreeSet::new();
-        year_day_num_set.insert(YearDayNum::from_signed_index(Sign::Negative, 1).unwrap());
+        year_day_num_set.insert(YearDayNum::from_signed_index(Sign::Neg, 1).unwrap());
 
         assert_eq!(
             core_by_rules,
@@ -878,7 +878,7 @@ mod tests {
         }
 
         let mut by_set_pos_set = BTreeSet::default();
-        let _ = by_set_pos_set.insert(YearDayNum::from_signed_index(Sign::Negative, 1).ok_or(())?);
+        let _ = by_set_pos_set.insert(YearDayNum::from_signed_index(Sign::Neg, 1).ok_or(())?);
 
         let expected_parts = vec![
             Part::Freq(Freq::Monthly),
@@ -1016,7 +1016,7 @@ mod tests {
             week_num::<_, ()>.parse_peek("+1"),
             Ok((
                 "",
-                WeekNoSetIndex::from_signed_week(Sign::Positive, IsoWeek::W1)
+                WeekNoSetIndex::from_signed_week(Sign::Pos, IsoWeek::W1)
             ))
         );
 
@@ -1024,7 +1024,7 @@ mod tests {
             week_num::<_, ()>.parse_peek("01"),
             Ok((
                 "",
-                WeekNoSetIndex::from_signed_week(Sign::Positive, IsoWeek::W1)
+                WeekNoSetIndex::from_signed_week(Sign::Pos, IsoWeek::W1)
             ))
         );
 
@@ -1032,7 +1032,7 @@ mod tests {
             week_num::<_, ()>.parse_peek("+31"),
             Ok((
                 "",
-                WeekNoSetIndex::from_signed_week(Sign::Positive, IsoWeek::W31)
+                WeekNoSetIndex::from_signed_week(Sign::Pos, IsoWeek::W31)
             ))
         );
 
@@ -1040,7 +1040,7 @@ mod tests {
             week_num::<_, ()>.parse_peek("-2"),
             Ok((
                 "",
-                WeekNoSetIndex::from_signed_week(Sign::Negative, IsoWeek::W2)
+                WeekNoSetIndex::from_signed_week(Sign::Neg, IsoWeek::W2)
             ))
         );
 
@@ -1048,7 +1048,7 @@ mod tests {
             week_num::<_, ()>.parse_peek("-02"),
             Ok((
                 "",
-                WeekNoSetIndex::from_signed_week(Sign::Negative, IsoWeek::W2)
+                WeekNoSetIndex::from_signed_week(Sign::Neg, IsoWeek::W2)
             ))
         );
 
@@ -1056,7 +1056,7 @@ mod tests {
             week_num::<_, ()>.parse_peek("-50"),
             Ok((
                 "",
-                WeekNoSetIndex::from_signed_week(Sign::Negative, IsoWeek::W50)
+                WeekNoSetIndex::from_signed_week(Sign::Neg, IsoWeek::W50)
             ))
         );
     }
@@ -1067,7 +1067,7 @@ mod tests {
             month_day_num::<_, ()>.parse_peek("+1"),
             Ok((
                 "",
-                MonthDaySetIndex::from_signed_month_day(Sign::Positive, MonthDay::D1)
+                MonthDaySetIndex::from_signed_month_day(Sign::Pos, MonthDay::D1)
             ))
         );
 
@@ -1075,7 +1075,7 @@ mod tests {
             month_day_num::<_, ()>.parse_peek("+01"),
             Ok((
                 "",
-                MonthDaySetIndex::from_signed_month_day(Sign::Positive, MonthDay::D1)
+                MonthDaySetIndex::from_signed_month_day(Sign::Pos, MonthDay::D1)
             ))
         );
 
@@ -1083,7 +1083,7 @@ mod tests {
             month_day_num::<_, ()>.parse_peek("-16"),
             Ok((
                 "",
-                MonthDaySetIndex::from_signed_month_day(Sign::Negative, MonthDay::D16)
+                MonthDaySetIndex::from_signed_month_day(Sign::Neg, MonthDay::D16)
             ))
         );
     }

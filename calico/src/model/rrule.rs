@@ -142,8 +142,8 @@ impl Debug for WeekdayNum {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         if let Some((sign, week)) = self.ordinal {
             match sign {
-                Sign::Positive => write!(f, "+"),
-                Sign::Negative => write!(f, "-"),
+                Sign::Pos => write!(f, "+"),
+                Sign::Neg => write!(f, "-"),
             }?;
 
             let w = week as u8;
@@ -724,8 +724,8 @@ impl MonthDaySetIndex {
     pub const fn from_signed_month_day(sign: Sign, day: MonthDay) -> Self {
         let day = day as u8;
         let offset = match sign {
-            Sign::Positive => 0,
-            Sign::Negative => 31,
+            Sign::Pos => 0,
+            Sign::Neg => 31,
         };
 
         // SAFETY: (day as u8) lies in the range 1..=31
@@ -788,8 +788,8 @@ impl WeekNoSetIndex {
     pub const fn from_signed_week(sign: Sign, week: IsoWeek) -> Self {
         let week = week as u8;
         let offset = match sign {
-            Sign::Positive => 0,
-            Sign::Negative => 64,
+            Sign::Pos => 0,
+            Sign::Neg => 64,
         };
 
         // SAFETY: (week as u8) is guaranteed to lie in the range 1..=53
@@ -1142,28 +1142,28 @@ mod tests {
     #[test]
     fn month_day_set_index_from_signed_month_day() {
         assert_eq!(
-            MonthDaySetIndex::from_signed_month_day(Sign::Positive, MonthDay::D1)
+            MonthDaySetIndex::from_signed_month_day(Sign::Pos, MonthDay::D1)
                 .0
                 .get(),
             1
         );
 
         assert_eq!(
-            MonthDaySetIndex::from_signed_month_day(Sign::Positive, MonthDay::D31)
+            MonthDaySetIndex::from_signed_month_day(Sign::Pos, MonthDay::D31)
                 .0
                 .get(),
             31
         );
 
         assert_eq!(
-            MonthDaySetIndex::from_signed_month_day(Sign::Negative, MonthDay::D1)
+            MonthDaySetIndex::from_signed_month_day(Sign::Neg, MonthDay::D1)
                 .0
                 .get(),
             31 + 1
         );
 
         assert_eq!(
-            MonthDaySetIndex::from_signed_month_day(Sign::Negative, MonthDay::D31)
+            MonthDaySetIndex::from_signed_month_day(Sign::Neg, MonthDay::D31)
                 .0
                 .get(),
             31 + 31
@@ -1174,9 +1174,9 @@ mod tests {
     fn month_day_set_bit_twiddling() {
         let mut month_day_set = MonthDaySet::default();
 
-        let i1 = MonthDaySetIndex::from_signed_month_day(Sign::Positive, MonthDay::D1);
-        let i2 = MonthDaySetIndex::from_signed_month_day(Sign::Positive, MonthDay::D25);
-        let i3 = MonthDaySetIndex::from_signed_month_day(Sign::Negative, MonthDay::D6);
+        let i1 = MonthDaySetIndex::from_signed_month_day(Sign::Pos, MonthDay::D1);
+        let i2 = MonthDaySetIndex::from_signed_month_day(Sign::Pos, MonthDay::D25);
+        let i3 = MonthDaySetIndex::from_signed_month_day(Sign::Neg, MonthDay::D6);
 
         for i in [i1, i2, i3] {
             assert!(!month_day_set.get(i));
@@ -1208,22 +1208,22 @@ mod tests {
     #[test]
     fn week_no_set_index_from_signed_week() {
         assert_eq!(
-            WeekNoSetIndex::from_signed_week(Sign::Positive, IsoWeek::W1),
+            WeekNoSetIndex::from_signed_week(Sign::Pos, IsoWeek::W1),
             WeekNoSetIndex(NonZero::new(1).unwrap())
         );
 
         assert_eq!(
-            WeekNoSetIndex::from_signed_week(Sign::Negative, IsoWeek::W1),
+            WeekNoSetIndex::from_signed_week(Sign::Neg, IsoWeek::W1),
             WeekNoSetIndex(NonZero::new(64 + 1).unwrap())
         );
 
         assert_eq!(
-            WeekNoSetIndex::from_signed_week(Sign::Positive, IsoWeek::W53),
+            WeekNoSetIndex::from_signed_week(Sign::Pos, IsoWeek::W53),
             WeekNoSetIndex(NonZero::new(53).unwrap())
         );
 
         assert_eq!(
-            WeekNoSetIndex::from_signed_week(Sign::Negative, IsoWeek::W53),
+            WeekNoSetIndex::from_signed_week(Sign::Neg, IsoWeek::W53),
             WeekNoSetIndex(NonZero::new(64 + 53).unwrap())
         );
     }
@@ -1232,9 +1232,9 @@ mod tests {
     fn week_no_set_bit_twiddling() {
         let mut week_no_set = WeekNoSet::default();
 
-        let i1 = WeekNoSetIndex::from_signed_week(Sign::Positive, IsoWeek::W12);
-        let i2 = WeekNoSetIndex::from_signed_week(Sign::Negative, IsoWeek::W8);
-        let i3 = WeekNoSetIndex::from_signed_week(Sign::Negative, IsoWeek::W37);
+        let i1 = WeekNoSetIndex::from_signed_week(Sign::Pos, IsoWeek::W12);
+        let i2 = WeekNoSetIndex::from_signed_week(Sign::Neg, IsoWeek::W8);
+        let i3 = WeekNoSetIndex::from_signed_week(Sign::Neg, IsoWeek::W37);
 
         for i in [i1, i2, i3] {
             assert!(!week_no_set.get(i));
@@ -1271,22 +1271,22 @@ mod tests {
         assert!(none_tuesday < none_friday);
 
         let sub_53_monday = WeekdayNum {
-            ordinal: Some((Sign::Negative, IsoWeek::W53)),
+            ordinal: Some((Sign::Neg, IsoWeek::W53)),
             weekday: Weekday::Monday,
         };
 
         let sub_50_monday = WeekdayNum {
-            ordinal: Some((Sign::Negative, IsoWeek::W50)),
+            ordinal: Some((Sign::Neg, IsoWeek::W50)),
             weekday: Weekday::Monday,
         };
 
         let sub_53_wednesday = WeekdayNum {
-            ordinal: Some((Sign::Negative, IsoWeek::W53)),
+            ordinal: Some((Sign::Neg, IsoWeek::W53)),
             weekday: Weekday::Wednesday,
         };
 
         let sub_50_thursday = WeekdayNum {
-            ordinal: Some((Sign::Negative, IsoWeek::W50)),
+            ordinal: Some((Sign::Neg, IsoWeek::W50)),
             weekday: Weekday::Thursday,
         };
 
@@ -1301,22 +1301,22 @@ mod tests {
         assert!(sub_50_monday < sub_50_thursday);
 
         let pos_53_monday = WeekdayNum {
-            ordinal: Some((Sign::Positive, IsoWeek::W53)),
+            ordinal: Some((Sign::Pos, IsoWeek::W53)),
             weekday: Weekday::Monday,
         };
 
         let pos_50_monday = WeekdayNum {
-            ordinal: Some((Sign::Positive, IsoWeek::W50)),
+            ordinal: Some((Sign::Pos, IsoWeek::W50)),
             weekday: Weekday::Monday,
         };
 
         let pos_53_wednesday = WeekdayNum {
-            ordinal: Some((Sign::Positive, IsoWeek::W53)),
+            ordinal: Some((Sign::Pos, IsoWeek::W53)),
             weekday: Weekday::Wednesday,
         };
 
         let pos_50_thursday = WeekdayNum {
-            ordinal: Some((Sign::Positive, IsoWeek::W50)),
+            ordinal: Some((Sign::Pos, IsoWeek::W50)),
             weekday: Weekday::Thursday,
         };
 

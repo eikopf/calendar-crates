@@ -61,9 +61,9 @@ use paste::paste;
 
 use super::{
     primitive::{
-        CalendarUserType, DisplayType, Encoding, FeatureType, FormatType, FreeBusyType, Language,
-        ParticipationRole, ParticipationStatus, PositiveInteger, RelationshipType, ThisAndFuture,
-        TriggerRelation, ValueType,
+        CalendarUserType, DisplayType, Encoding, FeatureType, FormatTypeBuf, FreeBusyType,
+        Language, ParticipationRole, ParticipationStatus, PositiveInteger, RelationshipType,
+        ThisAndFuture, Token, TriggerRelation, ValueType,
     },
     string::{CaselessStr, Name, NameKind, NeverStr, ParamValue, TzId, Uri},
 };
@@ -272,28 +272,28 @@ define_parameter_type! {
         // RFC 5545
         (alternate_representation, AltRep) ? Box<Uri>,
         (common_name, CommonName) ? Box<ParamValue>,
-        (calendar_user_type, CalUserType) ? CalendarUserType<Box<Name>>,
+        (calendar_user_type, CalUserType) ? Token<CalendarUserType, Box<Name>>,
         (delegated_from, DelFrom) ? Vec1<Box<Uri>>,
         (delegated_to, DelTo) ? Vec1<Box<Uri>>,
         (directory_reference, Dir) ? Box<Uri>,
         (inline_encoding, Encoding) ? Encoding,
-        (format_type, FormatType) ! FormatType,
-        (free_busy_type, FreeBusyType) ? FreeBusyType<Box<Name>>,
+        (format_type, FormatType) ! FormatTypeBuf,
+        (free_busy_type, FreeBusyType) ? Token<FreeBusyType, Box<Name>>,
         (language, Language) ? Language,
         (membership, Member) ? Vec1<Box<Uri>>,
-        (participation_status, PartStat) ? ParticipationStatus<Box<Name>>,
+        (participation_status, PartStat) ? Token<ParticipationStatus, Box<Name>>,
         (recurrence_range, Range) ? ThisAndFuture,
         (trigger_relationship, Related) ? TriggerRelation,
-        (relationship_type, RelType) ? RelationshipType<Box<Name>>,
-        (participation_role, Role) ? ParticipationRole<Box<Name>>,
+        (relationship_type, RelType) ? Token<RelationshipType, Box<Name>>,
+        (participation_role, Role) ? Token<ParticipationRole, Box<Name>>,
         (rsvp_expectation, Rsvp) ? bool,
         (sent_by, SentBy) ? Box<Uri>,
         (tz_id, TzId) ? Box<TzId>,
 
         // RFC 7986
-        (display_type, Display) ? DisplayType<Box<Name>>,
+        (display_type, Display) ? Token<DisplayType, Box<Name>>,
         (email, Email) ? Box<ParamValue>,
-        (feature_type, Feature) ? FeatureType<Box<Name>>,
+        (feature_type, Feature) ? Token<FeatureType, Box<Name>>,
         (label, Label) ? Box<ParamValue>,
 
         // RFC 9073
@@ -304,7 +304,7 @@ define_parameter_type! {
 }
 
 impl StructuredDataParams {
-    pub fn new(format_type: FormatType, schema: Box<Uri>) -> Self {
+    pub fn new(format_type: FormatTypeBuf, schema: Box<Uri>) -> Self {
         let mut params = Params::with_capacity(2);
         params.set_format_type(format_type);
         params.set_schema(schema);
@@ -342,28 +342,28 @@ define_parameter_type! {
         // RFC 5545
         (alternate_representation, AltRep) ? Box<Uri>,
         (common_name, CommonName) ? Box<ParamValue>,
-        (calendar_user_type, CalUserType) ? CalendarUserType<Box<Name>>,
+        (calendar_user_type, CalUserType) ? Token<CalendarUserType, Box<Name>>,
         (delegated_from, DelFrom) ? Vec1<Box<Uri>>,
         (delegated_to, DelTo) ? Vec1<Box<Uri>>,
         (directory_reference, Dir) ? Box<Uri>,
         (inline_encoding, Encoding) ? Encoding,
-        (format_type, FormatType) ? FormatType,
-        (free_busy_type, FreeBusyType) ? FreeBusyType<Box<Name>>,
+        (format_type, FormatType) ? FormatTypeBuf,
+        (free_busy_type, FreeBusyType) ? Token<FreeBusyType, Box<Name>>,
         (language, Language) ? Language,
         (membership, Member) ? Vec1<Box<Uri>>,
-        (participation_status, PartStat) ? ParticipationStatus<Box<Name>>,
+        (participation_status, PartStat) ? Token<ParticipationStatus, Box<Name>>,
         (recurrence_range, Range) ? ThisAndFuture,
         (trigger_relationship, Related) ? TriggerRelation,
-        (relationship_type, RelType) ? RelationshipType<Box<Name>>,
-        (participation_role, Role) ? ParticipationRole<Box<Name>>,
+        (relationship_type, RelType) ? Token<RelationshipType, Box<Name>>,
+        (participation_role, Role) ? Token<ParticipationRole, Box<Name>>,
         (rsvp_expectation, Rsvp) ? bool,
         (sent_by, SentBy) ? Box<Uri>,
         (tz_id, TzId) ? Box<TzId>,
 
         // RFC 7986
-        (display_type, Display) ? DisplayType<Box<Name>>,
+        (display_type, Display) ? Token<DisplayType, Box<Name>>,
         (email, Email) ? Box<ParamValue>,
-        (feature_type, Feature) ? FeatureType<Box<Name>>,
+        (feature_type, Feature) ? Token<FeatureType, Box<Name>>,
         (label, Label) ? Box<ParamValue>,
 
         // RFC 9073
@@ -415,7 +415,7 @@ impl Param {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum UpcastParamValue {
-    ValueType(ValueType<Box<Name>>),
+    ValueType(Token<ValueType, Box<Name>>),
     RawValue(AnyParamValue),
 }
 
@@ -474,19 +474,19 @@ pub struct AnyParamValue(AnyParamValueInner);
 enum AnyParamValueInner {
     Bool(bool),
     CalAddressSeq(Vec1<Box<Uri>>),
-    CUType(CalendarUserType<Box<Name>>),
-    DisplayType(DisplayType<Box<Name>>),
+    CUType(Token<CalendarUserType, Box<Name>>),
+    DisplayType(Token<DisplayType, Box<Name>>),
     Encoding(Encoding),
-    FBType(FreeBusyType<Box<Name>>),
-    FeatureType(FeatureType<Box<Name>>),
-    FormatType(FormatType),
+    FBType(Token<FreeBusyType, Box<Name>>),
+    FeatureType(Token<FeatureType, Box<Name>>),
+    FormatType(FormatTypeBuf),
     Language(Language),
     ParamValue1(Box<ParamValue>),
     ParamValue(Vec1<Box<ParamValue>>),
-    PartStatus(ParticipationStatus<Box<Name>>),
+    PartStatus(Token<ParticipationStatus, Box<Name>>),
     PositiveInteger(PositiveInteger),
-    RelType(RelationshipType<Box<Name>>),
-    Role(ParticipationRole<Box<Name>>),
+    RelType(Token<RelationshipType, Box<Name>>),
+    Role(Token<ParticipationRole, Box<Name>>),
     ThisAndFuture(ThisAndFuture),
     TrigRel(TriggerRelation),
     TzId(Box<TzId>),
@@ -496,19 +496,19 @@ enum AnyParamValueInner {
 impl_any_param_value_conversions! {
     Bool => bool,
     CalAddressSeq => Vec1<Box<Uri>>,
-    CUType => CalendarUserType<Box<Name>>,
-    DisplayType => DisplayType<Box<Name>>,
+    CUType => Token<CalendarUserType, Box<Name>>,
+    DisplayType => Token<DisplayType, Box<Name>>,
     Encoding => Encoding,
-    FBType => FreeBusyType<Box<Name>>,
-    FeatureType => FeatureType<Box<Name>>,
-    FormatType => FormatType,
+    FBType => Token<FreeBusyType, Box<Name>>,
+    FeatureType => Token<FeatureType, Box<Name>>,
+    FormatType => FormatTypeBuf,
     Language => Language,
     ParamValue1 => Box<ParamValue>,
     ParamValue => Vec1<Box<ParamValue>>,
-    PartStatus => ParticipationStatus<Box<Name>>,
+    PartStatus => Token<ParticipationStatus, Box<Name>>,
     PositiveInteger => PositiveInteger,
-    RelType => RelationshipType<Box<Name>>,
-    Role => ParticipationRole<Box<Name>>,
+    RelType => Token<RelationshipType, Box<Name>>,
+    Role => Token<ParticipationRole, Box<Name>>,
     ThisAndFuture => ThisAndFuture,
     TrigRel => TriggerRelation,
     TzId => Box<TzId>,
@@ -520,28 +520,28 @@ pub enum KnownParam {
     // RFC 5545 PROPERTY PARAMETERS
     AltRep(Box<Uri>),
     CommonName(Box<ParamValue>),
-    CUType(CalendarUserType<Box<Name>>),
+    CUType(Token<CalendarUserType, Box<Name>>),
     DelFrom(Vec1<Box<Uri>>),
     DelTo(Vec1<Box<Uri>>),
     Dir(Box<Uri>),
     Encoding(Encoding),
-    FormatType(FormatType),
-    FBType(FreeBusyType<Box<Name>>),
+    FormatType(FormatTypeBuf),
+    FBType(Token<FreeBusyType, Box<Name>>),
     Language(Language),
     Member(Vec1<Box<Uri>>),
-    PartStatus(ParticipationStatus<Box<Name>>),
+    PartStatus(Token<ParticipationStatus, Box<Name>>),
     RecurrenceIdentifierRange,
     AlarmTrigger(TriggerRelation),
-    RelType(RelationshipType<Box<Name>>),
-    Role(ParticipationRole<Box<Name>>),
+    RelType(Token<RelationshipType, Box<Name>>),
+    Role(Token<ParticipationRole, Box<Name>>),
     Rsvp(bool),
     SentBy(Box<Uri>),
     TzId(Box<TzId>),
-    Value(ValueType<Box<Name>>),
+    Value(Token<ValueType, Box<Name>>),
     // RFC 7986 PROPERTY PARAMETERS
-    Display(DisplayType<Box<Name>>),
+    Display(Token<DisplayType, Box<Name>>),
     Email(Box<ParamValue>),
-    Feature(FeatureType<Box<Name>>),
+    Feature(Token<FeatureType, Box<Name>>),
     Label(Box<ParamValue>),
     // RFC 9073 PROPERTY PARAMETERS
     Order(PositiveInteger),

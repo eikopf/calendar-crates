@@ -5,9 +5,10 @@ use super::{
     parameter::{Params, StructuredDataParams},
     primitive::{
         AlarmAction, Attachment, ClassValue, CompletionPercentage, Date, DateTime, DateTimeOrDate,
-        Duration, ExDateSeq, Geo, Gregorian, Integer, Method, ParticipantType, Period,
-        PositiveInteger, Priority, ProximityValue, RDateSeq, RequestStatus, ResourceType, Status,
-        StyledDescriptionValue, TimeTransparency, TriggerValue, Utc, UtcOffset, Value, Version,
+        Geo, Gregorian, Integer, Method, ParticipantType, Period, PositiveInteger, Priority,
+        ProximityValue, RDateSeq, RequestStatus, ResourceType, SignedDuration, Status,
+        StyledDescriptionValue, TimeTransparency, Token, TriggerValue, Utc, UtcOffset, Value,
+        Version,
     },
     rrule::RRule,
     string::{TzId, Uid, Uri},
@@ -30,28 +31,28 @@ type VP<V, P> = Vec<Prop<V, P>>;
 #[strum_discriminants(name(PropertySeqVariant))]
 #[strum_discriminants(derive(PartialOrd, Ord))]
 pub enum PropertySeq {
-    AlarmAction(VP<AlarmAction<String>, Params>),
+    AlarmAction(VP<Token<AlarmAction, String>, Params>),
     Attach(VP<Attachment, Params>),
-    Class(VP<ClassValue<String>, Params>),
+    Class(VP<Token<ClassValue, String>, Params>),
     Color(VP<Css3Color, Params>),
     Date(VP<Date, Params>),
     DtUtc(VP<DateTime<Utc>, Params>),
     DtOrDate(VP<DateTimeOrDate, Params>),
-    Duration(VP<Duration, Params>),
-    ExDateSeq(VP<ExDateSeq, Params>),
+    Duration(VP<SignedDuration, Params>),
+    ExDateSeq(VP<super::primitive::ExDateSeq, Params>),
     Geo(VP<Geo, Params>),
     Gregorian(VP<Gregorian, Params>),
     Integer(VP<Integer, Params>),
-    Method(VP<Method<String>, Params>),
-    ParticipantType(VP<ParticipantType<String>, Params>),
+    Method(VP<Token<Method, String>, Params>),
+    ParticipantType(VP<Token<ParticipantType, String>, Params>),
     Percent(VP<CompletionPercentage, Params>),
     PeriodSeq(VP<Vec<Period>, Params>),
     PositiveInteger(VP<PositiveInteger, Params>),
     Priority(VP<Priority, Params>),
-    Proximity(VP<ProximityValue<String>, Params>),
+    Proximity(VP<Token<ProximityValue, String>, Params>),
     RDateSeq(VP<RDateSeq, Params>),
     RequestStatus(VP<RequestStatus, Params>),
-    ResourceType(VP<ResourceType<String>, Params>),
+    ResourceType(VP<Token<ResourceType, String>, Params>),
     RRule(VP<RRule, Params>),
     Status(VP<Status, Params>),
     StructuredData(Vec<StructuredDataProp>),
@@ -188,36 +189,36 @@ impl<V, P> Prop<V, P> {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum EventTerminationRef<'a> {
     End(&'a Prop<DateTimeOrDate, Params>),
-    Duration(&'a Prop<Duration, Params>),
+    Duration(&'a Prop<SignedDuration, Params>),
 }
 
 #[derive(Debug, PartialEq, Eq)]
 pub enum EventTerminationMut<'a> {
     End(&'a mut Prop<DateTimeOrDate, Params>),
-    Duration(&'a mut Prop<Duration, Params>),
+    Duration(&'a mut Prop<SignedDuration, Params>),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TodoTerminationRef<'a> {
     Due(&'a Prop<DateTimeOrDate, Params>),
-    Duration(&'a Prop<Duration, Params>),
+    Duration(&'a Prop<SignedDuration, Params>),
 }
 
 #[derive(Debug, PartialEq, Eq)]
 pub enum TodoTerminationMut<'a> {
     Due(&'a mut Prop<DateTimeOrDate, Params>),
-    Duration(&'a mut Prop<Duration, Params>),
+    Duration(&'a mut Prop<SignedDuration, Params>),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TriggerPropRef<'a> {
-    Relative(&'a Prop<Duration, Params>),
+    Relative(&'a Prop<SignedDuration, Params>),
     Absolute(&'a Prop<DateTime<Utc>, Params>),
 }
 
 #[derive(Debug, PartialEq, Eq)]
 pub enum TriggerPropMut<'a> {
-    Relative(&'a mut Prop<Duration, Params>),
+    Relative(&'a mut Prop<SignedDuration, Params>),
     Absolute(&'a mut Prop<DateTime<Utc>, Params>),
 }
 

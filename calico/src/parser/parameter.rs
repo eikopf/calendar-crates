@@ -232,7 +232,7 @@ mod tests {
     use crate::{
         model::{
             parameter::KnownParam,
-            primitive::{DisplayType, Encoding, FeatureType, TriggerRelation, ValueType},
+            primitive::{DisplayType, Encoding, FeatureType, Token, TriggerRelation, ValueType},
             string::{ParamValue, TzId},
         },
         text,
@@ -247,7 +247,7 @@ mod tests {
                 .parse_peek("VALUE=CAL-ADDRESS")
                 .ok()
                 .and_then(|(_, p)| p.try_into_known().ok()),
-            Some(KnownParam::Value(ValueType::CalAddress)),
+            Some(KnownParam::Value(Token::Known(ValueType::CalAddress))),
         );
 
         assert_eq!(
@@ -394,7 +394,7 @@ mod tests {
                 .parse_peek("DISPLAY=THUMBNAIL")
                 .ok()
                 .and_then(|(_, p)| p.try_into_known().ok()),
-            Some(KnownParam::Display(DisplayType::Thumbnail)),
+            Some(KnownParam::Display(Token::Known(DisplayType::Thumbnail))),
         );
 
         assert_eq!(
@@ -402,7 +402,7 @@ mod tests {
                 .parse_peek("display=Badge")
                 .ok()
                 .and_then(|(_, p)| p.try_into_known().ok()),
-            Some(KnownParam::Display(DisplayType::Badge)),
+            Some(KnownParam::Display(Token::Known(DisplayType::Badge))),
         );
 
         assert_eq!(
@@ -410,7 +410,7 @@ mod tests {
                 .parse_peek("DISPLAY=X-SOMETHING-ELSE")
                 .ok()
                 .and_then(|(_, p)| p.try_into_known().ok()),
-            Some(KnownParam::Display(DisplayType::Other(
+            Some(KnownParam::Display(Token::Unknown(
                 Name::new("X-SOMETHING-ELSE").unwrap().into()
             ))),
         );
@@ -440,7 +440,7 @@ mod tests {
                 .parse_peek("FEATURE=moderator")
                 .ok()
                 .and_then(|(_, p)| p.try_into_known().ok()),
-            Some(KnownParam::Feature(FeatureType::Moderator)),
+            Some(KnownParam::Feature(Token::Known(FeatureType::Moderator))),
         );
 
         assert_eq!(
@@ -448,7 +448,7 @@ mod tests {
                 .parse_peek("feature=Screen")
                 .ok()
                 .and_then(|(_, p)| p.try_into_known().ok()),
-            Some(KnownParam::Feature(FeatureType::Screen)),
+            Some(KnownParam::Feature(Token::Known(FeatureType::Screen))),
         );
 
         assert_eq!(
@@ -456,7 +456,7 @@ mod tests {
                 .parse_peek("feature=random-iana-token")
                 .ok()
                 .and_then(|(_, p)| p.try_into_known().ok()),
-            Some(KnownParam::Feature(FeatureType::Other(
+            Some(KnownParam::Feature(Token::Unknown(
                 Name::new("random-iana-token").unwrap().into()
             ))),
         );
