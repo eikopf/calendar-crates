@@ -1,7 +1,49 @@
 //! String data model types.
 
+use std::str::FromStr;
+
 use dizzy::DstNewtype;
 use thiserror::Error;
+
+/// Re-export of the error type from the `language-tags` crate.
+pub use language_tags::ParseError as LanguageTagParseError;
+
+/// A BCP 47 language tag (RFC 5646).
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct LanguageTag(language_tags::LanguageTag);
+
+impl LanguageTag {
+    /// Parses a language tag from a string.
+    pub fn parse(s: &str) -> Result<Self, language_tags::ParseError> {
+        language_tags::LanguageTag::parse(s).map(LanguageTag)
+    }
+
+    /// Returns the language tag as a string.
+    #[inline]
+    pub fn as_str(&self) -> &str {
+        self.0.as_str()
+    }
+
+    /// Returns the primary language subtag.
+    #[inline]
+    pub fn primary_language(&self) -> &str {
+        self.0.primary_language()
+    }
+}
+
+impl FromStr for LanguageTag {
+    type Err = language_tags::ParseError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        Self::parse(s)
+    }
+}
+
+impl std::fmt::Display for LanguageTag {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        std::fmt::Display::fmt(&self.0, f)
+    }
+}
 
 /// An error indicating that a string is not a valid UID.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Error)]

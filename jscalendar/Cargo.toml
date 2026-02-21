@@ -16,7 +16,6 @@ calendar-types = { version = "0.1.0", path = "../calendar-types" }
 rfc5545-types = { version = "0.1.0", path = "../rfc5545-types" }
 dizzy.workspace = true
 strum.workspace = true
-language-tags = "0.3"
 serde_json = { version = "1.0", optional = true }
 thiserror = "2.0.18"
 structible = "0.5.0"

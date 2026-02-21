@@ -64,6 +64,9 @@ pub fn parse_full<'i, T, Sy, Se>(
     }
 }
 
+/// A parse error with an owned copy of the complete input string.
+///
+/// `Sy` is the syntactic error type and `Se` is the semantic error type.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 #[error("{error} (at index {index} of {complete_input:?})")]
 pub struct OwnedParseError<Sy, Se> {
@@ -232,6 +235,7 @@ pub enum GeneralParseError {
     UnconsumedInput,
 }
 
+/// Syntactic error from parsing a signed duration string.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Error)]
 pub enum SignedDurationParseError {
     #[error("expected +, -, or P, but got {0} instead")]
@@ -240,6 +244,7 @@ pub enum SignedDurationParseError {
     Duration(#[from] DurationParseError),
 }
 
+/// Syntactic error from parsing a duration string.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Error)]
 pub enum DurationParseError {
     #[error("expected P but got {0} instead")]
@@ -266,6 +271,7 @@ pub enum DurationParseError {
     FractionalSecond(#[from] FractionalSecondParseError),
 }
 
+/// Syntactic error from parsing a UTC datetime string.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Error)]
 pub enum UtcDateTimeParseError {
     #[error(transparent)]
@@ -274,6 +280,7 @@ pub enum UtcDateTimeParseError {
     InvalidMarker(char),
 }
 
+/// Syntactic error from parsing a datetime string.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Error)]
 pub enum DateTimeParseError {
     #[error("invalid date: {0}")]
@@ -284,6 +291,7 @@ pub enum DateTimeParseError {
     InvalidSeparator(char),
 }
 
+/// Syntactic error from parsing a date string.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Error)]
 pub enum DateParseError {
     #[error("invalid year: {0}")]
@@ -296,6 +304,7 @@ pub enum DateParseError {
     InvalidSeparator(char),
 }
 
+/// Syntactic error from parsing a time string.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Error)]
 pub enum TimeParseError {
     #[error("invalid hour: {0}")]
@@ -310,30 +319,37 @@ pub enum TimeParseError {
     InvalidSeparator(char),
 }
 
+/// Syntactic error from parsing a year component.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Error)]
 #[error(transparent)]
 pub struct YearParseError(#[from] DigitParseError);
 
+/// Syntactic error from parsing a month component.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Error)]
 #[error(transparent)]
 pub struct MonthParseError(#[from] DigitParseError);
 
+/// Syntactic error from parsing a day component.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Error)]
 #[error(transparent)]
 pub struct DayParseError(#[from] DigitParseError);
 
+/// Syntactic error from parsing an hour component.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Error)]
 #[error(transparent)]
 pub struct HourParseError(#[from] DigitParseError);
 
+/// Syntactic error from parsing a minute component.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Error)]
 #[error(transparent)]
 pub struct MinuteParseError(#[from] DigitParseError);
 
+/// Syntactic error from parsing a second component.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Error)]
 #[error(transparent)]
 pub struct SecondParseError(#[from] DigitParseError);
 
+/// Syntactic error from parsing a fractional second component.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Error)]
 pub enum FractionalSecondParseError {
     #[error(transparent)]
@@ -346,6 +362,7 @@ pub enum FractionalSecondParseError {
     TooManyDigits,
 }
 
+/// Syntactic error from parsing an unsigned 32-bit integer.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Error)]
 pub enum U32ParseError {
     #[error("expected an ASCII decimal digit")]
@@ -356,10 +373,12 @@ pub enum U32ParseError {
     Overflow,
 }
 
+/// Syntactic error from parsing a single ASCII decimal digit.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Error)]
 #[error("expected an ASCII digit but got the byte {0:02X} instead")]
 pub struct DigitParseError(u8);
 
+/// Incrementally parses a signed duration from `input`.
 pub fn signed_duration<'i>(
     input: &mut &'i str,
 ) -> ParseResult<'i, SignedDuration, SignedDurationParseError, InvalidDurationError> {
@@ -383,6 +402,7 @@ pub fn signed_duration<'i>(
     Ok(SignedDuration { sign, duration })
 }
 
+/// Incrementally parses a duration from `input`.
 pub fn duration<'i>(
     input: &mut &'i str,
 ) -> ParseResult<'i, Duration, DurationParseError, InvalidDurationError> {
@@ -522,6 +542,7 @@ pub fn duration<'i>(
     }
 }
 
+/// Incrementally parses a UTC datetime (ending with `Z`) from `input`.
 pub fn utc_date_time<'i>(
     input: &mut &'i str,
 ) -> ParseResult<'i, DateTime<Utc>, UtcDateTimeParseError, InvalidDateTimeError> {
@@ -535,6 +556,7 @@ pub fn utc_date_time<'i>(
     })
 }
 
+/// Incrementally parses a local datetime (no trailing marker) from `input`.
 pub fn local_date_time<'i>(
     input: &mut &'i str,
 ) -> ParseResult<'i, DateTime<Local>, DateTimeParseError, InvalidDateTimeError> {

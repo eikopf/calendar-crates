@@ -9,6 +9,10 @@ use calendar_types::{
 
 use super::WeekdayNum;
 
+/// A set of [`WeekdayNum`] values, used for the BYDAY recurrence rule part.
+///
+/// Small sets (up to 32 elements) are stored in a `BTreeSet`; larger sets
+/// are promoted to a fixed-size bitset for constant-time lookup.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct WeekdayNumSet(InnerWDNSet);
 
@@ -22,6 +26,7 @@ impl WeekdayNumSet {
     /// The maximum number of elements that can be in the small set.
     pub(crate) const SMALL_ELEMENT_LIMIT: usize = 32;
 
+    /// Returns `true` if the set contains no elements.
     pub fn is_empty(&self) -> bool {
         match &self.0 {
             InnerWDNSet::Small(set) => set.is_empty(),
@@ -29,6 +34,7 @@ impl WeekdayNumSet {
         }
     }
 
+    /// Returns the number of elements in the set.
     pub fn len(&self) -> usize {
         match &self.0 {
             InnerWDNSet::Small(set) => set.len(),
@@ -36,6 +42,7 @@ impl WeekdayNumSet {
         }
     }
 
+    /// Returns `true` if the set contains the given `weekday_num`.
     pub fn contains(&self, weekday_num: WeekdayNum) -> bool {
         match &self.0 {
             InnerWDNSet::Small(set) => set.contains(&weekday_num),
@@ -43,6 +50,7 @@ impl WeekdayNumSet {
         }
     }
 
+    /// Inserts a `weekday_num` into the set.
     pub fn insert(&mut self, weekday_num: WeekdayNum) {
         match &mut self.0 {
             InnerWDNSet::Small(set) => {
@@ -67,6 +75,7 @@ impl WeekdayNumSet {
         }
     }
 
+    /// Creates a new set with the given capacity hint.
     pub fn with_capacity(capacity: usize) -> Self {
         if capacity <= Self::SMALL_ELEMENT_LIMIT {
             // BTreeSet doesn't actually have a reserve or with_capacity method

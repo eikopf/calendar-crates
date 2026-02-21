@@ -10,5 +10,6 @@ categories = ["date-and-time"]
 
 [dependencies]
 dizzy.workspace = true
+language-tags = "0.3"
 strum.workspace = true
 thiserror = "2.0.18"

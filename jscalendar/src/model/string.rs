@@ -2,54 +2,17 @@
 
 use std::{borrow::Cow, fmt::Debug, num::NonZero};
 
-use std::str::FromStr;
-
-pub use calendar_types::string::{InvalidUidError, InvalidUriError, Uid, UidBuf, Uri, UriBuf};
+pub use calendar_types::string::{
+    InvalidUidError, InvalidUriError, LanguageTag, LanguageTagParseError, Uid, UidBuf, Uri, UriBuf,
+};
 use dizzy::DstNewtype;
 use rfc5545_types::string::ParamText;
 use thiserror::Error;
 
-/// A BCP 47 language tag (RFC 5646).
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct LanguageTag(language_tags::LanguageTag);
-
-impl LanguageTag {
-    /// Parses a language tag from a string.
-    pub fn parse(s: &str) -> Result<Self, language_tags::ParseError> {
-        language_tags::LanguageTag::parse(s).map(LanguageTag)
-    }
-
-    /// Returns the language tag as a string.
-    #[inline]
-    pub fn as_str(&self) -> &str {
-        self.0.as_str()
-    }
-
-    /// Returns the primary language subtag.
-    #[inline]
-    pub fn primary_language(&self) -> &str {
-        self.0.primary_language()
-    }
-}
-
-impl FromStr for LanguageTag {
-    type Err = language_tags::ParseError;
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        Self::parse(s)
-    }
-}
-
-impl std::fmt::Display for LanguageTag {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        std::fmt::Display::fmt(&self.0, f)
-    }
-}
-
 use crate::json::{DestructibleJsonValue, TryFromJson, TypeErrorOr};
 
 impl<V: DestructibleJsonValue> TryFromJson<V> for LanguageTag {
-    type Error = TypeErrorOr<StringError<language_tags::ParseError>>;
+    type Error = TypeErrorOr<StringError<LanguageTagParseError>>;
 
     fn try_from_json(value: V) -> Result<Self, Self::Error> {
         let input = value.try_into_string()?;
@@ -96,6 +59,7 @@ impl<V: DestructibleJsonValue> TryFromJson<V> for Box<Uri> {
     }
 }
 
+/// A string validation error, pairing the rejected input with the underlying error.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct StringError<E> {
     pub(crate) input: Box<str>,
@@ -168,6 +132,7 @@ impl Id {
         }
     }
 
+    /// Returns the underlying bytes of this `Id`.
     #[inline(always)]
     pub const fn as_bytes(&self) -> &[u8] {
         // SAFETY: two slices have the same layout iff their parameter types have the same layout.
@@ -176,6 +141,7 @@ impl Id {
         unsafe { std::mem::transmute::<&[IdChar], &[u8]>(self.as_slice()) }
     }
 
+    /// Returns this `Id` as a string slice.
     #[inline(always)]
     pub const fn as_str(&self) -> &str {
         let bytes: &[u8] = self.as_bytes();
@@ -186,6 +152,7 @@ impl Id {
         unsafe { str::from_utf8_unchecked(bytes) }
     }
 
+    /// Returns the length of this `Id` as a non-zero `u8`.
     #[inline(always)]
     pub const fn len(&self) -> NonZero<u8> {
         let length = self.0.len();
@@ -352,11 +319,13 @@ pub enum IdChar {
 }
 
 impl IdChar {
+    /// Converts this `IdChar` into a `char`.
     #[inline(always)]
     pub const fn into_char(self) -> char {
         (self as u8) as char
     }
 
+    /// Returns `true` if `value` is a valid [`IdChar`] (ASCII alphanumeric, hyphen, or underscore).
     #[inline(always)]
     pub const fn contains(value: char) -> bool {
         value == '-' || value == '_' || value.is_ascii_alphanumeric()
@@ -479,6 +448,7 @@ impl ImplicitJsonPointer {
         Ok(())
     }
 
+    /// Returns an iterator over the segments of this pointer, split on `/` and unescaping `~0`/`~1`.
     pub fn segments(&self) -> impl Iterator<Item = Cow<'_, str>> {
         self.0.split('/').map(|s| {
             let mut buf = Cow::Borrowed("");
@@ -570,6 +540,7 @@ impl VendorStr {
         }
     }
 
+    /// Returns the length of this `VendorStr` as a non-zero `usize`.
     #[inline(always)]
     pub const fn len(&self) -> NonZero<usize> {
         debug_assert!(!self.as_str().is_empty());
@@ -578,6 +549,7 @@ impl VendorStr {
         unsafe { NonZero::new_unchecked(self.as_str().len()) }
     }
 
+    /// Splits this string at the first colon, returning `(vendor_domain, suffix)`.
     #[inline(always)]
     pub fn split_at_colon(&self) -> (&str, &str) {
         self.as_str()
@@ -585,11 +557,13 @@ impl VendorStr {
             .expect("a VendorStr must contain at least one colon")
     }
 
+    /// Returns the vendor domain portion (before the first colon).
     #[inline(always)]
     pub fn vendor_domain(&self) -> &str {
         self.split_at_colon().0
     }
 
+    /// Returns the suffix portion (after the first colon).
     #[inline(always)]
     pub fn suffix(&self) -> &str {
         self.split_at_colon().1
@@ -995,6 +969,7 @@ impl std::fmt::Display for AlphaNumeric {
 }
 
 impl AlphaNumeric {
+    /// Returns `Ok` if every character in `s` is ASCII alphanumeric.
     pub fn str_is_alphanumeric(s: &str) -> Result<(), InvalidAlphaNumericError> {
         match s.char_indices().find(|(_, c)| !c.is_ascii_alphanumeric()) {
             Some((index, c)) => Err(InvalidAlphaNumericError { c, index }),

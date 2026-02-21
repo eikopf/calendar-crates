@@ -1,0 +1,28 @@
+[package]
+name = "calico"
+description = "A parser, printer, and data model for iCalendar."
+repository.workspace = true
+license.workspace = true
+keywords = ["icalendar", "ical", "ics", "calendar", "rfc5545"]
+categories = ["date-and-time", "encoding", "parser-implementations"]
+version = "0.2.0"
+edition = "2024"
+
+[dependencies]
+calendar-types = { version = "0.1.0", path = "../calendar-types" }
+rfc5545-types = { version = "0.1.0", path = "../rfc5545-types" }
+base64 = "0.22.1"
+dizzy = { workspace = true }
+derive_more = { version = "2.0.1", default-features = false, features = ["try_into", "from"] }
+enumflags2 = "0.7.12"
+hashbrown = "0.15.5"
+language-tags = "0.3.2"
+lexical-parse-float = { version = "1.0.6", features = ["format"] }
+mitsein = "0.8.0"
+paste = "1.0.15"
+structible = "0.5.0"
+strum = { workspace = true }
+winnow = "0.7.10"
+
+[features]
+memchr = ["winnow/simd"]
