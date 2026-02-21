@@ -28,8 +28,10 @@ where
     Self: Sized,
     V: DestructibleJsonValue,
 {
+    /// The error type returned on failure.
     type Error;
 
+    /// Attempts to convert a JSON value into this type.
     fn try_from_json(value: V) -> Result<Self, Self::Error>;
 }
 
@@ -183,8 +185,10 @@ where
 /// Error returned when parsing a `HashSet` from a JSON object.
 #[derive(Debug, Clone, Copy, PartialEq, Error)]
 pub enum HashSetTryFromJsonError<E> {
+    /// A set entry had `false` as its value (only `true` is valid).
     #[error("encountered `false` as a value in a set")]
     UnexpectedFalseValue,
+    /// The set key could not be parsed via `FromStr`.
     #[error(transparent)]
     FromStr(E),
 }
@@ -230,8 +234,10 @@ pub trait TryIntoJson<V>
 where
     V: ConstructibleJsonValue,
 {
+    /// The error type returned on failure.
     type Error;
 
+    /// Attempts to convert this value into a JSON value.
     fn try_into_json(self) -> Result<V, Self::Error>;
 }
 
@@ -240,6 +246,7 @@ pub trait IntoJson<V>
 where
     V: ConstructibleJsonValue,
 {
+    /// Converts this value into a JSON value.
     fn into_json(self) -> V;
 }
 
@@ -253,8 +260,10 @@ impl<T: IntoJson<V>, V: ConstructibleJsonValue> TryIntoJson<V> for T {
 
 /// Conversion of a field-level error into a [`DocumentError`] with a JSON path.
 pub trait IntoDocumentError: Sized {
+    /// The error type after extraction of any [`DocumentError`] path information.
     type Residual;
 
+    /// Wraps this error in a [`DocumentError`].
     fn into_document_error(self) -> DocumentError<Self::Residual>;
 }
 
@@ -314,8 +323,10 @@ impl<E: IntoDocumentError> IntoDocumentError for DocumentError<E> {
 
 /// Lifts a [`TypeError`] into the [`TypeErrorOr`] wrapper so that nested errors compose uniformly.
 pub trait LiftTypeError {
+    /// The remaining error type after extracting any [`TypeError`].
     type Residual;
 
+    /// Lifts this error into a [`TypeErrorOr`].
     fn lift_type_error(self) -> TypeErrorOr<Self::Residual>;
 }
 
@@ -362,6 +373,7 @@ pub struct DocumentError<E> {
 }
 
 impl<E> DocumentError<E> {
+    /// Creates a `DocumentError` with no path (at the document root).
     pub const fn root(error: E) -> Self {
         DocumentError {
             path: VecDeque::new(),
@@ -369,14 +381,17 @@ impl<E> DocumentError<E> {
         }
     }
 
+    /// Returns the JSON path at which the error occurred.
     pub fn path(&self) -> &VecDeque<PathSegment<Box<str>>> {
         &self.path
     }
 
+    /// Returns a reference to the underlying error.
     pub fn error(&self) -> &E {
         &self.error
     }
 
+    /// Decomposes this into its path and error components.
     pub fn into_parts(self) -> (VecDeque<PathSegment<Box<str>>>, E) {
         (self.path, self.error)
     }
@@ -429,6 +444,7 @@ impl<S> PathSegment<S> {
         }
     }
 
+    /// Borrows the string content of this segment.
     pub fn as_str(&self) -> PathSegment<&str>
     where
         S: AsRef<str>,
@@ -442,6 +458,7 @@ impl<S> PathSegment<S> {
 }
 
 impl PathSegment<&str> {
+    /// Converts the string content into an owned `Box<str>`.
     pub fn to_box_str(self) -> PathSegment<Box<str>> {
         self.map(|x| x, |x| x, Into::into)
     }
@@ -452,9 +469,12 @@ impl PathSegment<&str> {
 pub struct Int(i64);
 
 impl Int {
+    /// The minimum representable value (`-2^53 + 1`).
     pub const MIN: Self = Int(-(1 << 53) + 1);
+    /// The maximum representable value (`2^53 - 1`).
     pub const MAX: Self = Int((1 << 53) - 1);
 
+    /// Creates an `Int` from a raw `i64`, returning `None` if out of range.
     #[inline(always)]
     pub const fn new(value: i64) -> Option<Self> {
         match Self::MIN.get() <= value && value <= Self::MAX.get() {
@@ -463,6 +483,7 @@ impl Int {
         }
     }
 
+    /// Returns the numeric value.
     #[inline(always)]
     pub const fn get(self) -> i64 {
         self.0
@@ -572,9 +593,12 @@ impl<V: DestructibleJsonValue> TryFromJson<V> for Int {
 pub struct UnsignedInt(u64);
 
 impl UnsignedInt {
+    /// The minimum representable value (`0`).
     pub const MIN: Self = UnsignedInt(0);
+    /// The maximum representable value (`2^53 - 1`).
     pub const MAX: Self = UnsignedInt((1 << 53) - 1);
 
+    /// Creates an `UnsignedInt` from a raw `u64`, returning `None` if out of range.
     #[inline(always)]
     pub const fn new(value: u64) -> Option<Self> {
         match Self::MIN.get() <= value && value <= Self::MAX.get() {
@@ -583,6 +607,7 @@ impl UnsignedInt {
         }
     }
 
+    /// Returns the numeric value.
     #[inline(always)]
     pub const fn get(self) -> u64 {
         self.0
@@ -603,13 +628,20 @@ impl<V: DestructibleJsonValue> TryFromJson<V> for UnsignedInt {
     }
 }
 
+/// The type of a JSON value.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum ValueType {
+    /// JSON `null`.
     Null,
+    /// JSON boolean (`true` or `false`).
     Bool,
+    /// JSON number.
     Number,
+    /// JSON string.
     String,
+    /// JSON array.
     Array,
+    /// JSON object.
     Object,
 }
 
@@ -668,8 +700,11 @@ pub enum IntoUnsignedIntError {
 
 /// A type representing a JSON value.
 pub trait JsonValue {
+    /// The string representation used by this JSON value.
     type String: AsRef<str> + Into<String>;
+    /// The array representation used by this JSON value.
     type Array: JsonArray<Elem = Self>;
+    /// The object representation used by this JSON value.
     type Object: JsonObject<Value = Self>;
 }
 
@@ -677,6 +712,7 @@ pub trait JsonValue {
 pub trait DestructibleJsonValue: Sized + JsonValue {
     // TYPE CHECKS
 
+    /// Returns the [`ValueType`] of this JSON value.
     fn value_type(&self) -> ValueType;
 
     #[inline(always)]
@@ -722,18 +758,28 @@ pub trait DestructibleJsonValue: Sized + JsonValue {
         }
     }
 
+    /// Tries to extract a boolean value.
     fn try_as_bool(&self) -> Result<bool, TypeError>;
+    /// Tries to extract a floating-point number.
     fn try_as_f64(&self) -> Result<f64, TypeError>;
+    /// Tries to extract a signed integer.
     fn try_as_int(&self) -> Result<Int, TypeErrorOr<IntoIntError>>;
+    /// Tries to extract an unsigned integer.
     fn try_as_unsigned_int(&self) -> Result<UnsignedInt, TypeErrorOr<IntoUnsignedIntError>>;
+    /// Tries to borrow the string value.
     fn try_as_string(&self) -> Result<&Self::String, TypeError>;
+    /// Tries to borrow the array value.
     fn try_as_array(&self) -> Result<&Self::Array, TypeError>;
+    /// Tries to borrow the object value.
     fn try_as_object(&self) -> Result<&Self::Object, TypeError>;
 
     // OWNED DOWNCASTS
 
+    /// Tries to consume this value as a string.
     fn try_into_string(self) -> Result<Self::String, TypeError>;
+    /// Tries to consume this value as an array.
     fn try_into_array(self) -> Result<Self::Array, TypeError>;
+    /// Tries to consume this value as an object.
     fn try_into_object(self) -> Result<Self::Object, TypeError>;
 }
 
@@ -741,44 +787,64 @@ pub trait DestructibleJsonValue: Sized + JsonValue {
 pub trait ConstructibleJsonValue: Sized + JsonValue {
     // CONSTRUCTORS
 
+    /// Creates a JSON `null` value.
     fn null() -> Self;
+    /// Creates a JSON boolean value.
     fn bool(value: bool) -> Self;
 
+    /// Creates a JSON string from an owned `String`.
     fn string(value: String) -> Self;
+    /// Creates a JSON string from a string slice.
     fn str(value: &str) -> Self;
+    /// Creates a JSON string from a `Cow<str>`.
     fn cow_str(value: Cow<'_, str>) -> Self;
 
+    /// Creates a JSON number from an `f64`.
     fn f64(value: f64) -> Self;
+    /// Creates a JSON number from an [`Int`].
     fn int(value: Int) -> Self;
+    /// Creates a JSON number from an [`UnsignedInt`].
     fn unsigned_int(value: UnsignedInt) -> Self;
 
+    /// Creates a JSON array value.
     fn array(value: Self::Array) -> Self;
+    /// Creates a JSON object value.
     fn object(value: Self::Object) -> Self;
 }
 
 /// A type which represents a JSON object.
 pub trait JsonObject: Sized {
+    /// The key type for object entries.
     type Key: Borrow<str> + From<String> + for<'a> From<&'a str>;
+    /// The value type for object entries.
     type Value;
 
+    /// Creates an empty object with the given capacity hint.
     fn with_capacity(capacity: usize) -> Self;
 
+    /// Returns a reference to the value associated with `key`, if present.
     fn get<Q>(&self, key: &Q) -> Option<&Self::Value>
     where
         Self::Key: Borrow<Q>,
         Q: ?Sized + Hash + Eq + Ord;
 
+    /// Returns `true` if the object contains an entry for `key`.
     fn contains_key<Q>(&self, key: &Q) -> bool
     where
         Self::Key: Borrow<Q>,
         Q: ?Sized + Hash + Eq + Ord;
 
+    /// Converts an owned key into a `String`.
     fn key_into_string(key: Self::Key) -> String;
 
+    /// Inserts a key-value pair into the object.
     fn insert(&mut self, key: Self::Key, value: Self::Value);
 
+    /// Returns the number of entries in the object.
     fn len(&self) -> usize;
+    /// Returns an iterator over key-value pairs by reference.
     fn iter(&self) -> impl Iterator<Item = (&Self::Key, &Self::Value)>;
+    /// Consumes the object, returning an iterator over owned key-value pairs.
     fn into_iter(self) -> impl Iterator<Item = (Self::Key, Self::Value)>;
 
     #[inline(always)]
@@ -804,13 +870,20 @@ pub trait JsonObject: Sized {
 
 /// A type which represents a JSON array.
 pub trait JsonArray: Sized {
+    /// The element type of the array.
     type Elem;
 
+    /// Creates an empty array with the given capacity hint.
     fn with_capacity(capacity: usize) -> Self;
+    /// Appends an element to the end of the array.
     fn push(&mut self, elem: Self::Elem);
+    /// Returns a reference to the element at `index`, if present.
     fn get(&self, index: usize) -> Option<&Self::Elem>;
+    /// Returns the number of elements in the array.
     fn len(&self) -> usize;
+    /// Returns an iterator over elements by reference.
     fn iter(&self) -> impl Iterator<Item = &Self::Elem>;
+    /// Consumes the array, returning an iterator over owned elements.
     fn into_iter(self) -> impl Iterator<Item = Self::Elem>;
 
     #[inline(always)]

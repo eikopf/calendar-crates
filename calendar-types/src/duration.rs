@@ -14,8 +14,10 @@ pub enum Duration {
     Exact(ExactDuration),
 }
 
+/// An error arising from an invalid [`Duration`] value.
 #[derive(Debug, Clone, Copy, Error, PartialEq, Eq)]
 pub enum InvalidDurationError {
+    /// The fractional second component is invalid.
     #[error("invalid fractional second: {0}")]
     FractionalSecond(#[from] InvalidFractionalSecondError),
 }
@@ -23,7 +25,9 @@ pub enum InvalidDurationError {
 /// A [`Duration`] which may be positive or negative (RFC 8984 §1.4.7).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct SignedDuration {
+    /// The sign of this duration.
     pub sign: Sign,
+    /// The unsigned duration value.
     pub duration: Duration,
 }
 
@@ -40,17 +44,24 @@ impl From<Duration> for SignedDuration {
 /// seconds.
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct NominalDuration {
+    /// The number of weeks.
     pub weeks: u32,
+    /// The number of days.
     pub days: u32,
+    /// The optional sub-day time component.
     pub exact: Option<ExactDuration>,
 }
 
 /// A [`Duration`] measured only in terms of hours, minutes, seconds, and fractional seconds.
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct ExactDuration {
+    /// The number of hours.
     pub hours: u32,
+    /// The number of minutes.
     pub minutes: u32,
+    /// The number of whole seconds.
     pub seconds: u32,
+    /// The optional fractional second component.
     pub frac: Option<FractionalSecond>,
 }
 

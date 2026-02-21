@@ -118,6 +118,7 @@ where
 }
 
 impl<V: JsonValue> TaskOrEvent<V> {
+    /// Returns a reference to the inner [`Task`] if this is the `Task` variant.
     pub const fn as_task(&self) -> Option<&Task<V>> {
         if let Self::Task(v) = self {
             Some(v)
@@ -126,6 +127,7 @@ impl<V: JsonValue> TaskOrEvent<V> {
         }
     }
 
+    /// Returns a reference to the inner [`Event`] if this is the `Event` variant.
     pub const fn as_event(&self) -> Option<&Event<V>> {
         if let Self::Event(v) = self {
             Some(v)

@@ -8,17 +8,22 @@ use calendar_types::{
 
 pub use calendar_types::time::TimeFormat;
 
+/// Either a full datetime or a date-only value.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DateTimeOrDate<M = TimeFormat> {
+    /// A full datetime value.
     DateTime(DateTime<M>),
+    /// A date-only value.
     Date(Date),
 }
 
 impl<M> DateTimeOrDate<M> {
+    /// Returns `true` if this is a date-only value.
     pub fn is_date(&self) -> bool {
         matches!(self, Self::Date(_))
     }
 
+    /// Returns `true` if this is a full datetime value.
     pub fn is_date_time(&self) -> bool {
         matches!(self, Self::DateTime(_))
     }
@@ -27,9 +32,13 @@ impl<M> DateTimeOrDate<M> {
 /// An offset from UTC to some local time (RFC 5545 §3.3.14).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct UtcOffset {
+    /// The sign of the offset (positive = east of UTC).
     pub sign: Sign,
+    /// The hour component of the offset.
     pub hour: Hour,
+    /// The minute component of the offset.
     pub minute: Minute,
+    /// The second component of the offset.
     pub second: NonLeapSecond,
 }
 
@@ -57,12 +66,18 @@ impl std::fmt::Display for UtcOffset {
 /// A period of time (RFC 5545 §3.3.9).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Period<M = TimeFormat> {
+    /// A period defined by explicit start and end datetimes.
     Explicit {
+        /// The start of the period.
         start: DateTime<M>,
+        /// The end of the period.
         end: DateTime<M>,
     },
+    /// A period defined by a start datetime and a duration.
     Start {
+        /// The start of the period.
         start: DateTime<M>,
+        /// The duration of the period.
         duration: Duration,
     },
 }
@@ -101,6 +116,8 @@ pub enum ExDateSeq<M = TimeFormat> {
 /// The value of a TRIGGER property (RFC 5545 §3.8.6.3).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TriggerValue {
+    /// A duration offset relative to the event start or end.
     Duration(SignedDuration),
+    /// An absolute UTC datetime.
     DateTime(DateTime<Utc>),
 }

@@ -3,8 +3,11 @@
 /// A value of the REQUEST-STATUS property (RFC 5545 §3.8.8.3).
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct RequestStatus {
+    /// The hierarchical status code.
     pub code: StatusCode,
+    /// A human-readable description of the status.
     pub description: Box<str>,
+    /// Optional additional data about the status.
     pub exception_data: Option<Box<str>>,
 }
 
@@ -18,10 +21,14 @@ impl std::fmt::Display for RequestStatus {
     }
 }
 
+/// A hierarchical status code (e.g. `2.0`, `3.1.2`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct StatusCode {
+    /// The status class (1–5).
     pub class: Class,
+    /// The major status number within the class.
     pub major: u8,
+    /// The optional minor status number.
     pub minor: Option<u8>,
 }
 
@@ -66,6 +73,7 @@ pub enum Class {
 }
 
 impl Class {
+    /// Returns the numeric value of this class (1–5).
     pub const fn as_u8(self) -> u8 {
         match self {
             Class::C1 => 1,
@@ -76,6 +84,7 @@ impl Class {
         }
     }
 
+    /// Creates a `Class` from a numeric value (1–5), returning `None` if out of range.
     pub const fn from_u8(value: u8) -> Option<Self> {
         match value {
             1 => Some(Class::C1),

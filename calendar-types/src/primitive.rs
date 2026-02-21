@@ -4,12 +4,15 @@
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
 #[repr(i8)]
 pub enum Sign {
+    /// Negative sign (`-`).
     Neg = -1,
+    /// Positive sign (`+`).
     #[default]
     Pos = 1,
 }
 
 impl Sign {
+    /// Returns the ASCII character representation of this sign (`'+'` or `'-'`).
     pub const fn as_char(self) -> char {
         match self {
             Sign::Neg => '-',

@@ -34,14 +34,18 @@ pub enum Method {
 pub struct Percent(u8);
 
 impl Percent {
+    /// The minimum percentage value (0).
     pub const MIN: Self = Percent(0);
+    /// The maximum percentage value (100).
     pub const MAX: Self = Percent(100);
 
+    /// Returns the raw percentage value.
     #[inline(always)]
     pub const fn get(self) -> u8 {
         self.0
     }
 
+    /// Creates a `Percent` from a raw `u8`, returning `None` if greater than 100.
     #[inline(always)]
     pub const fn new(value: u8) -> Option<Self> {
         match value {
@@ -67,10 +71,14 @@ pub enum Priority {
     C3,
 }
 
+/// The broad classification of a [`Priority`] value.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum PriorityClass {
+    /// Low priority (values 6–9).
     Low,
+    /// Medium priority (value 5).
     Medium,
+    /// High priority (values 1–4).
     High,
 }
 
@@ -92,18 +100,22 @@ impl PartialOrd for Priority {
 }
 
 impl Priority {
+    /// Returns `true` if this is a low priority (values 6–9).
     pub const fn is_low(self) -> bool {
         matches!(self.into_class(), Some(PriorityClass::Low))
     }
 
+    /// Returns `true` if this is a medium priority (value 5).
     pub const fn is_medium(self) -> bool {
         matches!(self.into_class(), Some(PriorityClass::Medium))
     }
 
+    /// Returns `true` if this is a high priority (values 1–4).
     pub const fn is_high(self) -> bool {
         matches!(self.into_class(), Some(PriorityClass::High))
     }
 
+    /// Returns the [`PriorityClass`] of this priority, or `None` for `Zero` (undefined).
     pub const fn into_class(self) -> Option<PriorityClass> {
         match self {
             Self::Zero => None,
@@ -532,11 +544,14 @@ pub struct EmailAction;
 /// An unknown alarm action, either IANA-registered or experimental.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum UnknownAction<S> {
+    /// An IANA-registered action name.
     Iana(S),
+    /// An experimental (X-) action name.
     X(S),
 }
 
 impl<S> UnknownAction<S> {
+    /// Borrows the inner value.
     pub const fn as_ref(&self) -> UnknownAction<&S> {
         match self {
             UnknownAction::Iana(action) => UnknownAction::Iana(action),
@@ -544,6 +559,7 @@ impl<S> UnknownAction<S> {
         }
     }
 
+    /// Returns whether this is an IANA or X- action.
     pub const fn kind(&self) -> crate::string::NameKind {
         match self {
             UnknownAction::Iana(_) => crate::string::NameKind::Iana,
@@ -551,6 +567,7 @@ impl<S> UnknownAction<S> {
         }
     }
 
+    /// Consumes the `UnknownAction` and returns the inner value.
     pub fn into_inner(self) -> S {
         match self {
             UnknownAction::Iana(action) | UnknownAction::X(action) => action,
