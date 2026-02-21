@@ -60,18 +60,12 @@ const ICALENDAR_FLOAT_OPTIONS: Options = OptionsBuilder::new()
     .build_strict();
 
 macro_rules! match_iana_token {
-    ($input:ident, $enum_name:ident, $($lhs:literal => $rhs:ident),* $(,)?) => {{
+    ($input:ident, $enum_name:ident) => {{
         let name = name.parse_next($input)?;
 
-        let res = ::hashify::map_ignore_case!(
-            name.as_str().as_bytes(),
-            $enum_name,
-            $($lhs => $enum_name::$rhs,)*
-        );
-
-        match res {
-            Some(&res) => Ok($crate::model::primitive::Token::Known(res)),
-            None => Ok($crate::model::primitive::Token::Unknown(name)),
+        match name.as_str().parse::<$enum_name>() {
+            Ok(res) => Ok($crate::model::primitive::Token::Known(res)),
+            Err(_) => Ok($crate::model::primitive::Token::Unknown(name)),
         }
     }};
 }
@@ -100,18 +94,7 @@ where
     I::Token: AsChar,
     E: ParserError<I> + FromExternalError<I, CalendarParseError<I::Slice>>,
 {
-    match_iana_token!(input, ParticipantType,
-        "ACTIVE" => Active,
-        "INACTIVE" => Inactive,
-        "SPONSOR" => Sponsor,
-        "CONTACT" => Contact,
-        "BOOKING-CONTACT" => BookingContact,
-        "EMERGENCY-CONTACT" => EmergencyContact,
-        "PUBLICITY-CONTACT" => PublicityContact,
-        "PLANNER-CONTACT" => PlannerContact,
-        "PERFORMER" => Performer,
-        "SPEAKER" => Speaker,
-    )
+    match_iana_token!(input, ParticipantType)
 }
 
 /// Parses a [`ResourceType`].
@@ -121,12 +104,7 @@ where
     I::Token: AsChar,
     E: ParserError<I> + FromExternalError<I, CalendarParseError<I::Slice>>,
 {
-    match_iana_token!(input, ResourceType,
-        "ROOM" => Room,
-        "PROJECTOR" => Projector,
-        "REMOTE-CONFERENCE-AUDIO" => RemoteConferenceAudio,
-        "REMOTE-CONFERENCE-VIDEO" => RemoteConferenceVideo,
-    )
+    match_iana_token!(input, ResourceType)
 }
 
 /// Parses a [`RequestStatusCode`].
@@ -162,11 +140,7 @@ where
     I::Token: AsChar,
     E: ParserError<I> + FromExternalError<I, CalendarParseError<I::Slice>>,
 {
-    match_iana_token!(input, AlarmAction,
-        "AUDIO" => Audio,
-        "DISPLAY" => Display,
-        "EMAIL" => Email,
-    )
+    match_iana_token!(input, AlarmAction)
 }
 
 /// Parses a [`TzId`].
@@ -206,15 +180,7 @@ where
     I::Token: AsChar,
     E: ParserError<I> + FromExternalError<I, CalendarParseError<I::Slice>>,
 {
-    match_iana_token!(input, FeatureType,
-        "AUDIO" => Audio,
-        "CHAT" => Chat,
-        "FEED" => Feed,
-        "MODERATOR" => Moderator,
-        "PHONE" => Phone,
-        "SCREEN" => Screen,
-        "VIDEO" => Video,
-    )
+    match_iana_token!(input, FeatureType)
 }
 
 /// Parses a [`DisplayType`].
@@ -224,12 +190,7 @@ where
     I::Token: AsChar,
     E: ParserError<I> + FromExternalError<I, CalendarParseError<I::Slice>>,
 {
-    match_iana_token!(input, DisplayType,
-        "BADGE" => Badge,
-        "GRAPHIC" => Graphic,
-        "FULLSIZE" => Fullsize,
-        "THUMBNAIL" => Thumbnail,
-    )
+    match_iana_token!(input, DisplayType)
 }
 
 /// Parses the exact string `GREGORIAN`, which occurs in the calendar scale
@@ -261,16 +222,7 @@ where
     I::Token: AsChar,
     E: ParserError<I> + FromExternalError<I, CalendarParseError<I::Slice>>,
 {
-    match_iana_token!(input, Method,
-        "PUBLISH" => Publish,
-        "REQUEST" => Request,
-        "REPLY" => Reply,
-        "ADD" => Add,
-        "CANCEL" => Cancel,
-        "REFRESH" => Refresh,
-        "COUNTER" => Counter,
-        "DECLINECOUNTER" => DeclineCounter,
-    )
+    match_iana_token!(input, Method)
 }
 
 /// Parses a [`Uid`].
@@ -397,11 +349,7 @@ where
     I::Token: AsChar,
     E: ParserError<I> + FromExternalError<I, CalendarParseError<I::Slice>>,
 {
-    match_iana_token!(input, ClassValue,
-        "PUBLIC" => Public,
-        "PRIVATE" => Private,
-        "CONFIDENTIAL" => Confidential,
-    )
+    match_iana_token!(input, ClassValue)
 }
 
 /// Parses a calendar user type value (RFC 5545 §3.2.3).
@@ -411,13 +359,7 @@ where
     I::Token: AsChar,
     E: ParserError<I> + FromExternalError<I, CalendarParseError<I::Slice>>,
 {
-    match_iana_token!(input, CalendarUserType,
-        "INDIVIDUAL" => Individual,
-        "GROUP" => Group,
-        "RESOURCE" => Resource,
-        "ROOM" => Room,
-        "UNKNOWN" => Unknown,
-    )
+    match_iana_token!(input, CalendarUserType)
 }
 
 /// Parses an [`Encoding`].
@@ -482,12 +424,7 @@ where
     I::Token: AsChar,
     E: ParserError<I> + FromExternalError<I, CalendarParseError<I::Slice>>,
 {
-    match_iana_token!(input, FreeBusyType,
-        "FREE" => Free,
-        "BUSY" => Busy,
-        "BUSY-UNAVAILABLE" => BusyUnavailable,
-        "BUSY-TENTATIVE" => BusyTentative,
-    )
+    match_iana_token!(input, FreeBusyType)
 }
 
 /// Parses a [`Status`].
@@ -499,22 +436,9 @@ where
 {
     let name = name.parse_next(input)?;
 
-    let res = hashify::map_ignore_case!(
-        name.as_str().as_bytes(),
-        Status,
-        "TENTATIVE" => Status::Tentative,
-        "CONFIRMED" => Status::Confirmed,
-        "CANCELLED" => Status::Cancelled,
-        "NEEDS-ACTION" => Status::NeedsAction,
-        "COMPLETED" => Status::Completed,
-        "IN-PROCESS" => Status::InProcess,
-        "DRAFT" => Status::Draft,
-        "FINAL" => Status::Final,
-    );
-
-    match res {
-        Some(&res) => Ok(res),
-        None => fail.parse_next(input),
+    match name.as_str().parse::<Status>() {
+        Ok(res) => Ok(res),
+        Err(_) => fail.parse_next(input),
     }
 }
 
@@ -525,15 +449,7 @@ where
     I::Token: AsChar,
     E: ParserError<I> + FromExternalError<I, CalendarParseError<I::Slice>>,
 {
-    match_iana_token!(input, ParticipationStatus,
-        "NEEDS-ACTION" => NeedsAction,
-        "IN-PROCESS" => InProcess,
-        "COMPLETED" => Completed,
-        "DELEGATED" => Delegated,
-        "TENTATIVE" => Tentative,
-        "ACCEPTED" => Accepted,
-        "DECLINED" => Declined,
-    )
+    match_iana_token!(input, ParticipationStatus)
 }
 
 /// Parses a [`TriggerRelation`].
@@ -556,12 +472,7 @@ where
     I::Token: AsChar,
     E: ParserError<I> + FromExternalError<I, CalendarParseError<I::Slice>>,
 {
-    match_iana_token!(input, RelationshipType,
-        "PARENT" => Parent,
-        "CHILD" => Child,
-        "SIBLING" => Sibling,
-        "SNOOZE" => Snooze,
-    )
+    match_iana_token!(input, RelationshipType)
 }
 
 /// Parses a [`ProximityValue`].
@@ -571,12 +482,7 @@ where
     I::Token: AsChar,
     E: ParserError<I> + FromExternalError<I, CalendarParseError<I::Slice>>,
 {
-    match_iana_token!(input, ProximityValue,
-        "ARRIVE" => Arrive,
-        "DEPART" => Depart,
-        "CONNECT" => Connect,
-        "DISCONNECT" => Disconnect,
-    )
+    match_iana_token!(input, ProximityValue)
 }
 
 /// Parses a [`ParticipationRole`].
@@ -586,12 +492,7 @@ where
     I::Token: AsChar,
     E: ParserError<I> + FromExternalError<I, CalendarParseError<I::Slice>>,
 {
-    match_iana_token!(input, ParticipationRole,
-        "CHAIR" => Chair,
-        "REQ-PARTICIPANT" => ReqParticipant,
-        "OPT-PARTICIPANT" => OptParticipant,
-        "NON-PARTICIPANT" => NonParticipant,
-    )
+    match_iana_token!(input, ParticipationRole)
 }
 
 /// Parses a [`ValueType`].
@@ -601,22 +502,7 @@ where
     I::Token: AsChar,
     E: ParserError<I> + FromExternalError<I, CalendarParseError<I::Slice>>,
 {
-    match_iana_token!(input, ValueType,
-        "BINARY" => Binary,
-        "BOOLEAN" => Boolean,
-        "CAL-ADDRESS" => CalAddress,
-        "DATE" => Date,
-        "DATE-TIME" => DateTime,
-        "DURATION" => Duration,
-        "FLOAT" => Float,
-        "INTEGER" => Integer,
-        "PERIOD" => Period,
-        "RECUR" => Recur,
-        "TEXT" => Text,
-        "TIME" => Time,
-        "URI" => Uri,
-        "UTC-OFFSET" => UtcOffset,
-    )
+    match_iana_token!(input, ValueType)
 }
 
 /// Parses a [`Name`].
@@ -1344,161 +1230,9 @@ where
     let source = alpha1.parse_next(input)?;
     let s = I::try_into_str(&source).map_err(|e| E::from_external_error(input, e.into()))?;
 
-    let color = hashify::map_ignore_case!(
-        s.as_ref().as_bytes(),
-        Css3Color,
-        "aliceblue" => Css3Color::AliceBlue,
-        "antiquewhite" => Css3Color::AntiqueWhite,
-        "aqua" => Css3Color::Aqua,
-        "aquamarine" => Css3Color::Aquamarine,
-        "azure" => Css3Color::Azure,
-        "beige" => Css3Color::Beige,
-        "bisque" => Css3Color::Bisque,
-        "black" => Css3Color::Black,
-        "blanchedalmond" => Css3Color::BlanchedAlmond,
-        "blue" => Css3Color::Blue,
-        "blueviolet" => Css3Color::BlueViolet,
-        "brown" => Css3Color::Brown,
-        "burlywood" => Css3Color::BurlyWood,
-        "cadetblue" => Css3Color::CadetBlue,
-        "chartreuse" => Css3Color::Chartreuse,
-        "chocolate" => Css3Color::Chocolate,
-        "coral" => Css3Color::Coral,
-        "cornflowerblue" => Css3Color::CornflowerBlue,
-        "cornsilk" => Css3Color::Cornsilk,
-        "crimson" => Css3Color::Crimson,
-        "cyan" => Css3Color::Cyan,
-        "darkblue" => Css3Color::DarkBlue,
-        "darkcyan" => Css3Color::DarkCyan,
-        "darkgoldenrod" => Css3Color::DarkGoldenRod,
-        "darkgray" => Css3Color::DarkGray,
-        "darkgrey" => Css3Color::DarkGrey,
-        "darkgreen" => Css3Color::DarkGreen,
-        "darkkhaki" => Css3Color::DarkKhaki,
-        "darkmagenta" => Css3Color::DarkMagenta,
-        "darkolivegreen" => Css3Color::DarkOliveGreen,
-        "darkorange" => Css3Color::DarkOrange,
-        "darkorchid" => Css3Color::DarkOrchid,
-        "darkred" => Css3Color::DarkRed,
-        "darksalmon" => Css3Color::DarkSalmon,
-        "darkseagreen" => Css3Color::DarkSeaGreen,
-        "darkslateblue" => Css3Color::DarkSlateBlue,
-        "darkslategray" => Css3Color::DarkSlateGray,
-        "darkslategrey" => Css3Color::DarkSlateGrey,
-        "darkturquoise" => Css3Color::DarkTurquoise,
-        "darkviolet" => Css3Color::DarkViolet,
-        "deeppink" => Css3Color::DeepPink,
-        "deepskyblue" => Css3Color::DeepSkyBlue,
-        "dimgray" => Css3Color::DimGray,
-        "dimgrey" => Css3Color::DimGrey,
-        "dodgerblue" => Css3Color::DodgerBlue,
-        "firebrick" => Css3Color::FireBrick,
-        "floralwhite" => Css3Color::FloralWhite,
-        "forestgreen" => Css3Color::ForestGreen,
-        "fuchsia" => Css3Color::Fuchsia,
-        "gainsboro" => Css3Color::Gainsboro,
-        "ghostwhite" => Css3Color::GhostWhite,
-        "gold" => Css3Color::Gold,
-        "goldenrod" => Css3Color::GoldenRod,
-        "gray" => Css3Color::Gray,
-        "grey" => Css3Color::Grey,
-        "green" => Css3Color::Green,
-        "greenyellow" => Css3Color::GreenYellow,
-        "honeydew" => Css3Color::HoneyDew,
-        "hotpink" => Css3Color::HotPink,
-        "indianred" => Css3Color::IndianRed,
-        "indigo" => Css3Color::Indigo,
-        "ivory" => Css3Color::Ivory,
-        "khaki" => Css3Color::Khaki,
-        "lavender" => Css3Color::Lavender,
-        "lavenderblush" => Css3Color::LavenderBlush,
-        "lawngreen" => Css3Color::LawnGreen,
-        "lemonchiffon" => Css3Color::LemonChiffon,
-        "lightblue" => Css3Color::LightBlue,
-        "lightcoral" => Css3Color::LightCoral,
-        "lightcyan" => Css3Color::LightCyan,
-        "lightgoldenrodyellow" => Css3Color::LightGoldenRodYellow,
-        "lightgray" => Css3Color::LightGray,
-        "lightgrey" => Css3Color::LightGrey,
-        "lightgreen" => Css3Color::LightGreen,
-        "lightpink" => Css3Color::LightPink,
-        "lightsalmon" => Css3Color::LightSalmon,
-        "lightseagreen" => Css3Color::LightSeaGreen,
-        "lightskyblue" => Css3Color::LightSkyBlue,
-        "lightslategray" => Css3Color::LightSlateGray,
-        "lightslategrey" => Css3Color::LightSlateGrey,
-        "lightsteelblue" => Css3Color::LightSteelBlue,
-        "lightyellow" => Css3Color::LightYellow,
-        "lime" => Css3Color::Lime,
-        "limegreen" => Css3Color::LimeGreen,
-        "linen" => Css3Color::Linen,
-        "magenta" => Css3Color::Magenta,
-        "maroon" => Css3Color::Maroon,
-        "mediumaquamarine" => Css3Color::MediumAquaMarine,
-        "mediumblue" => Css3Color::MediumBlue,
-        "mediumorchid" => Css3Color::MediumOrchid,
-        "mediumpurple" => Css3Color::MediumPurple,
-        "mediumseagreen" => Css3Color::MediumSeaGreen,
-        "mediumslateblue" => Css3Color::MediumSlateBlue,
-        "mediumspringgreen" => Css3Color::MediumSpringGreen,
-        "mediumturquoise" => Css3Color::MediumTurquoise,
-        "mediumvioletred" => Css3Color::MediumVioletRed,
-        "midnightblue" => Css3Color::MidnightBlue,
-        "mintcream" => Css3Color::MintCream,
-        "mistyrose" => Css3Color::MistyRose,
-        "moccasin" => Css3Color::Moccasin,
-        "navajowhite" => Css3Color::NavajoWhite,
-        "navy" => Css3Color::Navy,
-        "oldlace" => Css3Color::OldLace,
-        "olive" => Css3Color::Olive,
-        "olivedrab" => Css3Color::OliveDrab,
-        "orange" => Css3Color::Orange,
-        "orangered" => Css3Color::OrangeRed,
-        "orchid" => Css3Color::Orchid,
-        "palegoldenrod" => Css3Color::PaleGoldenRod,
-        "palegreen" => Css3Color::PaleGreen,
-        "paleturquoise" => Css3Color::PaleTurquoise,
-        "palevioletred" => Css3Color::PaleVioletRed,
-        "papayawhip" => Css3Color::PapayaWhip,
-        "peachpuff" => Css3Color::PeachPuff,
-        "peru" => Css3Color::Peru,
-        "pink" => Css3Color::Pink,
-        "plum" => Css3Color::Plum,
-        "powderblue" => Css3Color::PowderBlue,
-        "purple" => Css3Color::Purple,
-        "red" => Css3Color::Red,
-        "rosybrown" => Css3Color::RosyBrown,
-        "royalblue" => Css3Color::RoyalBlue,
-        "saddlebrown" => Css3Color::SaddleBrown,
-        "salmon" => Css3Color::Salmon,
-        "sandybrown" => Css3Color::SandyBrown,
-        "seagreen" => Css3Color::SeaGreen,
-        "seashell" => Css3Color::SeaShell,
-        "sienna" => Css3Color::Sienna,
-        "silver" => Css3Color::Silver,
-        "skyblue" => Css3Color::SkyBlue,
-        "slateblue" => Css3Color::SlateBlue,
-        "slategray" => Css3Color::SlateGray,
-        "slategrey" => Css3Color::SlateGrey,
-        "snow" => Css3Color::Snow,
-        "springgreen" => Css3Color::SpringGreen,
-        "steelblue" => Css3Color::SteelBlue,
-        "tan" => Css3Color::Tan,
-        "teal" => Css3Color::Teal,
-        "thistle" => Css3Color::Thistle,
-        "tomato" => Css3Color::Tomato,
-        "turquoise" => Css3Color::Turquoise,
-        "violet" => Css3Color::Violet,
-        "wheat" => Css3Color::Wheat,
-        "white" => Css3Color::White,
-        "whitesmoke" => Css3Color::WhiteSmoke,
-        "yellow" => Css3Color::Yellow,
-        "yellowgreen" => Css3Color::YellowGreen,
-    );
-
-    match color {
-        Some(&color) => Ok(color),
-        None => fail.parse_next(input),
+    match s.as_ref().parse::<Css3Color>() {
+        Ok(color) => Ok(color),
+        Err(_) => fail.parse_next(input),
     }
 }
 
