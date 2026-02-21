@@ -31,6 +31,7 @@ dependencies = [
  "base64",
  "calendar-types",
  "derive_more",
+ "dizzy",
  "enumflags2",
  "hashbrown 0.15.5",
  "hashify",
@@ -39,6 +40,7 @@ dependencies = [
  "mitsein",
  "paste",
  "rfc5545-types",
+ "structible",
  "strum",
  "winnow",
 ]

@@ -53,11 +53,8 @@
 //! parameters. I suspect that this was intended to neatly admit repetitions of parameters with
 //! *distinct* names, but it also obviously allows the same parameter to occur several times.
 
-use std::hash::Hash;
-
-use hashbrown::{Equivalent, HashMap};
-use mitsein::{slice1::Slice1, vec1::Vec1};
-use paste::paste;
+use mitsein::vec1::Vec1;
+use structible::structible;
 
 use super::{
     primitive::{
@@ -65,252 +62,167 @@ use super::{
         Language, ParticipationRole, ParticipationStatus, PositiveInteger, RelationshipType,
         ThisAndFuture, Token, TriggerRelation, ValueType,
     },
-    string::{CaselessStr, Name, NameKind, NeverStr, ParamValue, TzId, Uri},
+    string::{CaselessStr, Name, NameKind, ParamValue, TzId, Uri},
 };
 
 // TODO: RFC 5545 §3.2.19 (Time Zone Identifier) says that the TZID parameter MUST be specified on
 // the DTSTART, DTEND, DUE, EXDATE, and RDATE properties given certain conditions on their value
 // types. should that be encoded here? and more generally, am i missing more cases like this?
 
-macro_rules! define_parameter_type {
-    ($(#[$m:meta])* $v:vis $name:ident { $($tail:tt)* }) => {
-        $(#[$m])*
-        $v struct $name(ParameterTable);
+/// A table of optional property parameters.
+#[structible]
+pub struct Params {
+    // RFC 5545
+    pub alternate_representation: Option<Box<Uri>>,
+    pub common_name: Option<Box<ParamValue>>,
+    pub calendar_user_type: Option<Token<CalendarUserType, Box<Name>>>,
+    pub delegated_from: Option<Vec1<Box<Uri>>>,
+    pub delegated_to: Option<Vec1<Box<Uri>>>,
+    pub directory_reference: Option<Box<Uri>>,
+    pub inline_encoding: Option<Encoding>,
+    pub format_type: Option<FormatTypeBuf>,
+    pub free_busy_type: Option<Token<FreeBusyType, Box<Name>>>,
+    pub language: Option<Language>,
+    pub membership: Option<Vec1<Box<Uri>>>,
+    pub participation_status: Option<Token<ParticipationStatus, Box<Name>>>,
+    pub recurrence_range: Option<ThisAndFuture>,
+    pub trigger_relationship: Option<TriggerRelation>,
+    pub relationship_type: Option<Token<RelationshipType, Box<Name>>>,
+    pub participation_role: Option<Token<ParticipationRole, Box<Name>>>,
+    pub rsvp_expectation: Option<bool>,
+    pub sent_by: Option<Box<Uri>>,
+    pub tz_id: Option<Box<TzId>>,
 
-        impl std::ops::Deref for $name {
-            type Target = ParameterTable;
+    // RFC 7986
+    pub display_type: Option<Token<DisplayType, Box<Name>>>,
+    pub email: Option<Box<ParamValue>>,
+    pub feature_type: Option<Token<FeatureType, Box<Name>>>,
+    pub label: Option<Box<ParamValue>>,
 
-            fn deref(&self) -> &Self::Target {
-                &self.0
-            }
-        }
+    // RFC 9073
+    pub order: Option<PositiveInteger>,
+    pub schema: Option<Box<Uri>>,
+    pub derived: Option<bool>,
 
-        impl std::ops::DerefMut for $name {
-            fn deref_mut(&mut self) -> &mut Self::Target {
-                &mut self.0
-            }
-        }
-
-        impl $name {
-            define_methods!({$($tail)*});
-        }
-    };
-
+    // Unknown parameters
+    #[structible(key = Box<CaselessStr>)]
+    pub unknown_param: Option<Vec1<Box<ParamValue>>>,
 }
 
-/// A helper macro for [`define_parameter_type`] that creates accessor methods for each of "fields."
-/// Each field has the form `(name, key) <sep> ty` where <sep> may either be `?` or `!`. If it is
-/// `?`, then the field is _optional_; if it is `!` then the field is _mandatory_. Aside from the
-/// difference in return types, the only notable difference is that mandatory fields cannot be
-/// removed, only modified or replaced.
-macro_rules! define_methods {
-    // optional
-    ({$(#[$m:meta])* ($name:ident, $key:ident) ? $ret_ty:ty $(, $($tail:tt)*)?}) => {
-        paste! {
-            $(#[$m])*
-            pub fn $name(&self) -> Option<&$ret_ty> {
-                self.get_known(StaticParam::$key)
-                    .map(|raw_value| raw_value.try_into().ok().unwrap())
-            }
+impl Eq for Params {}
 
-            $(#[$m])*
-            pub fn [<$name _mut>](&mut self) -> Option<&mut $ret_ty> {
-                self.get_known_mut(StaticParam::$key)
-                    .map(|raw_value| raw_value.try_into().ok().unwrap())
-            }
-
-            $(#[$m])*
-            pub fn [<remove_ $name>](&mut self) -> Option<$ret_ty> {
-                self.0.remove_known(StaticParam::$key)
-                    .map(|raw_value| raw_value.try_into().ok().unwrap())
-            }
-
-            $(#[$m])*
-            pub fn [<set_ $name>](&mut self, value: $ret_ty) -> Option<$ret_ty> {
-                self.0
-                    .insert(ParamName::Known(StaticParam::$key), AnyParamValue::from(value))
-                    .map(|raw_value| raw_value.try_into().ok().unwrap())
-            }
+impl Params {
+    /// Inserts a known parameter, overwriting any previous value.
+    pub fn insert_known(&mut self, param: KnownParam) {
+        match param {
+            KnownParam::AltRep(v) => { self.set_alternate_representation(v); }
+            KnownParam::CommonName(v) => { self.set_common_name(v); }
+            KnownParam::CUType(v) => { self.set_calendar_user_type(v); }
+            KnownParam::DelFrom(v) => { self.set_delegated_from(v); }
+            KnownParam::DelTo(v) => { self.set_delegated_to(v); }
+            KnownParam::Dir(v) => { self.set_directory_reference(v); }
+            KnownParam::Encoding(v) => { self.set_inline_encoding(v); }
+            KnownParam::FormatType(v) => { self.set_format_type(v); }
+            KnownParam::FBType(v) => { self.set_free_busy_type(v); }
+            KnownParam::Language(v) => { self.set_language(v); }
+            KnownParam::Member(v) => { self.set_membership(v); }
+            KnownParam::PartStatus(v) => { self.set_participation_status(v); }
+            KnownParam::RecurrenceIdentifierRange => { self.set_recurrence_range(ThisAndFuture); }
+            KnownParam::AlarmTrigger(v) => { self.set_trigger_relationship(v); }
+            KnownParam::RelType(v) => { self.set_relationship_type(v); }
+            KnownParam::Role(v) => { self.set_participation_role(v); }
+            KnownParam::Rsvp(v) => { self.set_rsvp_expectation(v); }
+            KnownParam::SentBy(v) => { self.set_sent_by(v); }
+            KnownParam::TzId(v) => { self.set_tz_id(v); }
+            KnownParam::Value(_) => { /* VALUE is not stored in Params */ }
+            KnownParam::Display(v) => { self.set_display_type(v); }
+            KnownParam::Email(v) => { self.set_email(v); }
+            KnownParam::Feature(v) => { self.set_feature_type(v); }
+            KnownParam::Label(v) => { self.set_label(v); }
+            KnownParam::Order(v) => { self.set_order(v); }
+            KnownParam::Schema(v) => { self.set_schema(v); }
+            KnownParam::Derived(v) => { self.set_derived(v); }
         }
-
-        $(define_methods!({$($tail)*});)?
-    };
-    // required
-    ({$(#[$m:meta])* ($name:ident, $key:ident) ! $ret_ty:ty $(, $($tail:tt)*)?}) => {
-        paste! {
-            $(#[$m])*
-            pub fn $name(&self) -> &$ret_ty {
-                self.get_known(StaticParam::$key)
-                    .map(|raw_value| raw_value.try_into().ok().unwrap())
-                    .unwrap()
-            }
-
-            $(#[$m])*
-            pub fn [<$name _mut>](&mut self) -> &mut $ret_ty {
-                self.get_known_mut(StaticParam::$key)
-                    .map(|raw_value| raw_value.try_into().ok().unwrap())
-                    .unwrap()
-            }
-
-            $(#[$m])*
-            pub fn [<replace_ $name>](&mut self, value: $ret_ty) -> $ret_ty {
-                self.0
-                    .insert(ParamName::Known(StaticParam::$key), AnyParamValue::from(value))
-                    .map(|raw_value| raw_value.try_into().ok().unwrap())
-                    .unwrap()
-            }
-        }
-
-        $(define_methods!({$($tail)*});)?
-    };
-    ({$(,)?}) => {};
-}
-
-#[derive(Debug, Default, Clone, PartialEq, Eq)]
-pub struct ParameterTable(HashMap<ParamName<Box<CaselessStr>>, AnyParamValue>);
-
-impl ParameterTable {
-    // public APIs accessible via deref coercion
-
-    pub fn is_empty(&self) -> bool {
-        self.0.is_empty()
     }
 
-    pub fn len(&self) -> usize {
-        self.0.len()
-    }
-
-    pub fn capacity(&self) -> usize {
-        self.0.capacity()
-    }
-
+    /// Returns `true` if the given known parameter is set.
     pub fn contains_known(&self, key: StaticParam) -> bool {
-        self.0.contains_key(&ParamName::<NeverStr>::Known(key))
-    }
-
-    pub fn contains_unknown(&self, key: &str) -> bool {
-        let key: ParamName<&CaselessStr> = ParamName::Unknown(key.into());
-        self.0.contains_key(&key)
-    }
-
-    pub fn get_known(&self, key: StaticParam) -> Option<&AnyParamValue> {
-        self.0.get(&ParamName::<NeverStr>::Known(key))
-    }
-
-    pub fn get_known_mut(&mut self, key: StaticParam) -> Option<&mut AnyParamValue> {
-        self.0.get_mut(&ParamName::<NeverStr>::Known(key))
-    }
-
-    pub fn get_unknown(&self, key: &str) -> Option<&Slice1<Box<ParamValue>>> {
-        let key: ParamName<&CaselessStr> = ParamName::Unknown(key.into());
-        let value = self.0.get(&key);
-
-        value.map(|value| {
-            let vec: &Vec1<Box<ParamValue>> = value
-                .try_into()
-                .expect("unknown parameters must be param value vectors");
-
-            vec.as_slice1()
-        })
-    }
-
-    pub fn get_unknown_mut(&mut self, key: &str) -> Option<&mut Vec1<Box<ParamValue>>> {
-        let key: ParamName<&CaselessStr> = ParamName::Unknown(key.into());
-        let value = self.0.get_mut(&key);
-
-        value.map(|value| {
-            value
-                .try_into()
-                .expect("unknown parameters must be param value vectors")
-        })
-    }
-
-    pub fn insert_unknown(
-        &mut self,
-        key: impl Into<Box<str>>,
-        value: Vec1<Box<ParamValue>>,
-    ) -> Option<Vec1<Box<ParamValue>>> {
-        let key = ParamName::Unknown(CaselessStr::from_box_str(key.into()));
-
-        self.0.insert(key, AnyParamValue::from(value)).map(|value| {
-            value
-                .try_into()
-                .expect("unknown parameters must be param value vectors")
-        })
-    }
-
-    pub fn remove_unknown(&mut self, key: &str) -> Option<Vec1<Box<ParamValue>>> {
-        let key: ParamName<&CaselessStr> = ParamName::Unknown(key.into());
-
-        self.0.remove(&key).map(|value| {
-            value
-                .try_into()
-                .expect("unknown parameters must be param value vectors")
-        })
-    }
-
-    // private APIs that should not be "inherited"
-
-    fn insert(
-        &mut self,
-        key: ParamName<Box<CaselessStr>>,
-        value: AnyParamValue,
-    ) -> Option<AnyParamValue> {
-        self.0.insert(key, value)
-    }
-
-    fn remove_known(&mut self, key: StaticParam) -> Option<AnyParamValue> {
-        self.0.remove(&ParamName::<NeverStr>::Known(key))
+        match key {
+            StaticParam::AltRep => self.alternate_representation().is_some(),
+            StaticParam::CommonName => self.common_name().is_some(),
+            StaticParam::CalUserType => self.calendar_user_type().is_some(),
+            StaticParam::DelFrom => self.delegated_from().is_some(),
+            StaticParam::DelTo => self.delegated_to().is_some(),
+            StaticParam::Dir => self.directory_reference().is_some(),
+            StaticParam::Encoding => self.inline_encoding().is_some(),
+            StaticParam::FormatType => self.format_type().is_some(),
+            StaticParam::FreeBusyType => self.free_busy_type().is_some(),
+            StaticParam::Language => self.language().is_some(),
+            StaticParam::Member => self.membership().is_some(),
+            StaticParam::PartStat => self.participation_status().is_some(),
+            StaticParam::Range => self.recurrence_range().is_some(),
+            StaticParam::Related => self.trigger_relationship().is_some(),
+            StaticParam::RelType => self.relationship_type().is_some(),
+            StaticParam::Role => self.participation_role().is_some(),
+            StaticParam::Rsvp => self.rsvp_expectation().is_some(),
+            StaticParam::SentBy => self.sent_by().is_some(),
+            StaticParam::TzId => self.tz_id().is_some(),
+            StaticParam::Value => false, // VALUE is not stored in Params
+            StaticParam::Display => self.display_type().is_some(),
+            StaticParam::Email => self.email().is_some(),
+            StaticParam::Feature => self.feature_type().is_some(),
+            StaticParam::Label => self.label().is_some(),
+            StaticParam::Order => self.order().is_some(),
+            StaticParam::Schema => self.schema().is_some(),
+            StaticParam::Derived => self.derived().is_some(),
+        }
     }
 }
 
-define_parameter_type! {
-    /// The parameters of the STRUCTURED-DATA property when its value type is TEXT or BINARY. The
-    /// `format_type` and `schema` fields are mandatory, while all other fields are optional.
-    #[derive(Debug, Clone, PartialEq, Eq)]
-    pub StructuredDataParams {
-        // RFC 5545
-        (alternate_representation, AltRep) ? Box<Uri>,
-        (common_name, CommonName) ? Box<ParamValue>,
-        (calendar_user_type, CalUserType) ? Token<CalendarUserType, Box<Name>>,
-        (delegated_from, DelFrom) ? Vec1<Box<Uri>>,
-        (delegated_to, DelTo) ? Vec1<Box<Uri>>,
-        (directory_reference, Dir) ? Box<Uri>,
-        (inline_encoding, Encoding) ? Encoding,
-        (format_type, FormatType) ! FormatTypeBuf,
-        (free_busy_type, FreeBusyType) ? Token<FreeBusyType, Box<Name>>,
-        (language, Language) ? Language,
-        (membership, Member) ? Vec1<Box<Uri>>,
-        (participation_status, PartStat) ? Token<ParticipationStatus, Box<Name>>,
-        (recurrence_range, Range) ? ThisAndFuture,
-        (trigger_relationship, Related) ? TriggerRelation,
-        (relationship_type, RelType) ? Token<RelationshipType, Box<Name>>,
-        (participation_role, Role) ? Token<ParticipationRole, Box<Name>>,
-        (rsvp_expectation, Rsvp) ? bool,
-        (sent_by, SentBy) ? Box<Uri>,
-        (tz_id, TzId) ? Box<TzId>,
+/// The parameters of the STRUCTURED-DATA property when its value type is TEXT or BINARY. The
+/// `format_type` and `schema` fields are mandatory, while all other fields are optional.
+#[structible]
+pub struct StructuredDataParams {
+    // Required
+    pub format_type: FormatTypeBuf,
+    pub schema: Box<Uri>,
 
-        // RFC 7986
-        (display_type, Display) ? Token<DisplayType, Box<Name>>,
-        (email, Email) ? Box<ParamValue>,
-        (feature_type, Feature) ? Token<FeatureType, Box<Name>>,
-        (label, Label) ? Box<ParamValue>,
+    // RFC 5545
+    pub alternate_representation: Option<Box<Uri>>,
+    pub common_name: Option<Box<ParamValue>>,
+    pub calendar_user_type: Option<Token<CalendarUserType, Box<Name>>>,
+    pub delegated_from: Option<Vec1<Box<Uri>>>,
+    pub delegated_to: Option<Vec1<Box<Uri>>>,
+    pub directory_reference: Option<Box<Uri>>,
+    pub inline_encoding: Option<Encoding>,
+    pub free_busy_type: Option<Token<FreeBusyType, Box<Name>>>,
+    pub language: Option<Language>,
+    pub membership: Option<Vec1<Box<Uri>>>,
+    pub participation_status: Option<Token<ParticipationStatus, Box<Name>>>,
+    pub recurrence_range: Option<ThisAndFuture>,
+    pub trigger_relationship: Option<TriggerRelation>,
+    pub relationship_type: Option<Token<RelationshipType, Box<Name>>>,
+    pub participation_role: Option<Token<ParticipationRole, Box<Name>>>,
+    pub rsvp_expectation: Option<bool>,
+    pub sent_by: Option<Box<Uri>>,
+    pub tz_id: Option<Box<TzId>>,
 
-        // RFC 9073
-        (order, Order) ? PositiveInteger,
-        (schema, Schema) ! Box<Uri>,
-        (derived, Derived) ? bool,
-    }
+    // RFC 7986
+    pub display_type: Option<Token<DisplayType, Box<Name>>>,
+    pub email: Option<Box<ParamValue>>,
+    pub feature_type: Option<Token<FeatureType, Box<Name>>>,
+    pub label: Option<Box<ParamValue>>,
+
+    // RFC 9073
+    pub order: Option<PositiveInteger>,
+    pub derived: Option<bool>,
+
+    // Unknown parameters
+    #[structible(key = Box<CaselessStr>)]
+    pub unknown_param: Option<Vec1<Box<ParamValue>>>,
 }
 
-impl StructuredDataParams {
-    pub fn new(format_type: FormatTypeBuf, schema: Box<Uri>) -> Self {
-        let mut params = Params::with_capacity(2);
-        params.set_format_type(format_type);
-        params.set_schema(schema);
-        Self(params.0)
-    }
-}
+impl Eq for StructuredDataParams {}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SDParamsFromParamsError {
@@ -323,69 +235,84 @@ impl TryFrom<Params> for StructuredDataParams {
     type Error = SDParamsFromParamsError;
 
     fn try_from(value: Params) -> Result<Self, Self::Error> {
-        let format_type = value.contains_known(StaticParam::FormatType);
-        let schema = value.contains_known(StaticParam::Schema);
+        let has_format_type = value.format_type().is_some();
+        let has_schema = value.schema().is_some();
 
-        match (format_type, schema) {
+        match (has_format_type, has_schema) {
             (false, false) => Err(SDParamsFromParamsError::MissingFormatTypeAndSchema),
             (false, true) => Err(SDParamsFromParamsError::MissingFormatType),
             (true, false) => Err(SDParamsFromParamsError::MissingSchema),
-            (true, true) => Ok(Self(value.0)),
+            (true, true) => {
+                let mut fields = value.into_fields();
+                let format_type = fields.take_format_type().unwrap();
+                let schema = fields.take_schema().unwrap();
+                let mut result = StructuredDataParams::new(format_type, schema);
+
+                if let Some(v) = fields.take_alternate_representation() { result.set_alternate_representation(v); }
+                if let Some(v) = fields.take_common_name() { result.set_common_name(v); }
+                if let Some(v) = fields.take_calendar_user_type() { result.set_calendar_user_type(v); }
+                if let Some(v) = fields.take_delegated_from() { result.set_delegated_from(v); }
+                if let Some(v) = fields.take_delegated_to() { result.set_delegated_to(v); }
+                if let Some(v) = fields.take_directory_reference() { result.set_directory_reference(v); }
+                if let Some(v) = fields.take_inline_encoding() { result.set_inline_encoding(v); }
+                if let Some(v) = fields.take_free_busy_type() { result.set_free_busy_type(v); }
+                if let Some(v) = fields.take_language() { result.set_language(v); }
+                if let Some(v) = fields.take_membership() { result.set_membership(v); }
+                if let Some(v) = fields.take_participation_status() { result.set_participation_status(v); }
+                if let Some(v) = fields.take_recurrence_range() { result.set_recurrence_range(v); }
+                if let Some(v) = fields.take_trigger_relationship() { result.set_trigger_relationship(v); }
+                if let Some(v) = fields.take_relationship_type() { result.set_relationship_type(v); }
+                if let Some(v) = fields.take_participation_role() { result.set_participation_role(v); }
+                if let Some(v) = fields.take_rsvp_expectation() { result.set_rsvp_expectation(v); }
+                if let Some(v) = fields.take_sent_by() { result.set_sent_by(v); }
+                if let Some(v) = fields.take_tz_id() { result.set_tz_id(v); }
+                if let Some(v) = fields.take_display_type() { result.set_display_type(v); }
+                if let Some(v) = fields.take_email() { result.set_email(v); }
+                if let Some(v) = fields.take_feature_type() { result.set_feature_type(v); }
+                if let Some(v) = fields.take_label() { result.set_label(v); }
+                if let Some(v) = fields.take_order() { result.set_order(v); }
+                if let Some(v) = fields.take_derived() { result.set_derived(v); }
+
+                Ok(result)
+            }
         }
-    }
-}
-
-define_parameter_type! {
-    /// A table of optional property parameters.
-    #[derive(Debug, Default, Clone, PartialEq, Eq)]
-    pub Params {
-        // RFC 5545
-        (alternate_representation, AltRep) ? Box<Uri>,
-        (common_name, CommonName) ? Box<ParamValue>,
-        (calendar_user_type, CalUserType) ? Token<CalendarUserType, Box<Name>>,
-        (delegated_from, DelFrom) ? Vec1<Box<Uri>>,
-        (delegated_to, DelTo) ? Vec1<Box<Uri>>,
-        (directory_reference, Dir) ? Box<Uri>,
-        (inline_encoding, Encoding) ? Encoding,
-        (format_type, FormatType) ? FormatTypeBuf,
-        (free_busy_type, FreeBusyType) ? Token<FreeBusyType, Box<Name>>,
-        (language, Language) ? Language,
-        (membership, Member) ? Vec1<Box<Uri>>,
-        (participation_status, PartStat) ? Token<ParticipationStatus, Box<Name>>,
-        (recurrence_range, Range) ? ThisAndFuture,
-        (trigger_relationship, Related) ? TriggerRelation,
-        (relationship_type, RelType) ? Token<RelationshipType, Box<Name>>,
-        (participation_role, Role) ? Token<ParticipationRole, Box<Name>>,
-        (rsvp_expectation, Rsvp) ? bool,
-        (sent_by, SentBy) ? Box<Uri>,
-        (tz_id, TzId) ? Box<TzId>,
-
-        // RFC 7986
-        (display_type, Display) ? Token<DisplayType, Box<Name>>,
-        (email, Email) ? Box<ParamValue>,
-        (feature_type, Feature) ? Token<FeatureType, Box<Name>>,
-        (label, Label) ? Box<ParamValue>,
-
-        // RFC 9073
-        (order, Order) ? PositiveInteger,
-        (schema, Schema) ? Box<Uri>,
-        (derived, Derived) ? bool,
     }
 }
 
 impl From<StructuredDataParams> for Params {
     fn from(value: StructuredDataParams) -> Self {
-        Self(value.0)
-    }
-}
+        let mut fields = value.into_fields();
+        let mut result = Params::new();
 
-impl Params {
-    pub fn new() -> Self {
-        Self::default()
-    }
+        result.set_format_type(fields.take_format_type().unwrap());
+        result.set_schema(fields.take_schema().unwrap());
 
-    pub fn with_capacity(capacity: usize) -> Self {
-        Self(ParameterTable(HashMap::with_capacity(capacity)))
+        if let Some(v) = fields.take_alternate_representation() { result.set_alternate_representation(v); }
+        if let Some(v) = fields.take_common_name() { result.set_common_name(v); }
+        if let Some(v) = fields.take_calendar_user_type() { result.set_calendar_user_type(v); }
+        if let Some(v) = fields.take_delegated_from() { result.set_delegated_from(v); }
+        if let Some(v) = fields.take_delegated_to() { result.set_delegated_to(v); }
+        if let Some(v) = fields.take_directory_reference() { result.set_directory_reference(v); }
+        if let Some(v) = fields.take_inline_encoding() { result.set_inline_encoding(v); }
+        if let Some(v) = fields.take_free_busy_type() { result.set_free_busy_type(v); }
+        if let Some(v) = fields.take_language() { result.set_language(v); }
+        if let Some(v) = fields.take_membership() { result.set_membership(v); }
+        if let Some(v) = fields.take_participation_status() { result.set_participation_status(v); }
+        if let Some(v) = fields.take_recurrence_range() { result.set_recurrence_range(v); }
+        if let Some(v) = fields.take_trigger_relationship() { result.set_trigger_relationship(v); }
+        if let Some(v) = fields.take_relationship_type() { result.set_relationship_type(v); }
+        if let Some(v) = fields.take_participation_role() { result.set_participation_role(v); }
+        if let Some(v) = fields.take_rsvp_expectation() { result.set_rsvp_expectation(v); }
+        if let Some(v) = fields.take_sent_by() { result.set_sent_by(v); }
+        if let Some(v) = fields.take_tz_id() { result.set_tz_id(v); }
+        if let Some(v) = fields.take_display_type() { result.set_display_type(v); }
+        if let Some(v) = fields.take_email() { result.set_email(v); }
+        if let Some(v) = fields.take_feature_type() { result.set_feature_type(v); }
+        if let Some(v) = fields.take_label() { result.set_label(v); }
+        if let Some(v) = fields.take_order() { result.set_order(v); }
+        if let Some(v) = fields.take_derived() { result.set_derived(v); }
+
+        result
     }
 }
 
@@ -416,103 +343,7 @@ impl Param {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum UpcastParamValue {
     ValueType(Token<ValueType, Box<Name>>),
-    RawValue(AnyParamValue),
-}
-
-macro_rules! impl_any_param_value_conversions {
-    ($($variant:ident => $t:ty),* $(,)?) => {
-        $(
-            impl From<$t> for AnyParamValue {
-                fn from(value: $t) -> Self {
-                    Self(AnyParamValueInner::$variant(value))
-                }
-            }
-
-            impl TryFrom<AnyParamValue> for $t {
-                type Error = AnyParamValue;
-
-                fn try_from(value: AnyParamValue) -> Result<$t, Self::Error> {
-                    if let AnyParamValue(AnyParamValueInner::$variant(value)) = value {
-                        Ok(value)
-                    } else {
-                        Err(value)
-                    }
-                }
-            }
-
-            impl<'a> TryFrom<&'a AnyParamValue> for &'a $t {
-                type Error = &'a AnyParamValue;
-
-                fn try_from(value: &'a AnyParamValue) -> Result<&'a $t, Self::Error> {
-                    if let AnyParamValue(AnyParamValueInner::$variant(value)) = value {
-                        Ok(value)
-                    } else {
-                        Err(value)
-                    }
-                }
-            }
-
-            impl<'a> TryFrom<&'a mut AnyParamValue> for &'a mut $t {
-                type Error = &'a mut AnyParamValue;
-
-                fn try_from(value: &'a mut AnyParamValue) -> Result<&'a mut $t, Self::Error> {
-                    if let AnyParamValue(AnyParamValueInner::$variant(value)) = value {
-                        Ok(value)
-                    } else {
-                        Err(value)
-                    }
-                }
-            }
-        )*
-    };
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct AnyParamValue(AnyParamValueInner);
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-enum AnyParamValueInner {
-    Bool(bool),
-    CalAddressSeq(Vec1<Box<Uri>>),
-    CUType(Token<CalendarUserType, Box<Name>>),
-    DisplayType(Token<DisplayType, Box<Name>>),
-    Encoding(Encoding),
-    FBType(Token<FreeBusyType, Box<Name>>),
-    FeatureType(Token<FeatureType, Box<Name>>),
-    FormatType(FormatTypeBuf),
-    Language(Language),
-    ParamValue1(Box<ParamValue>),
-    ParamValue(Vec1<Box<ParamValue>>),
-    PartStatus(Token<ParticipationStatus, Box<Name>>),
-    PositiveInteger(PositiveInteger),
-    RelType(Token<RelationshipType, Box<Name>>),
-    Role(Token<ParticipationRole, Box<Name>>),
-    ThisAndFuture(ThisAndFuture),
-    TrigRel(TriggerRelation),
-    TzId(Box<TzId>),
-    Uri(Box<Uri>),
-}
-
-impl_any_param_value_conversions! {
-    Bool => bool,
-    CalAddressSeq => Vec1<Box<Uri>>,
-    CUType => Token<CalendarUserType, Box<Name>>,
-    DisplayType => Token<DisplayType, Box<Name>>,
-    Encoding => Encoding,
-    FBType => Token<FreeBusyType, Box<Name>>,
-    FeatureType => Token<FeatureType, Box<Name>>,
-    FormatType => FormatTypeBuf,
-    Language => Language,
-    ParamValue1 => Box<ParamValue>,
-    ParamValue => Vec1<Box<ParamValue>>,
-    PartStatus => Token<ParticipationStatus, Box<Name>>,
-    PositiveInteger => PositiveInteger,
-    RelType => Token<RelationshipType, Box<Name>>,
-    Role => Token<ParticipationRole, Box<Name>>,
-    ThisAndFuture => ThisAndFuture,
-    TrigRel => TriggerRelation,
-    TzId => Box<TzId>,
-    Uri => Box<Uri>,
+    Known(KnownParam),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -583,34 +414,10 @@ impl KnownParam {
     }
 
     pub fn upcast(self) -> UpcastParamValue {
-        UpcastParamValue::RawValue(match self {
-            KnownParam::AltRep(uri)
-            | KnownParam::Dir(uri)
-            | KnownParam::SentBy(uri)
-            | KnownParam::Schema(uri) => uri.into(),
-            KnownParam::CommonName(param_value)
-            | KnownParam::Email(param_value)
-            | KnownParam::Label(param_value) => param_value.into(),
-            KnownParam::CUType(calendar_user_type) => calendar_user_type.into(),
-            KnownParam::DelFrom(cal_addresses)
-            | KnownParam::DelTo(cal_addresses)
-            | KnownParam::Member(cal_addresses) => cal_addresses.into(),
-            KnownParam::Encoding(encoding) => encoding.into(),
-            KnownParam::FormatType(format_type) => format_type.into(),
-            KnownParam::FBType(free_busy_type) => free_busy_type.into(),
-            KnownParam::Language(language) => language.into(),
-            KnownParam::PartStatus(participation_status) => participation_status.into(),
-            KnownParam::RecurrenceIdentifierRange => ThisAndFuture.into(),
-            KnownParam::AlarmTrigger(trigger_relation) => trigger_relation.into(),
-            KnownParam::RelType(relationship_type) => relationship_type.into(),
-            KnownParam::Role(participation_role) => participation_role.into(),
-            KnownParam::Rsvp(value) | KnownParam::Derived(value) => value.into(),
-            KnownParam::TzId(tz_id) => tz_id.into(),
-            KnownParam::Value(value_type) => return UpcastParamValue::ValueType(value_type),
-            KnownParam::Display(display_type) => display_type.into(),
-            KnownParam::Feature(feature_type) => feature_type.into(),
-            KnownParam::Order(non_zero) => non_zero.into(),
-        })
+        match self {
+            KnownParam::Value(value_type) => UpcastParamValue::ValueType(value_type),
+            other => UpcastParamValue::Known(other),
+        }
     }
 }
 
@@ -697,25 +504,6 @@ pub enum ParamName<S> {
     Unknown(S),
 }
 
-impl Equivalent<ParamName<Box<CaselessStr>>> for ParamName<NeverStr> {
-    fn equivalent(&self, key: &ParamName<Box<CaselessStr>>) -> bool {
-        match (self, key) {
-            (ParamName::Known(lhs), ParamName::Known(rhs)) => lhs == rhs,
-            _ => false,
-        }
-    }
-}
-
-impl Equivalent<ParamName<Box<CaselessStr>>> for ParamName<&CaselessStr> {
-    fn equivalent(&self, key: &ParamName<Box<CaselessStr>>) -> bool {
-        match (self, key) {
-            (ParamName::Known(lhs), ParamName::Known(rhs)) => lhs == rhs,
-            (ParamName::Unknown(lhs), ParamName::Unknown(rhs)) => rhs.as_ref() == *lhs,
-            _ => false,
-        }
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use mitsein::vec1;
@@ -727,13 +515,16 @@ mod tests {
         let mut params = Params::default();
         params.set_rsvp_expectation(true);
         params.set_inline_encoding(Encoding::Base64);
-        params.insert_unknown("X-FOO", vec1![ParamValue::new("bar").unwrap().into()]);
+        params.insert_unknown_param(
+            CaselessStr::from_box_str("X-FOO".into()),
+            vec1![ParamValue::new("bar").unwrap().into()],
+        );
 
         assert_eq!(params.rsvp_expectation(), Some(&true));
         assert_eq!(params.inline_encoding(), Some(&Encoding::Base64));
         assert_eq!(
-            params.get_unknown("x-foo"),
-            Some(vec1![ParamValue::new("bar").unwrap().into()].as_slice1()),
+            params.unknown_param(CaselessStr::new("x-foo")),
+            Some(&vec1![ParamValue::new("bar").unwrap().into()]),
         );
 
         assert!(params.alternate_representation().is_none());

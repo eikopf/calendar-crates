@@ -88,7 +88,12 @@ pub struct InvalidTextError {
 pub struct Text(str);
 
 impl Text {
-    fn str_is_text(s: &str) -> Result<(), InvalidTextError> {
+    /// Returns `true` iff `c` is valid in a TEXT value.
+    pub const fn char_is_valid(c: char) -> bool {
+        char_is_text(c)
+    }
+
+    pub(crate) fn str_is_text(s: &str) -> Result<(), InvalidTextError> {
         for (index, c) in s.char_indices() {
             if !char_is_text(c) {
                 return Err(InvalidTextError { index, c });
@@ -101,6 +106,35 @@ impl Text {
 impl std::fmt::Display for Text {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_str(self.as_str())
+    }
+}
+
+impl TextBuf {
+    /// Consumes the `TextBuf` and returns the inner `String`.
+    pub fn into_string(self) -> String {
+        self.__dizzy_owned_inner
+    }
+
+    /// Creates a `TextBuf` from a `String`, validating the text invariant.
+    pub fn from_string(s: String) -> Result<Self, InvalidTextError> {
+        Text::str_is_text(&s)?;
+        // SAFETY: validated above; the inner field is correct
+        Ok(Self {
+            __data: std::marker::PhantomData,
+            __dizzy_owned_inner: s,
+        })
+    }
+
+    /// Creates a `TextBuf` from a `String` without checking the text invariant.
+    ///
+    /// # Safety
+    /// The string must not contain ASCII control characters other than HTAB or LF.
+    pub unsafe fn from_string_unchecked(s: String) -> Self {
+        debug_assert!(Text::str_is_text(&s).is_ok());
+        Self {
+            __data: std::marker::PhantomData,
+            __dizzy_owned_inner: s,
+        }
     }
 }
 

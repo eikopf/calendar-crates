@@ -12,7 +12,8 @@ use winnow::{
 
 use crate::{
     model::component::{
-        Alarm, Calendar, Component, Event, FreeBusy, Journal, Resource, TimeZone, Todo,
+        Alarm, Calendar, Event, FreeBusy, Journal, OtherComponent, ResourceComponent, TimeZone,
+        Todo,
     },
     parser::{
         error::CalendarParseError,
@@ -988,7 +989,7 @@ where
 }
 
 /// Parses a [`Resource`].
-fn resource<I, E>(input: &mut I) -> Result<Resource, E>
+fn resource<I, E>(input: &mut I) -> Result<ResourceComponent, E>
 where
     I: StreamIsPartial
         + Stream
@@ -1016,7 +1017,7 @@ where
 }
 
 /// A version of [`other`] that handles the BEGIN and END lines.
-fn other_with_name<I, E>(input: &mut I) -> Result<Component, E>
+fn other_with_name<I, E>(input: &mut I) -> Result<OtherComponent, E>
 where
     I: StreamIsPartial
         + Stream

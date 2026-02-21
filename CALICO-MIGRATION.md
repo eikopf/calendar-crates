@@ -163,7 +163,7 @@ Create a `calico-migration` branch and commit this plan as `CALICO-MIGRATION.md`
 2. ~~Extract `LanguageTag` from jscalendar into calendar-types~~ ✅
 3. ~~Add new RFC 5545 types to rfc5545-types (§2 above)~~ ✅
 4. ~~Replace calico's duplicated types with imports from calendar-types and rfc5545-types~~ ✅ (partial — see §10)
-5. Replace `unsized_newtype!` usages with dizzy `DstNewtype`
+5. ~~Replace `unsized_newtype!` usages with dizzy `DstNewtype`~~ ✅
 6. Evaluate and apply structible to component/parameter types where appropriate
 7. Remove calico's now-redundant type definitions
 8. Update calico's parser to work with workspace types
@@ -176,7 +176,27 @@ Create a `calico-migration` branch and commit this plan as `CALICO-MIGRATION.md`
 **From calendar-types:** `Weekday`, `IsoWeek`
 **From rfc5545-types::set:** `Gregorian`, `Version`, `Encoding`, `TimeTransparency`, `EventStatus`, `TodoStatus`, `JournalStatus`, `Priority`, `PriorityClass`, `TriggerRelation`, `ThisAndFuture`
 **From rfc5545-types::value:** `Geo`
-**From rfc5545-types::string:** `CaselessStr`, `InvalidCharError`
+**From rfc5545-types::string:** `CaselessStr`, `InvalidCharError`, `Text`, `TextBuf`, `Name`, `NameKind`, `InvalidNameError`, `InvalidTextError`
+**From calendar-types::css:** `Css3Color` (entire module re-exported)
+
+### unsized_newtype! → DstNewtype migration
+
+The `unsized_newtype!` macro and `CloneUnsized` helper trait have been completely removed. All remaining calico-local string DST newtypes now use `dizzy::DstNewtype`:
+
+| type | invariant | notes |
+|---|---|---|
+| `TzId(str)` | `dizzy::trivial` | Any string is a valid TZID |
+| `Uri(str)` | `dizzy::trivial` | Permissive — no scheme validation (unlike `calendar_types::string::Uri`) |
+| `Uid(str)` | `dizzy::trivial` | Any string is a valid UID |
+| `ParamValue(str)` | char validation | Rejects ASCII control (except HTAB) and double-quote |
+
+### Workspace API additions for migration
+
+- `rfc5545_types::string::TextBuf::from_string()` — construct from `String` with validation
+- `rfc5545_types::string::TextBuf::from_string_unchecked()` — construct from pre-validated `String`
+- `rfc5545_types::string::TextBuf::into_string()` — consume and return inner `String`
+- `rfc5545_types::string::Text::char_is_valid()` — public character validation
+- `rfc5545_types::time::DateTimeOrDate::map_marker()` — convert timezone marker type
 
 ### Types NOT yet replaced (structural differences)
 
@@ -189,10 +209,6 @@ Create a `calico-migration` branch and commit this plan as `CALICO-MIGRATION.md`
 | `Duration`/`DurationKind`/`DurationTime` | `calendar_types::duration::*` | Completely different decomposition model |
 | `CompletionPercentage` | `rfc5545_types::set::Percent` | Different name and API |
 | `RequestStatus`/`RequestStatusCode` | `rfc5545_types::request_status::*` | Different code structure |
-| `Css3Color` | `calendar_types::css::Css3Color` | Missing `iter()`, parser uses `hashify!` |
-| `Text`/`TextBuf` | `rfc5545_types::string::Text`/`TextBuf` | Different invariants (calico rejects HTAB/LF) |
-| `Name` | `rfc5545_types::string::Name` | Inner type differs (`Str1` vs `str`), error types differ |
-| `NameKind::of` | `rfc5545_types::string::NameKind::of` | Signature differs (`impl AsRef<str>` vs `&str`) |
 | Extensible `<S>` enums | Closed `#[non_exhaustive]` enums | Calico needs `Other(S)` variant for parsing |
 | `DateTimeOrDate<F>` | `rfc5545_types::time::DateTimeOrDate<M>` | Type parameter semantics differ |
 | RRule and bitset types | `rfc5545_types::rrule::*` | Not yet compared in detail |

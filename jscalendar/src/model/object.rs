@@ -912,7 +912,8 @@ impl<V: DestructibleJsonValue> TryFromJson<V> for RRule {
                     rrule_field_err::<std::convert::Infallible>("until", TypeErrorOr::TypeError(e))
                 })?;
                 let until = parse_date_or_datetime(s.as_ref())
-                    .ok_or_else(|| rrule_invalid("until", s.as_ref()))?;
+                    .ok_or_else(|| rrule_invalid("until", s.as_ref()))?
+                    .map_marker(Into::into);
                 Some(crate::model::rrule::Termination::Until(until))
             }
             (None, None) => None,
@@ -4334,7 +4335,10 @@ fn serialize_week_no_set<V: ConstructibleJsonValue>(set: &rfc5545_types::rrule::
     V::array(arr)
 }
 
-fn serialize_date_or_datetime(dod: &DateTimeOrDate<Local>) -> String {
+fn serialize_date_or_datetime<M>(dod: &DateTimeOrDate<M>) -> String
+where
+    DateTime<M>: std::fmt::Display,
+{
     match dod {
         DateTimeOrDate::DateTime(dt) => dt.to_string(),
         DateTimeOrDate::Date(d) => d.to_string(),

@@ -86,9 +86,10 @@ where
     Ok(RequestStatus {
         code: status_code.parse_next(input)?,
         description: preceded(';', text)
-            .map(Box::<str>::from)
+            .map(|t: TextBuf| t.into_string().into_boxed_str())
             .parse_next(input)?,
-        exception_data: opt(preceded(';', text).map(Box::<str>::from)).parse_next(input)?,
+        exception_data: opt(preceded(';', text).map(|t: TextBuf| t.into_string().into_boxed_str()))
+            .parse_next(input)?,
     })
 }
 
@@ -182,9 +183,7 @@ where
     // but a literal forward slash is perfectly permissible in a text value, so this is equivalent
     // to just parsing a text value
 
-    text.map(TextBuf::into_boxed_text)
-        .map(TzId::from_boxed_text)
-        .parse_next(input)
+    text.map(TzId::from_text_buf).parse_next(input)
 }
 
 /// Parses a [`TimeTransparency`].
@@ -281,9 +280,7 @@ where
     <I as Stream>::Token: AsChar + Clone,
     E: ParserError<I> + FromExternalError<I, CalendarParseError<I::Slice>>,
 {
-    text.map(TextBuf::into_boxed_text)
-        .map(Uid::from_boxed_text)
-        .parse_next(input)
+    text.map(Uid::from_text_buf).parse_next(input)
 }
 
 /// Parses an RFC 5646 [language tag](Language).
@@ -358,8 +355,8 @@ where
 
     I::try_into_string(&slice)
         .map(|s| {
-            // SAFETY: the parser guarantees that this string is a valid URI
-            unsafe { Uri::from_boxed_unchecked(s.into_boxed_str()) }
+            // Trivial invariant — unwrap is infallible
+            Uri::new(&s).unwrap().into()
         })
         .map_err(|e| E::from_external_error(input, e))
 }
@@ -637,15 +634,9 @@ where
 
     let s = I::try_into_string(&slice).map_err(|e| E::from_external_error(input, e.into()))?;
 
-    // SAFETY: the result of the parser is definitely non-empty
-    assert!(!s.is_empty());
-    let s = unsafe { mitsein::string1::String1::from_string_unchecked(s) };
-
-    // SAFETY: the bytes of `s` are definitely either alphanumeric or the hyphen, as guaranteed by
-    // the parser
-    let name = unsafe { Name::from_boxed_unchecked(s.into_boxed_str1()) };
-
-    Ok(name)
+    // The parser guarantees non-empty, alphanumeric+hyphen, so this cannot fail.
+    let name_ref = Name::new(&s).expect("parser guarantees valid name");
+    Ok(name_ref.into())
 }
 
 /// Parses a [`ParamValue`].
@@ -760,8 +751,8 @@ where
         match alt((safe_text, text_escape)).parse_next(input) {
             Ok(str) => buf.push_str(str.as_ref()),
             Err(()) => {
-                // SAFETY: the parser guarantees this is a valid TextBuf
-                let t = unsafe { TextBuf::new_unchecked(buf) };
+                // SAFETY: the parser only produces valid TEXT characters
+                let t = unsafe { TextBuf::from_string_unchecked(buf) };
                 return Ok(t);
             }
         }

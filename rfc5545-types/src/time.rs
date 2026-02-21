@@ -27,6 +27,18 @@ impl<M> DateTimeOrDate<M> {
     pub fn is_date_time(&self) -> bool {
         matches!(self, Self::DateTime(_))
     }
+
+    /// Converts the marker type of the inner datetime.
+    pub fn map_marker<N>(self, f: impl FnOnce(M) -> N) -> DateTimeOrDate<N> {
+        match self {
+            Self::DateTime(dt) => DateTimeOrDate::DateTime(DateTime {
+                date: dt.date,
+                time: dt.time,
+                marker: f(dt.marker),
+            }),
+            Self::Date(d) => DateTimeOrDate::Date(d),
+        }
+    }
 }
 
 /// An offset from UTC to some local time (RFC 5545 §3.3.14).

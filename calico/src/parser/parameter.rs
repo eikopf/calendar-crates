@@ -229,13 +229,10 @@ where
 mod tests {
     use mitsein::{iter1::IntoIterator1, vec1};
 
-    use crate::{
-        model::{
-            parameter::KnownParam,
-            primitive::{DisplayType, Encoding, FeatureType, Token, TriggerRelation, ValueType},
-            string::{ParamValue, TzId},
-        },
-        text,
+    use crate::model::{
+        parameter::KnownParam,
+        primitive::{DisplayType, Encoding, FeatureType, Token, TriggerRelation, ValueType},
+        string::{ParamValue, Text, TextBuf, TzId, Uri},
     };
 
     use super::*;
@@ -255,9 +252,9 @@ mod tests {
                 .parse_peek("tzid=America/New_York")
                 .ok()
                 .and_then(|(_, p)| p.try_into_known().ok()),
-            Some(KnownParam::TzId(TzId::from_boxed_text(text!(
-                "America/New_York"
-            )))),
+            Some(KnownParam::TzId(TzId::from_text_buf(
+                TextBuf::from(Text::new("America/New_York").unwrap()),
+            ))),
         );
 
         assert_eq!(
@@ -492,15 +489,12 @@ mod tests {
         );
 
         let uris = vec1![
-            Box::<str>::from("mailto:alice@place.com"),
-            Box::<str>::from("mailto:brice@place.com"),
-            Box::<str>::from("mailto:carla@place.com"),
+            Uri::new("mailto:alice@place.com").unwrap(),
+            Uri::new("mailto:brice@place.com").unwrap(),
+            Uri::new("mailto:carla@place.com").unwrap(),
         ]
         .into_iter1()
-        .map(|s| {
-            // SAFETY: these literals are definitely valid URIs
-            unsafe { Uri::from_boxed_unchecked(s) }
-        })
+        .map(|u| -> Box<Uri> { u.into() })
         .collect1();
 
         assert_eq!(

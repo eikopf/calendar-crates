@@ -1,48 +1,515 @@
 //! Model types for iCalendar components.
 
-use std::num::NonZero;
-
 use enumflags2::{BitFlags, bitflags};
-use hashbrown::{Equivalent, HashMap};
+use structible::structible;
 
 use super::{
-    property::{PropertySeq, StaticProp},
-    string::{CaselessStr, NeverStr},
+    css::Css3Color,
+    parameter::Params,
+    primitive::{
+        Attachment, ClassValue, CompletionPercentage, DateTime, DateTimeOrDate, Geo, Gregorian,
+        Integer, Method, ParticipantType, Period, Priority, RDateSeq,
+        RequestStatus, ResourceType, SignedDuration, Status, StyledDescriptionValue,
+        TimeTransparency, Token, TriggerValue, Utc, UtcOffset, Value, Version,
+    },
+    property::{Prop, StructuredDataProp},
+    rrule::RRule,
+    string::{CaselessStr, TzId, Uid, Uri},
 };
 
-// TODO: extend this macro to support doc comments
+// ============================================================================
+// Calendar (RFC 5545 §3.4)
+// ============================================================================
 
-macro_rules! define_component_newtype {
-    ($v:vis $name:ident) => {
-        #[derive(Debug, Clone, PartialEq)]
-        #[repr(transparent)]
-        $v struct $name(Component);
-    };
+/// An iCalendar object (RFC 5545 §3.4).
+#[structible]
+pub struct Calendar {
+    // Required
+    pub prod_id: Prop<String, Params>,
+    pub version: Prop<Version, Params>,
+
+    // Optional (at most once)
+    pub cal_scale: Option<Prop<Token<Gregorian, String>, Params>>,
+    pub method: Option<Prop<Token<Method, String>, Params>>,
+
+    // RFC 7986 optional
+    pub uid: Option<Prop<Box<Uid>, Params>>,
+    pub last_modified: Option<Prop<DateTime<Utc>, Params>>,
+    pub url: Option<Prop<Box<Uri>, Params>>,
+    pub refresh_interval: Option<Prop<SignedDuration, Params>>,
+    pub source: Option<Prop<Box<Uri>, Params>>,
+    pub color: Option<Prop<Css3Color, Params>>,
+
+    // RFC 7986 multi-valued
+    pub name: Option<Vec<Prop<String, Params>>>,
+    pub description: Option<Vec<Prop<String, Params>>>,
+    pub categories: Option<Vec<Prop<Vec<String>, Params>>>,
+    pub image: Option<Vec<Prop<Attachment, Params>>>,
+
+    // Subcomponents
+    pub components: Vec<CalendarComponent>,
+
+    // Unknown properties
+    #[structible(key = Box<CaselessStr>)]
+    pub x_property: Option<Vec<Prop<Value<String>, Params>>>,
 }
 
-define_component_newtype!(pub Calendar);
-define_component_newtype!(pub Event);
-define_component_newtype!(pub Todo);
-define_component_newtype!(pub Journal);
-define_component_newtype!(pub FreeBusy);
-define_component_newtype!(pub TimeZone);
-define_component_newtype!(pub Standard);
-define_component_newtype!(pub Daylight);
-define_component_newtype!(pub Alarm);
-define_component_newtype!(pub AudioAlarm);
-define_component_newtype!(pub DisplayAlarm);
-define_component_newtype!(pub EmailAlarm);
-define_component_newtype!(pub Participant);
-define_component_newtype!(pub Location);
-define_component_newtype!(pub Resource);
+// ============================================================================
+// CalendarComponent enum
+// ============================================================================
 
-/// An iCalendar component.
+/// An immediate subcomponent of a [`Calendar`].
 #[derive(Debug, Clone, PartialEq)]
-pub struct Component {
-    tag: ComponentTag,
-    properties: HashMap<PropKey<Box<CaselessStr>>, PropertySeq>,
-    subcomponents: Vec<Self>,
+pub enum CalendarComponent {
+    Event(Event),
+    Todo(Todo),
+    Journal(Journal),
+    FreeBusy(FreeBusy),
+    TimeZone(TimeZone),
+    Other(OtherComponent),
 }
+
+// ============================================================================
+// Event (RFC 5545 §3.6.1)
+// ============================================================================
+
+/// A VEVENT component (RFC 5545 §3.6.1).
+#[structible]
+pub struct Event {
+    // Required
+    pub dtstamp: Prop<DateTime<Utc>, Params>,
+    pub uid: Prop<Box<Uid>, Params>,
+
+    // Optional (at most once)
+    pub dtstart: Option<Prop<DateTimeOrDate, Params>>,
+    pub class: Option<Prop<Token<ClassValue, String>, Params>>,
+    pub created: Option<Prop<DateTime<Utc>, Params>>,
+    pub description: Option<Prop<String, Params>>,
+    pub geo: Option<Prop<Geo, Params>>,
+    pub last_modified: Option<Prop<DateTime<Utc>, Params>>,
+    pub location: Option<Prop<String, Params>>,
+    pub organizer: Option<Prop<Box<Uri>, Params>>,
+    pub priority: Option<Prop<Priority, Params>>,
+    pub sequence: Option<Prop<Integer, Params>>,
+    pub status: Option<Prop<Status, Params>>,
+    pub summary: Option<Prop<String, Params>>,
+    pub transp: Option<Prop<TimeTransparency, Params>>,
+    pub url: Option<Prop<Box<Uri>, Params>>,
+    pub recurrence_id: Option<Prop<DateTimeOrDate, Params>>,
+    pub dtend: Option<Prop<DateTimeOrDate, Params>>,
+    pub duration: Option<Prop<SignedDuration, Params>>,
+    pub color: Option<Prop<Css3Color, Params>>,
+
+    // Multi-valued
+    pub attach: Option<Vec<Prop<Attachment, Params>>>,
+    pub attendee: Option<Vec<Prop<Box<Uri>, Params>>>,
+    pub categories: Option<Vec<Prop<Vec<String>, Params>>>,
+    pub comment: Option<Vec<Prop<String, Params>>>,
+    pub contact: Option<Vec<Prop<String, Params>>>,
+    pub exdate: Option<Vec<Prop<DateTimeOrDate, Params>>>,
+    pub request_status: Option<Vec<Prop<RequestStatus, Params>>>,
+    pub related_to: Option<Vec<Prop<Box<Uid>, Params>>>,
+    pub resources: Option<Vec<Prop<Vec<String>, Params>>>,
+    pub rdate: Option<Vec<Prop<RDateSeq, Params>>>,
+    pub rrule: Option<Vec<Prop<RRule, Params>>>,
+    pub image: Option<Vec<Prop<Attachment, Params>>>,
+    pub conference: Option<Vec<Prop<Box<Uri>, Params>>>,
+    pub styled_description: Option<Vec<Prop<StyledDescriptionValue, Params>>>,
+    pub structured_data: Option<Vec<StructuredDataProp>>,
+
+    // Subcomponents
+    pub alarms: Vec<Alarm>,
+    pub participants: Vec<Participant>,
+    pub locations: Vec<LocationComponent>,
+    pub resource_components: Vec<ResourceComponent>,
+
+    // Unknown properties
+    #[structible(key = Box<CaselessStr>)]
+    pub x_property: Option<Vec<Prop<Value<String>, Params>>>,
+}
+
+// ============================================================================
+// Todo (RFC 5545 §3.6.2)
+// ============================================================================
+
+/// A VTODO component (RFC 5545 §3.6.2).
+#[structible]
+pub struct Todo {
+    // Required
+    pub dtstamp: Prop<DateTime<Utc>, Params>,
+    pub uid: Prop<Box<Uid>, Params>,
+
+    // Optional (at most once)
+    pub dtstart: Option<Prop<DateTimeOrDate, Params>>,
+    pub class: Option<Prop<Token<ClassValue, String>, Params>>,
+    pub completed: Option<Prop<DateTime<Utc>, Params>>,
+    pub created: Option<Prop<DateTime<Utc>, Params>>,
+    pub description: Option<Prop<String, Params>>,
+    pub geo: Option<Prop<Geo, Params>>,
+    pub last_modified: Option<Prop<DateTime<Utc>, Params>>,
+    pub location: Option<Prop<String, Params>>,
+    pub organizer: Option<Prop<Box<Uri>, Params>>,
+    pub percent_complete: Option<Prop<CompletionPercentage, Params>>,
+    pub priority: Option<Prop<Priority, Params>>,
+    pub recurrence_id: Option<Prop<DateTimeOrDate, Params>>,
+    pub sequence: Option<Prop<Integer, Params>>,
+    pub status: Option<Prop<Status, Params>>,
+    pub summary: Option<Prop<String, Params>>,
+    pub url: Option<Prop<Box<Uri>, Params>>,
+    pub due: Option<Prop<DateTimeOrDate, Params>>,
+    pub duration: Option<Prop<SignedDuration, Params>>,
+    pub color: Option<Prop<Css3Color, Params>>,
+
+    // Multi-valued
+    pub attach: Option<Vec<Prop<Attachment, Params>>>,
+    pub attendee: Option<Vec<Prop<Box<Uri>, Params>>>,
+    pub categories: Option<Vec<Prop<Vec<String>, Params>>>,
+    pub comment: Option<Vec<Prop<String, Params>>>,
+    pub contact: Option<Vec<Prop<String, Params>>>,
+    pub exdate: Option<Vec<Prop<DateTimeOrDate, Params>>>,
+    pub request_status: Option<Vec<Prop<RequestStatus, Params>>>,
+    pub related_to: Option<Vec<Prop<Box<Uid>, Params>>>,
+    pub resources: Option<Vec<Prop<Vec<String>, Params>>>,
+    pub rdate: Option<Vec<Prop<RDateSeq, Params>>>,
+    pub rrule: Option<Vec<Prop<RRule, Params>>>,
+    pub image: Option<Vec<Prop<Attachment, Params>>>,
+    pub conference: Option<Vec<Prop<Box<Uri>, Params>>>,
+    pub styled_description: Option<Vec<Prop<StyledDescriptionValue, Params>>>,
+    pub structured_data: Option<Vec<StructuredDataProp>>,
+
+    // Subcomponents
+    pub alarms: Vec<Alarm>,
+    pub participants: Vec<Participant>,
+    pub locations: Vec<LocationComponent>,
+    pub resource_components: Vec<ResourceComponent>,
+
+    // Unknown properties
+    #[structible(key = Box<CaselessStr>)]
+    pub x_property: Option<Vec<Prop<Value<String>, Params>>>,
+}
+
+// ============================================================================
+// Journal (RFC 5545 §3.6.3)
+// ============================================================================
+
+/// A VJOURNAL component (RFC 5545 §3.6.3).
+#[structible]
+pub struct Journal {
+    // Required
+    pub dtstamp: Prop<DateTime<Utc>, Params>,
+    pub uid: Prop<Box<Uid>, Params>,
+
+    // Optional (at most once)
+    pub dtstart: Option<Prop<DateTimeOrDate, Params>>,
+    pub class: Option<Prop<Token<ClassValue, String>, Params>>,
+    pub created: Option<Prop<DateTime<Utc>, Params>>,
+    pub last_modified: Option<Prop<DateTime<Utc>, Params>>,
+    pub organizer: Option<Prop<Box<Uri>, Params>>,
+    pub recurrence_id: Option<Prop<DateTimeOrDate, Params>>,
+    pub sequence: Option<Prop<Integer, Params>>,
+    pub status: Option<Prop<Status, Params>>,
+    pub summary: Option<Prop<String, Params>>,
+    pub url: Option<Prop<Box<Uri>, Params>>,
+
+    // Multi-valued
+    pub attach: Option<Vec<Prop<Attachment, Params>>>,
+    pub attendee: Option<Vec<Prop<Box<Uri>, Params>>>,
+    pub categories: Option<Vec<Prop<Vec<String>, Params>>>,
+    pub comment: Option<Vec<Prop<String, Params>>>,
+    pub contact: Option<Vec<Prop<String, Params>>>,
+    pub description: Option<Vec<Prop<String, Params>>>,
+    pub exdate: Option<Vec<Prop<DateTimeOrDate, Params>>>,
+    pub related_to: Option<Vec<Prop<Box<Uid>, Params>>>,
+    pub rdate: Option<Vec<Prop<RDateSeq, Params>>>,
+    pub rrule: Option<Vec<Prop<RRule, Params>>>,
+    pub request_status: Option<Vec<Prop<RequestStatus, Params>>>,
+
+    // Subcomponents
+    pub participants: Vec<Participant>,
+    pub locations: Vec<LocationComponent>,
+    pub resource_components: Vec<ResourceComponent>,
+
+    // Unknown properties
+    #[structible(key = Box<CaselessStr>)]
+    pub x_property: Option<Vec<Prop<Value<String>, Params>>>,
+}
+
+// ============================================================================
+// FreeBusy (RFC 5545 §3.6.4)
+// ============================================================================
+
+/// A VFREEBUSY component (RFC 5545 §3.6.4).
+#[structible]
+pub struct FreeBusy {
+    // Required
+    pub dtstamp: Prop<DateTime<Utc>, Params>,
+    pub uid: Prop<Box<Uid>, Params>,
+
+    // Optional (at most once)
+    pub contact: Option<Prop<String, Params>>,
+    pub dtstart: Option<Prop<DateTimeOrDate, Params>>,
+    pub dtend: Option<Prop<DateTimeOrDate, Params>>,
+    pub organizer: Option<Prop<Box<Uri>, Params>>,
+    pub url: Option<Prop<Box<Uri>, Params>>,
+
+    // Multi-valued
+    pub attendee: Option<Vec<Prop<Box<Uri>, Params>>>,
+    pub comment: Option<Vec<Prop<String, Params>>>,
+    pub freebusy: Option<Vec<Prop<Vec<Period>, Params>>>,
+    pub request_status: Option<Vec<Prop<RequestStatus, Params>>>,
+
+    // Subcomponents
+    pub participants: Vec<Participant>,
+    pub locations: Vec<LocationComponent>,
+    pub resource_components: Vec<ResourceComponent>,
+
+    // Unknown properties
+    #[structible(key = Box<CaselessStr>)]
+    pub x_property: Option<Vec<Prop<Value<String>, Params>>>,
+}
+
+// ============================================================================
+// TimeZone (RFC 5545 §3.6.5)
+// ============================================================================
+
+/// A VTIMEZONE component (RFC 5545 §3.6.5).
+#[structible]
+pub struct TimeZone {
+    // Required
+    pub tz_id: Prop<Box<TzId>, Params>,
+
+    // Optional (at most once)
+    pub last_modified: Option<Prop<DateTime<Utc>, Params>>,
+    pub tz_url: Option<Prop<Box<Uri>, Params>>,
+
+    // Subcomponents
+    pub rules: Vec<TzRule>,
+
+    // Unknown properties
+    #[structible(key = Box<CaselessStr>)]
+    pub x_property: Option<Vec<Prop<Value<String>, Params>>>,
+}
+
+// ============================================================================
+// TzRule (STANDARD / DAYLIGHT)
+// ============================================================================
+
+/// A STANDARD or DAYLIGHT subcomponent of a [`TimeZone`].
+#[structible]
+pub struct TzRule {
+    // Required
+    pub kind: TzRuleKind,
+    pub dtstart: Prop<DateTimeOrDate, Params>,
+    pub tz_offset_to: Prop<UtcOffset, Params>,
+    pub tz_offset_from: Prop<UtcOffset, Params>,
+
+    // Multi-valued
+    pub comment: Option<Vec<Prop<String, Params>>>,
+    pub rdate: Option<Vec<Prop<RDateSeq, Params>>>,
+    pub rrule: Option<Vec<Prop<RRule, Params>>>,
+    pub tz_name: Option<Vec<Prop<String, Params>>>,
+
+    // Unknown properties
+    #[structible(key = Box<CaselessStr>)]
+    pub x_property: Option<Vec<Prop<Value<String>, Params>>>,
+}
+
+// ============================================================================
+// Alarm (RFC 5545 §3.6.6)
+// ============================================================================
+
+/// A VALARM component (RFC 5545 §3.6.6).
+#[derive(Debug, Clone, PartialEq)]
+pub enum Alarm {
+    Audio(AudioAlarm),
+    Display(DisplayAlarm),
+    Email(EmailAlarm),
+    Other(OtherAlarm),
+}
+
+/// A VALARM with the AUDIO action.
+#[structible]
+pub struct AudioAlarm {
+    // Required
+    pub trigger: Prop<TriggerValue, Params>,
+
+    // Optional (at most once)
+    pub attach: Option<Prop<Attachment, Params>>,
+    pub uid: Option<Prop<Box<Uid>, Params>>,
+    pub duration: Option<Prop<SignedDuration, Params>>,
+    pub repeat: Option<Prop<Integer, Params>>,
+    pub acknowledged: Option<Prop<DateTime<Utc>, Params>>,
+
+    // Unknown properties
+    #[structible(key = Box<CaselessStr>)]
+    pub x_property: Option<Vec<Prop<Value<String>, Params>>>,
+}
+
+/// A VALARM with the DISPLAY action.
+#[structible]
+pub struct DisplayAlarm {
+    // Required
+    pub trigger: Prop<TriggerValue, Params>,
+    pub description: Prop<String, Params>,
+
+    // Optional (at most once)
+    pub uid: Option<Prop<Box<Uid>, Params>>,
+    pub duration: Option<Prop<SignedDuration, Params>>,
+    pub repeat: Option<Prop<Integer, Params>>,
+    pub acknowledged: Option<Prop<DateTime<Utc>, Params>>,
+
+    // Unknown properties
+    #[structible(key = Box<CaselessStr>)]
+    pub x_property: Option<Vec<Prop<Value<String>, Params>>>,
+}
+
+/// A VALARM with the EMAIL action.
+#[structible]
+pub struct EmailAlarm {
+    // Required
+    pub trigger: Prop<TriggerValue, Params>,
+    pub description: Prop<String, Params>,
+    pub summary: Prop<String, Params>,
+
+    // Optional (at most once)
+    pub uid: Option<Prop<Box<Uid>, Params>>,
+    pub duration: Option<Prop<SignedDuration, Params>>,
+    pub repeat: Option<Prop<Integer, Params>>,
+    pub acknowledged: Option<Prop<DateTime<Utc>, Params>>,
+
+    // Multi-valued
+    pub attendee: Option<Vec<Prop<Box<Uri>, Params>>>,
+    pub attach: Option<Vec<Prop<Attachment, Params>>>,
+
+    // Unknown properties
+    #[structible(key = Box<CaselessStr>)]
+    pub x_property: Option<Vec<Prop<Value<String>, Params>>>,
+}
+
+/// A VALARM with an action other than AUDIO, DISPLAY, or EMAIL.
+#[structible]
+pub struct OtherAlarm {
+    // Required
+    pub trigger: Prop<TriggerValue, Params>,
+    pub action: Prop<String, Params>,
+
+    // Optional
+    pub description: Option<Prop<String, Params>>,
+    pub summary: Option<Prop<String, Params>>,
+    pub uid: Option<Prop<Box<Uid>, Params>>,
+    pub duration: Option<Prop<SignedDuration, Params>>,
+    pub repeat: Option<Prop<Integer, Params>>,
+    pub acknowledged: Option<Prop<DateTime<Utc>, Params>>,
+
+    // Multi-valued
+    pub attendee: Option<Vec<Prop<Box<Uri>, Params>>>,
+    pub attach: Option<Vec<Prop<Attachment, Params>>>,
+
+    // Unknown properties
+    #[structible(key = Box<CaselessStr>)]
+    pub x_property: Option<Vec<Prop<Value<String>, Params>>>,
+}
+
+// ============================================================================
+// RFC 9073 Components
+// ============================================================================
+
+/// A VLOCATION component (RFC 9073 §7.2).
+#[structible]
+pub struct LocationComponent {
+    // Required
+    pub uid: Prop<Box<Uid>, Params>,
+
+    // Optional (at most once)
+    pub description: Option<Prop<String, Params>>,
+    pub geo: Option<Prop<Geo, Params>>,
+    pub name: Option<Prop<String, Params>>,
+    pub location_type: Option<Prop<String, Params>>,
+    pub url: Option<Prop<Box<Uri>, Params>>,
+
+    // Multi-valued
+    pub structured_data: Option<Vec<StructuredDataProp>>,
+
+    // Unknown properties
+    #[structible(key = Box<CaselessStr>)]
+    pub x_property: Option<Vec<Prop<Value<String>, Params>>>,
+}
+
+/// A VRESOURCE component (RFC 9073 §7.3).
+#[structible]
+pub struct ResourceComponent {
+    // Required
+    pub uid: Prop<Box<Uid>, Params>,
+
+    // Optional (at most once)
+    pub description: Option<Prop<String, Params>>,
+    pub geo: Option<Prop<Geo, Params>>,
+    pub name: Option<Prop<String, Params>>,
+    pub resource_type: Option<Prop<Token<ResourceType, String>, Params>>,
+
+    // Multi-valued
+    pub structured_data: Option<Vec<StructuredDataProp>>,
+
+    // Unknown properties
+    #[structible(key = Box<CaselessStr>)]
+    pub x_property: Option<Vec<Prop<Value<String>, Params>>>,
+}
+
+/// A PARTICIPANT component (RFC 9073 §7.1).
+#[structible]
+pub struct Participant {
+    // Required
+    pub uid: Prop<Box<Uid>, Params>,
+    pub participant_type: Prop<Token<ParticipantType, String>, Params>,
+
+    // Optional (at most once)
+    pub calendar_address: Option<Prop<Box<Uri>, Params>>,
+    pub created: Option<Prop<DateTime<Utc>, Params>>,
+    pub description: Option<Prop<String, Params>>,
+    pub dtstamp: Option<Prop<DateTime<Utc>, Params>>,
+    pub geo: Option<Prop<Geo, Params>>,
+    pub last_modified: Option<Prop<DateTime<Utc>, Params>>,
+    pub priority: Option<Prop<Priority, Params>>,
+    pub sequence: Option<Prop<Integer, Params>>,
+    pub status: Option<Prop<Status, Params>>,
+    pub summary: Option<Prop<String, Params>>,
+    pub url: Option<Prop<Box<Uri>, Params>>,
+
+    // Multi-valued
+    pub attach: Option<Vec<Prop<Attachment, Params>>>,
+    pub categories: Option<Vec<Prop<Vec<String>, Params>>>,
+    pub comment: Option<Vec<Prop<String, Params>>>,
+    pub contact: Option<Vec<Prop<String, Params>>>,
+    pub location_prop: Option<Vec<Prop<String, Params>>>,
+    pub request_status: Option<Vec<Prop<RequestStatus, Params>>>,
+    pub related_to: Option<Vec<Prop<Box<Uid>, Params>>>,
+    pub resources: Option<Vec<Prop<Vec<String>, Params>>>,
+    pub styled_description: Option<Vec<Prop<StyledDescriptionValue, Params>>>,
+    pub structured_data: Option<Vec<StructuredDataProp>>,
+
+    // Subcomponents
+    pub locations: Vec<LocationComponent>,
+    pub resource_components: Vec<ResourceComponent>,
+
+    // Unknown properties
+    #[structible(key = Box<CaselessStr>)]
+    pub x_property: Option<Vec<Prop<Value<String>, Params>>>,
+}
+
+// ============================================================================
+// OtherComponent
+// ============================================================================
+
+/// An arbitrary component which may have any properties and subcomponents.
+#[derive(Debug, Clone, PartialEq)]
+pub struct OtherComponent {
+    pub name: Box<str>,
+    pub subcomponents: Vec<OtherComponent>,
+}
+
+// ============================================================================
+// Enums kept from original
+// ============================================================================
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ComponentName<S> {
@@ -75,81 +542,9 @@ pub enum TzRuleKind {
     Daylight,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-enum ComponentTag {
-    // RFC 5545 KNOWN COMPONENTS
-    Calendar,
-    Event {
-        alarm_len: u32,
-        participant_len: u32,
-        location_len: u32,
-        resource_len: u32,
-    },
-    Todo {
-        alarm_len: u32,
-        participant_len: u32,
-        location_len: u32,
-        resource_len: u32,
-    },
-    Journal {
-        participant_len: u32,
-        location_len: u32,
-        resource_len: u32,
-    },
-    FreeBusy {
-        participant_len: u32,
-        location_len: u32,
-        resource_len: u32,
-    },
-    TimeZone {
-        rule_len: NonZero<u32>,
-    },
-    Standard,
-    Daylight,
-    Alarm {
-        kind: AlarmKind,
-        location_len: u32,
-    },
-    Unknown(Box<str>),
-
-    // RFC 9073 KNOWN COMPONENTS
-    Participant {
-        location_len: u32,
-        resource_len: u32,
-    },
-    Location,
-    Resource,
-
-    // MALFORMED COMPONENTS
-    MalformedCalendar(BitFlags<MalformedCalendarError>),
-    MalformedEvent(BitFlags<MalformedEventError>),
-    MalformedTodo(BitFlags<MalformedTodoError>),
-    MalformedJournal(BitFlags<MalformedJournalError>),
-    MalformedFreeBusy(BitFlags<MalformedFreeBusyError>),
-    MalformedStandard(BitFlags<MalformedTzRuleError>),
-    MalformedDaylight(BitFlags<MalformedTzRuleError>),
-    MalformedAlarm(BitFlags<MalformedAlarmError>, AlarmActionErrors),
-}
-
-impl ComponentTag {
-    pub fn name(&self) -> ComponentName<&str> {
-        match self {
-            Self::Calendar | Self::MalformedCalendar(_) => ComponentName::Calendar,
-            Self::Event { .. } | Self::MalformedEvent(_) => ComponentName::Event,
-            Self::Todo { .. } | Self::MalformedTodo(_) => ComponentName::Todo,
-            Self::Journal { .. } | Self::MalformedJournal(_) => ComponentName::Journal,
-            Self::FreeBusy { .. } | Self::MalformedFreeBusy(_) => ComponentName::FreeBusy,
-            Self::TimeZone { .. } => ComponentName::TimeZone,
-            Self::Standard | Self::MalformedStandard(_) => ComponentName::Standard,
-            Self::Daylight | Self::MalformedDaylight(_) => ComponentName::Daylight,
-            Self::Alarm { .. } | Self::MalformedAlarm(..) => ComponentName::Alarm,
-            Self::Participant { .. } => ComponentName::Participant,
-            Self::Location => ComponentName::Location,
-            Self::Resource => ComponentName::Resource,
-            Self::Unknown(value) => ComponentName::Unknown(value),
-        }
-    }
-}
+// ============================================================================
+// Malformed component error types
+// ============================================================================
 
 // TODO: these error types currently don't have variants associated with the ordering of time (e.g.
 // errors when DTSTART occurs after DTEND); these should be added where appropriate
@@ -490,1466 +885,3 @@ enum MalformedEmailAlarmError {
 // - Participant (RFC 9073)
 // - Location (RFC 9073)
 // - Resource (RFC 9073)
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-enum PropKey<S> {
-    Known(StaticProp),
-    Unknown(S),
-}
-
-impl Equivalent<PropKey<Box<CaselessStr>>> for PropKey<NeverStr> {
-    fn equivalent(&self, key: &PropKey<Box<CaselessStr>>) -> bool {
-        match (self, key) {
-            (PropKey::Known(lhs), PropKey::Known(rhs)) => lhs == rhs,
-            _ => false,
-        }
-    }
-}
-
-impl Equivalent<PropKey<Box<CaselessStr>>> for PropKey<&str> {
-    fn equivalent(&self, key: &PropKey<Box<CaselessStr>>) -> bool {
-        match (self, key) {
-            (PropKey::Known(lhs), PropKey::Known(rhs)) => lhs == rhs,
-            (PropKey::Unknown(lhs), PropKey::Unknown(rhs)) => rhs.as_ref() == *lhs,
-            _ => false,
-        }
-    }
-}
-
-// macro_rules! mandatory_accessors {
-//     ($([$key:ident, $name:ident, $ret:ty]),* $(,)?) => {
-//         $(
-//             pub fn $name(&self) -> &$ret {
-//                 match self.props.get_known(StaticProp::$key).unwrap().try_into() {
-//                     Ok(value) => value,
-//                     Err(_) => panic!(),
-//                 }
-//             }
-//
-//             paste! {
-//             pub fn [<$name _mut>](&mut self) -> &mut $ret {
-//                 match self.props.get_known_mut(StaticProp::$key).unwrap().try_into() {
-//                     Ok(value) => value,
-//                     Err(_) => panic!(),
-//                 }
-//             }
-//             }
-//         )*
-//     };
-// }
-//
-// macro_rules! check_property_mult {
-//     ($props:expr, $comp:ident; { $($key:ident : $mult:ident),+ $(,)? }) => {{
-//         let props = &$props;
-//         $(
-//             check_mult(props, StaticProp::$key, Mult::$mult)
-//                 .map_err(|received| FromRawComponentError::InvalidPropMult {
-//                     component: StaticComponentName::$comp,
-//                     prop: StaticProp::$key,
-//                     expected: Mult::$mult,
-//                     received,
-//                 })?;
-//         )+
-//     }};
-// }
-
-// /// An iCalendar object (RFC 5545 §3.4).
-// #[derive(Debug, Clone)]
-// pub struct Calendar<S> {
-//     props: PropertyTable<S>,
-//     components: Vec<CalendarComponent<S>>,
-// }
-//
-// impl<S> Calendar<S> {
-//     pub(crate) const fn new(
-//         props: PropertyTable<S>,
-//         components: Vec<CalendarComponent<S>>,
-//     ) -> Self {
-//         Self { props, components }
-//     }
-//
-//     pub const fn components(&self) -> &[CalendarComponent<S>] {
-//         self.components.as_slice()
-//     }
-//
-//     pub const fn components_mut(&mut self) -> &mut Vec<CalendarComponent<S>> {
-//         &mut self.components
-//     }
-// }
-//
-// impl<S> Calendar<S>
-// where
-//     S: HashCaseless + Equiv,
-// {
-//     mandatory_accessors! {
-//         [ProdId, prod_id, Prop<String, Params>],
-//         [Version, version, Prop<Version, Params>],
-//     }
-//
-//     optional_accessors! {
-//         [CalScale, scale, Prop<Gregorian, Params>],
-//         [Method, method, Prop<Method<S>, Params>],
-//         [Uid, uid, Prop<Uid, Params>],
-//         [LastModified, last_modified, Prop<DateTime<Utc>, Params>],
-//         [Url, url, Prop<Uri<S>, Params>],
-//         [RefreshInterval, refresh_interval, Prop<Duration, Params>],
-//         [Source, source, Prop<Uri<S>, Params>],
-//         [Color, color, Prop<Css3Color, Params>],
-//     }
-//
-//     // seq_accessors! {
-//     //     [Name, names, Prop<String, Params>],
-//     //     [Description, description, Prop<String, Params>],
-//     //     [Categories, categories, Prop<Vec<String>, Params>],
-//     //     [Image, images, Prop<Attachment<S>, Params>],
-//     // }
-// }
-//
-// /// An immediate subcomponent of a [`Calendar`].
-// #[derive(Debug, Clone)]
-// pub enum CalendarComponent<S> {
-//     Event(Event<S>),
-//     Todo(Todo<S>),
-//     Journal(Journal<S>),
-//     FreeBusy(FreeBusy<S>),
-//     TimeZone(TimeZone<S>),
-//     Other(OtherComponent<S>),
-// }
-//
-// /// A VEVENT component (RFC 5545 §3.6.1).
-// #[derive(Debug, Clone)]
-// pub struct Event<S> {
-//     props: PropertyTable<S>,
-//     alarms: Vec<Alarm<S>>,
-// }
-//
-// impl<S> Event<S> {
-//     pub(crate) const fn new(props: PropertyTable<S>, alarms: Vec<Alarm<S>>) -> Self {
-//         Self { props, alarms }
-//     }
-//
-//     pub const fn alarms(&self) -> &[Alarm<S>] {
-//         self.alarms.as_slice()
-//     }
-//
-//     pub const fn alarms_mut(&mut self) -> &mut Vec<Alarm<S>> {
-//         &mut self.alarms
-//     }
-// }
-//
-// impl<S> Event<S>
-// where
-//     S: HashCaseless + Equiv,
-// {
-//     mandatory_accessors! {
-//         [DtStamp, timestamp, Prop<DateTime<Utc>, Params>],
-//         [Uid, uid, Prop<Uid, Params>],
-//     }
-//
-//     pub fn termination(&self) -> Option<EventTerminationRef<'_>> {
-//         self.end()
-//             .map(EventTerminationRef::End)
-//             .or_else(|| self.duration().map(EventTerminationRef::Duration))
-//     }
-//
-//     pub fn termination_mut(&mut self) -> Option<EventTerminationMut<'_>> {
-//         if self.end().is_some() {
-//             self.end_mut().map(EventTerminationMut::End)
-//         } else if self.duration().is_some() {
-//             self.duration_mut().map(EventTerminationMut::Duration)
-//         } else {
-//             None
-//         }
-//     }
-//
-//     optional_accessors! {
-//         [Status, status, Prop<EventStatus, Params>],
-//         [DtStart, start, Prop<DateTimeOrDate, Params>],
-//         [DtEnd, end, Prop<DateTimeOrDate, Params>],
-//         [Duration, duration, Prop<Duration, Params>],
-//         [Class, class, Prop<ClassValue<S>, Params>],
-//         [Created, created, Prop<DateTime<Utc>, Params>],
-//         [Description, description, Prop<String, Params>],
-//         [Geo, geo, Prop<Geo, Params>],
-//         [LastModified, last_modified, Prop<DateTime<Utc>, Params>],
-//         [Location, location, Prop<String, Params>],
-//         [Organizer, organizer, Prop<CalAddress<S>, Params>],
-//         [Priority, priority, Prop<Priority, Params>],
-//         [Sequence, sequence_number, Prop<Integer, Params>],
-//         [Summary, summary, Prop<String, Params>],
-//         [Transp, transparency, Prop<TimeTransparency, Params>],
-//         [Url, url, Prop<Uri<S>, Params>],
-//         [RecurId, recurrence_id, Prop<DateTimeOrDate, Params>],
-//         [Color, color, Prop<Css3Color, Params>],
-//     }
-//
-//     // seq_accessors! {
-//     //     [Attach, attachments, Prop<Attachment<S>, Params<S>>],
-//     //     [Attendee, attendees, Prop<CalAddress<S>, Params<S>>],
-//     //     [Categories, categories, Prop<Vec<Text<S>>, Params<S>>],
-//     //     [Comment, comments, Prop<Text<S>, Params<S>>],
-//     //     [Contact, contacts, Prop<Text<S>, Params<S>>],
-//     //     [RRule, rrule, Prop<Box<RRule>, Params<S>>],
-//     //     [ExDate, exception_dates, Prop<ExDateSeq, Params<S>>],
-//     //     [RequestStatus, request_statuses, Prop<RequestStatus<S>, Params<S>>],
-//     //     [RelatedTo, relateds, Prop<Uid<S>, Params<S>>],
-//     //     [Resources, resources, Prop<Vec<Text<S>>, Params<S>>],
-//     //     [RDate, recurrence_dates, Prop<RDateSeq, Params<S>>],
-//     //     [Conference, conferences, Prop<Uri<S>, Params<S>>],
-//     //     [Image, images, Prop<Attachment<S>, Params<S>>],
-//     // }
-// }
-//
-// /// A VTODO component (RFC 5545 §3.6.2).
-// #[derive(Debug, Clone)]
-// pub struct Todo<S> {
-//     props: PropertyTable<S>,
-//     alarms: Vec<Alarm<S>>,
-// }
-//
-// impl<S> Todo<S> {
-//     pub(crate) const fn new(props: PropertyTable<S>, alarms: Vec<Alarm<S>>) -> Self {
-//         Self { props, alarms }
-//     }
-//
-//     pub const fn alarms(&self) -> &[Alarm<S>] {
-//         self.alarms.as_slice()
-//     }
-//
-//     pub const fn alarms_mut(&mut self) -> &mut Vec<Alarm<S>> {
-//         &mut self.alarms
-//     }
-// }
-//
-// impl<S> Todo<S>
-// where
-//     S: HashCaseless + Equiv,
-// {
-//     mandatory_accessors! {
-//         [DtStamp, timestamp, Prop<DateTime<Utc>, Params>],
-//         [Uid, uid, Prop<Uid, Params>],
-//     }
-//
-//     pub fn termination(&self) -> Option<TodoTerminationRef<'_>> {
-//         self.due()
-//             .map(TodoTerminationRef::Due)
-//             .or_else(|| self.duration().map(TodoTerminationRef::Duration))
-//     }
-//
-//     pub fn termination_mut(&mut self) -> Option<TodoTerminationMut<'_>> {
-//         if self.due().is_some() {
-//             self.due_mut().map(TodoTerminationMut::Due)
-//         } else if self.duration().is_some() {
-//             self.duration_mut().map(TodoTerminationMut::Duration)
-//         } else {
-//             None
-//         }
-//     }
-//
-//     optional_accessors! {
-//         [Status, status, Prop<TodoStatus, Params>],
-//         [Class, class, Prop<ClassValue<S>, Params>],
-//         [DtCompleted, completed, Prop<DateTime<Utc>, Params>],
-//         [Created, created, Prop<DateTime<Utc>, Params>],
-//         [Description, description, Prop<String, Params>],
-//         [DtStart, start, Prop<DateTimeOrDate, Params>],
-//         [DtDue, due, Prop<DateTimeOrDate, Params>],
-//         [Duration, duration, Prop<Duration, Params>],
-//         [Geo, geo, Prop<Geo, Params>],
-//         [LastModified, last_modified, Prop<DateTime<Utc>, Params>],
-//         [Location, location, Prop<String, Params>],
-//         [Organizer, organizer, Prop<CalAddress<S>, Params>],
-//         [PercentComplete, percent, Prop<CompletionPercentage, Params>],
-//         [Priority, priority, Prop<Priority, Params>],
-//         [RecurId, recurrence_id, Prop<DateTimeOrDate, Params>],
-//         [Sequence, sequence_number, Prop<Integer, Params>],
-//         [Summary, summary, Prop<String, Params>],
-//         [Url, url, Prop<Uri<S>, Params>],
-//         [Color, color, Prop<Css3Color, Params>],
-//     }
-//
-//     // seq_accessors! {
-//     //     [Attach, attachments, Prop<Attachment<S>, Params<S>>],
-//     //     [Attendee, attendees, Prop<CalAddress<S>, Params<S>>],
-//     //     [Categories, categories, Prop<Vec<Text<S>>, Params<S>>],
-//     //     [Comment, comments, Prop<Text<S>, Params<S>>],
-//     //     [Contact, contacts, Prop<Text<S>, Params<S>>],
-//     //     [RRule, rrule, Prop<Box<RRule>, Params<S>>],
-//     //     [ExDate, exception_dates, Prop<ExDateSeq, Params<S>>],
-//     //     [RequestStatus, request_statuses, Prop<RequestStatus<S>, Params<S>>],
-//     //     [RelatedTo, relateds, Prop<Uid<S>, Params<S>>],
-//     //     [Resources, resources, Prop<Vec<Text<S>>, Params<S>>],
-//     //     [RDate, recurrence_dates, Prop<RDateSeq, Params<S>>],
-//     //     [Conference, conferences, Prop<Uri<S>, Params<S>>],
-//     //     [Image, images, Prop<Attachment<S>, Params<S>>],
-//     // }
-// }
-//
-// /// A VJOURNAL component (RFC 5545 §3.6.3).
-// #[derive(Debug, Clone)]
-// pub struct Journal<S> {
-//     props: PropertyTable<S>,
-// }
-//
-// impl<S> Journal<S> {
-//     pub(crate) const fn new(props: PropertyTable<S>) -> Self {
-//         Self { props }
-//     }
-// }
-//
-// impl<S> Journal<S>
-// where
-//     S: HashCaseless + Equiv,
-// {
-//     mandatory_accessors! {
-//         [DtStamp, timestamp, Prop<DateTime<Utc>, Params>],
-//         [Uid, uid, Prop<Uid, Params>],
-//     }
-//
-//     optional_accessors! {
-//         [Status, status, Prop<JournalStatus, Params>],
-//         [Class, class, Prop<ClassValue<S>, Params>],
-//         [Created, created, Prop<DateTime<Utc>, Params>],
-//         [DtStart, start, Prop<DateTimeOrDate, Params>],
-//         [LastModified, last_modified, Prop<DateTime<Utc>, Params>],
-//         [Organizer, organizer, Prop<CalAddress<S>, Params>],
-//         [RecurId, recurrence_id, Prop<DateTimeOrDate, Params>],
-//         [Sequence, sequence_number, Prop<Integer, Params>],
-//         [Summary, summary, Prop<String, Params>],
-//         [Url, url, Prop<Uri<S>, Params>],
-//     }
-//
-//     // seq_accessors! {
-//     //     [Attach, attachments, Prop<Attachment<S>, Params<S>>],
-//     //     [Attendee, attendees, Prop<CalAddress<S>, Params<S>>],
-//     //     [Categories, categories, Prop<Vec<Text<S>>, Params<S>>],
-//     //     [Comment, comments, Prop<Text<S>, Params<S>>],
-//     //     [Contact, contacts, Prop<Text<S>, Params<S>>],
-//     //     [Description, descriptions, Prop<Text<S>, Params<S>>],
-//     //     [ExDate, exception_dates, Prop<ExDateSeq, Params<S>>],
-//     //     [RelatedTo, relateds, Prop<Uid<S>, Params<S>>],
-//     //     [RDate, recurrence_dates, Prop<RDateSeq, Params<S>>],
-//     //     [RRule, rrule, Prop<Box<RRule>, Params<S>>],
-//     //     [RequestStatus, request_statuses, Prop<RequestStatus<S>, Params<S>>],
-//     // }
-// }
-//
-// /// A VFREEBUSY component (RFC 5545 §3.6.4).
-// #[derive(Debug, Clone)]
-// pub struct FreeBusy<S> {
-//     props: PropertyTable<S>,
-// }
-//
-// impl<S> FreeBusy<S> {
-//     pub(crate) const fn new(props: PropertyTable<S>) -> Self {
-//         Self { props }
-//     }
-// }
-//
-// impl<S> FreeBusy<S>
-// where
-//     S: HashCaseless + Equiv,
-// {
-//     mandatory_accessors! {
-//         [DtStamp, timestamp, Prop<DateTime<Utc>, Params>],
-//         [Uid, uid, Prop<Uid, Params>],
-//     }
-//
-//     optional_accessors! {
-//         [Contact, contact, Prop<String, Params>],
-//         [DtStart, start, Prop<DateTimeOrDate, Params>],
-//         [DtEnd, end, Prop<DateTimeOrDate, Params>],
-//         [Organizer, organizer, Prop<CalAddress<S>, Params>],
-//         [Url, url, Prop<Uri<S>, Params>],
-//     }
-//
-//     // seq_accessors! {
-//     //     [Attendee, attendees, Prop<CalAddress<S>, Params<S>>],
-//     //     [Comment, comments, Prop<Text<S>, Params<S>>],
-//     //     [FreeBusy, free_busy_periods, Prop<Vec<Period>, Params<S>>],
-//     //     [RequestStatus, request_statuses, Prop<RequestStatus<S>, Params<S>>],
-//     // }
-// }
-//
-// /// A VTIMEZONE component (RFC 5545 §3.6.5).
-// #[derive(Debug, Clone)]
-// pub struct TimeZone<S> {
-//     props: PropertyTable<S>,
-//     subcomponents: Vec<TzRule<S>>,
-// }
-//
-// impl<S> TimeZone<S> {
-//     pub(crate) const fn new(props: PropertyTable<S>, subcomponents: Vec<TzRule<S>>) -> Self {
-//         Self {
-//             props,
-//             subcomponents,
-//         }
-//     }
-//
-//     pub const fn rules(&self) -> &[TzRule<S>] {
-//         self.subcomponents.as_slice()
-//     }
-//
-//     pub const fn rules_mut(&mut self) -> &mut Vec<TzRule<S>> {
-//         &mut self.subcomponents
-//     }
-// }
-//
-// impl<S> TimeZone<S>
-// where
-//     S: HashCaseless + Equiv,
-// {
-//     mandatory_accessors! {
-//         [TzId, id, Prop<TzId, Params>],
-//     }
-//
-//     optional_accessors! {
-//         [LastModified, last_modified, Prop<DateTime<Utc>, Params>],
-//         [TzUrl, url, Prop<Uri<S>, Params>],
-//     }
-// }
-//
-// /// A STANDARD or DAYLIGHT subcomponent of a [`TimeZone`].
-// #[derive(Debug, Clone)]
-// pub struct TzRule<S> {
-//     kind: TzRuleKind,
-//     props: PropertyTable<S>,
-// }
-//
-// impl<S> TzRule<S> {
-//     pub(crate) const fn new(props: PropertyTable<S>, kind: TzRuleKind) -> Self {
-//         Self { kind, props }
-//     }
-//
-//     pub fn kind(&self) -> TzRuleKind {
-//         self.kind
-//     }
-// }
-//
-// impl<S> TzRule<S>
-// where
-//     S: HashCaseless + Equiv,
-// {
-//     mandatory_accessors! {
-//         [DtStart, start, Prop<DateTimeOrDate, Params>],
-//         [TzOffsetTo, offset_to, Prop<UtcOffset, Params>],
-//         [TzOffsetFrom, offset_from, Prop<UtcOffset, Params>],
-//     }
-//
-//     // seq_accessors! {
-//     //     [Comment, comments, Prop<Text<S>, Params<S>>],
-//     //     [RDate, recurrence_dates, Prop<RDateSeq, Params<S>>],
-//     //     [RRule, rrule, Prop<Box<RRule>, Params<S>>],
-//     //     [TzName, names, Prop<Text<S>, Params<S>>],
-//     // }
-// }
-//
-// /// The kind of a [`TzRule`], for which the default is [`Standard`].
-// ///
-// /// [`Standard`]: TzRuleKind::Standard
-// #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
-// pub enum TzRuleKind {
-//     #[default]
-//     Standard,
-//     Daylight,
-// }
-//
-// // TODO: VALARM should admit a tail of VLOCATION components when the PROXIMITY property is
-// // present (RFC 9074 §8).
-//
-// macro_rules! alarm_accessors {
-//     () => {
-//         pub fn duration_and_repeat(
-//             &self,
-//         ) -> Option<(&Prop<Duration, Params>, &Prop<Integer, Params>)> {
-//             let duration = self.duration();
-//             let repeat = self.repeat();
-//
-//             match (duration, repeat) {
-//                 (Some(duration), Some(repeat)) => Some((duration, repeat)),
-//                 (Some(_), None) => panic!("DURATION without REPEAT in VALARM"),
-//                 (None, Some(_)) => panic!("REPEAT without DURATION in VALARM"),
-//                 (None, None) => None,
-//             }
-//         }
-//
-//         pub fn trigger(&self) -> TriggerPropRef<'_> {
-//             self.props
-//                 .get_known(StaticProp::Trigger)
-//                 .unwrap()
-//                 .try_into()
-//                 .unwrap()
-//         }
-//
-//         pub fn trigger_mut(&mut self) -> TriggerPropMut<'_> {
-//             self.props
-//                 .get_known_mut(StaticProp::Trigger)
-//                 .unwrap()
-//                 .try_into()
-//                 .unwrap()
-//         }
-//     };
-// }
-//
-// type DurAndRepeatRef<'a> = (&'a Prop<Duration, Params>, &'a Prop<Integer, Params>);
-// type ProxAndLocations<S> = (Prop<ProximityValue<S>, Params>, Vec<Location<S>>);
-// type ProxAndLocationsRef<'a, S> = (&'a Prop<ProximityValue<S>, Params>, &'a [Location<S>]);
-// type ProxAndLocationsMut<'a, S> = (
-//     &'a mut Prop<ProximityValue<S>, Params>,
-//     &'a mut Vec<Location<S>>,
-// );
-//
-// // TODO: handle alarms with unknown actions as a separate type
-//
-// pub struct RawAlarm<S, K> {
-//     props: PropertyTable<S>,
-//     prox_and_locations: Option<ProxAndLocations<S>>,
-//     __kind: PhantomData<K>,
-// }
-//
-// impl<S: Debug, K> Debug for RawAlarm<S, K> {
-//     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-//         f.debug_struct("RawAlarm")
-//             .field("props", &self.props)
-//             .field("prox_and_locations", &self.prox_and_locations)
-//             .finish()
-//     }
-// }
-//
-// impl<S, K: AlarmKind<S>> RawAlarm<S, K> {
-//     pub fn action(&self) -> &Prop<K::Action, Params> {
-//         K::get_action_ref(&self.props)
-//     }
-//
-//     pub fn action_mut(&mut self) -> &mut Prop<K::Action, Params> {
-//         K::get_action_mut(&mut self.props)
-//     }
-// }
-//
-// impl<S, K> RawAlarm<S, K>
-// where
-//     S: HashCaseless + Equiv,
-//     K: AlarmKindWithMandatoryDescription,
-// {
-//     pub fn description(&self) -> &Prop<String, Params> {
-//         todo!()
-//     }
-//
-//     pub fn description_mut(&mut self) -> &mut Prop<String, Params> {
-//         todo!()
-//     }
-// }
-//
-// impl<S> RawAlarm<S, AudioAlarmKind>
-// where
-//     S: HashCaseless + Equiv,
-// {
-//     optional_accessors! {
-//         [Attach, attachment, Prop<Attachment<S>, Params>],
-//     }
-// }
-//
-// impl<S> RawAlarm<S, EmailAlarmKind>
-// where
-//     S: HashCaseless + Equiv,
-// {
-//     mandatory_accessors! {
-//         [Summary, summary, Prop<String, Params>]
-//     }
-//
-//     // NOTE: there must be at least one attendee; maybe use the types provided by the mitsein crate
-//     // to express this in the API?
-//
-//     pub fn attendees(&self) -> &[Prop<CalAddress<S>, Params>] {
-//         todo!()
-//     }
-//
-//     pub fn attendees_mut(&mut self) -> &mut Vec<Prop<CalAddress<S>, Params>> {
-//         todo!()
-//     }
-//
-//     pub fn attachments(&self) -> &[Prop<Attachment<S>, Params>] {
-//         todo!()
-//     }
-//
-//     pub fn attachments_mut(&mut self) -> &mut Vec<Prop<Attachment<S>, Params>> {
-//         todo!()
-//     }
-// }
-//
-// impl<S, K> RawAlarm<S, K>
-// where
-//     S: HashCaseless + Equiv,
-// {
-//     optional_accessors! {
-//         [Uid, uid, Prop<Uid, Params>],
-//         [Duration, duration, Prop<Duration, Params>],
-//         [Repeat, repeat, Prop<Integer, Params>],
-//         [Acknowledged, acknowlegded, Prop<DateTime<Utc>, Params>],
-//     }
-//
-//     pub fn duration_and_repeat(&self) -> Option<DurAndRepeatRef<'_>> {
-//         let duration = self.duration();
-//         let repeat = self.repeat();
-//
-//         match (duration, repeat) {
-//             (Some(duration), Some(repeat)) => Some((duration, repeat)),
-//             (Some(_), None) => panic!("DURATION without REPEAT in VALARM"),
-//             (None, Some(_)) => panic!("REPEAT without DURATION in VALARM"),
-//             (None, None) => None,
-//         }
-//     }
-//
-//     // TODO: duration_and_repeat_mut
-//
-//     pub fn trigger(&self) -> TriggerPropRef<'_> {
-//         self.props
-//             .get_known(StaticProp::Trigger)
-//             .unwrap()
-//             .try_into()
-//             .unwrap()
-//     }
-//
-//     pub fn trigger_mut(&mut self) -> TriggerPropMut<'_> {
-//         self.props
-//             .get_known_mut(StaticProp::Trigger)
-//             .unwrap()
-//             .try_into()
-//             .unwrap()
-//     }
-//
-//     pub const fn proximity_and_locations(&self) -> Option<ProxAndLocationsRef<'_, S>> {
-//         match self.prox_and_locations.as_ref() {
-//             Some((prox, locs)) => Some((prox, locs.as_slice())),
-//             None => None,
-//         }
-//     }
-//
-//     pub const fn proximity_and_locations_mut(&mut self) -> Option<ProxAndLocationsMut<'_, S>> {
-//         match self.prox_and_locations.as_mut() {
-//             Some((prox, locs)) => Some((prox, locs)),
-//             None => None,
-//         }
-//     }
-//
-//     pub const fn remove_proximity_and_locations(&mut self) -> Option<ProxAndLocations<S>> {
-//         self.prox_and_locations.take()
-//     }
-//
-//     pub const fn proximity(&self) -> Option<&Prop<ProximityValue<S>, Params>> {
-//         match self.prox_and_locations.as_ref() {
-//             Some((prox, _)) => Some(prox),
-//             None => None,
-//         }
-//     }
-//
-//     pub const fn proximity_mut(&mut self) -> Option<&mut Prop<ProximityValue<S>, Params>> {
-//         match self.prox_and_locations.as_mut() {
-//             Some((prox, _)) => Some(prox),
-//             None => None,
-//         }
-//     }
-//
-//     pub const fn locations(&self) -> Option<&[Location<S>]> {
-//         match self.prox_and_locations.as_ref() {
-//             Some((_, locs)) => Some(locs.as_slice()),
-//             None => None,
-//         }
-//     }
-//
-//     pub const fn locations_mut(&mut self) -> Option<&mut Vec<Location<S>>> {
-//         match self.prox_and_locations.as_mut() {
-//             Some((_, locs)) => Some(locs),
-//             None => None,
-//         }
-//     }
-// }
-//
-// // TODO: we need a way to be generic over multiplicities for the following properties:
-// // - DESCRIPTION (0 in AUDIO, 1 in DISPLAY and EMAIL)
-// // - SUMMARY (0 in AUDIO and DISPLAY, 1 in EMAIL)
-// // - ATTENDEE (0 in AUDIO and DISPLAY, 1 or more in EMAIL)
-// // - ATTACH (0 or 1 in AUDIO, 0 in DISPLAY, 0 or more in EMAIL)
-//
-// pub struct AudioAlarmKind;
-// pub struct DisplayAlarmKind;
-// pub struct EmailAlarmKind;
-//
-// pub trait AlarmKind<S> {
-//     type Action;
-//
-//     fn get_action_ref(props: &PropertyTable<S>) -> &Prop<Self::Action, Params>;
-//     fn get_action_mut(props: &mut PropertyTable<S>) -> &mut Prop<Self::Action, Params>;
-// }
-//
-// /// Marker trait for alarm kinds where the DESCRIPTION property must occur exactly once, used to
-// /// define the [`description`] and [`description_mut`] methods on [`RawAlarm`].
-// ///
-// /// [`description`]: RawAlarm::description
-// /// [`description_mut`]: RawAlarm::description_mut
-// pub trait AlarmKindWithMandatoryDescription {}
-// impl AlarmKindWithMandatoryDescription for DisplayAlarmKind {}
-// impl AlarmKindWithMandatoryDescription for EmailAlarmKind {}
-//
-// impl<S: HashCaseless + Equiv> AlarmKind<S> for AudioAlarmKind {
-//     type Action = AudioAction;
-//
-//     fn get_action_ref(props: &PropertyTable<S>) -> &Prop<Self::Action, Params> {
-//         props
-//             .get_known(StaticProp::Action)
-//             .unwrap()
-//             .downcast_ref::<Prop<AudioAction, Params>>()
-//             .unwrap()
-//     }
-//
-//     fn get_action_mut(props: &mut PropertyTable<S>) -> &mut Prop<Self::Action, Params> {
-//         props
-//             .get_known_mut(StaticProp::Action)
-//             .unwrap()
-//             .downcast_mut::<Prop<AudioAction, Params>>()
-//             .unwrap()
-//     }
-// }
-//
-// impl<S: HashCaseless + Equiv> AlarmKind<S> for DisplayAlarmKind {
-//     type Action = DisplayAction;
-//
-//     fn get_action_ref(props: &PropertyTable<S>) -> &Prop<Self::Action, Params> {
-//         props
-//             .get_known(StaticProp::Action)
-//             .unwrap()
-//             .downcast_ref::<Prop<DisplayAction, Params>>()
-//             .unwrap()
-//     }
-//
-//     fn get_action_mut(props: &mut PropertyTable<S>) -> &mut Prop<Self::Action, Params> {
-//         props
-//             .get_known_mut(StaticProp::Action)
-//             .unwrap()
-//             .downcast_mut::<Prop<DisplayAction, Params>>()
-//             .unwrap()
-//     }
-// }
-//
-// impl<S: HashCaseless + Equiv> AlarmKind<S> for EmailAlarmKind {
-//     type Action = EmailAction;
-//
-//     fn get_action_ref(props: &PropertyTable<S>) -> &Prop<Self::Action, Params> {
-//         props
-//             .get_known(StaticProp::Action)
-//             .unwrap()
-//             .downcast_ref::<Prop<EmailAction, Params>>()
-//             .unwrap()
-//     }
-//
-//     fn get_action_mut(props: &mut PropertyTable<S>) -> &mut Prop<Self::Action, Params> {
-//         props
-//             .get_known_mut(StaticProp::Action)
-//             .unwrap()
-//             .downcast_mut::<Prop<EmailAction, Params>>()
-//             .unwrap()
-//     }
-// }
-//
-// /// A VALARM component (RFC 5545 §3.6.6).
-// #[derive(Debug, Clone)]
-// pub enum Alarm<S> {
-//     Audio(AudioAlarm<S>),
-//     Display(DisplayAlarm<S>),
-//     Email(EmailAlarm<S>),
-//     Other(OtherAlarm<S>),
-// }
-//
-// impl<S> Alarm<S> {
-//     pub const fn locations(&self) -> &[Location<S>] {
-//         match self {
-//             Alarm::Audio(alarm) => alarm.locations(),
-//             Alarm::Display(alarm) => alarm.locations(),
-//             Alarm::Email(alarm) => alarm.locations(),
-//             Alarm::Other(alarm) => alarm.locations(),
-//         }
-//     }
-//
-//     pub const fn locations_mut(&mut self) -> &mut Vec<Location<S>> {
-//         match self {
-//             Alarm::Audio(alarm) => alarm.locations_mut(),
-//             Alarm::Display(alarm) => alarm.locations_mut(),
-//             Alarm::Email(alarm) => alarm.locations_mut(),
-//             Alarm::Other(alarm) => alarm.locations_mut(),
-//         }
-//     }
-//
-//     pub const fn other_subcomponents(&self) -> &[OtherComponent<S>] {
-//         match self {
-//             Alarm::Audio(alarm) => alarm.other_subcomponents(),
-//             Alarm::Display(alarm) => alarm.other_subcomponents(),
-//             Alarm::Email(alarm) => alarm.other_subcomponents(),
-//             Alarm::Other(alarm) => alarm.other_subcomponents(),
-//         }
-//     }
-//
-//     pub const fn other_subcomponents_mut(&mut self) -> &mut Vec<OtherComponent<S>> {
-//         match self {
-//             Alarm::Audio(alarm) => alarm.other_subcomponents_mut(),
-//             Alarm::Display(alarm) => alarm.other_subcomponents_mut(),
-//             Alarm::Email(alarm) => alarm.other_subcomponents_mut(),
-//             Alarm::Other(alarm) => alarm.other_subcomponents_mut(),
-//         }
-//     }
-// }
-//
-// macro_rules! alarm_subtype_methods {
-//     () => {
-//         pub(crate) const fn new(
-//             props: PropertyTable<S>,
-//             locations: Vec<Location<S>>,
-//             other_subcomponents: Vec<OtherComponent<S>>,
-//         ) -> Self {
-//             Self {
-//                 props,
-//                 locations,
-//                 other_subcomponents,
-//             }
-//         }
-//
-//         pub const fn locations(&self) -> &[Location<S>] {
-//             self.locations.as_slice()
-//         }
-//
-//         pub const fn locations_mut(&mut self) -> &mut Vec<Location<S>> {
-//             &mut self.locations
-//         }
-//
-//         pub const fn other_subcomponents(&self) -> &[OtherComponent<S>] {
-//             self.other_subcomponents.as_slice()
-//         }
-//
-//         pub const fn other_subcomponents_mut(&mut self) -> &mut Vec<OtherComponent<S>> {
-//             &mut self.other_subcomponents
-//         }
-//     };
-// }
-//
-// /// A VALARM with the AUDIO action.
-// #[derive(Debug, Clone)]
-// pub struct AudioAlarm<S> {
-//     props: PropertyTable<S>,
-//     locations: Vec<Location<S>>,
-//     other_subcomponents: Vec<OtherComponent<S>>,
-// }
-//
-// impl<S> AudioAlarm<S> {
-//     alarm_subtype_methods!();
-// }
-//
-// impl<S> AudioAlarm<S>
-// where
-//     S: HashCaseless + Equiv,
-// {
-//     mandatory_accessors! {
-//         [Action, action, Prop<AudioAction, Params>],
-//     }
-//
-//     optional_accessors! {
-//         [Attach, attachment, Prop<Attachment<S>, Params>],
-//         [Uid, uid, Prop<Uid, Params>],
-//         [Duration, duration, Prop<Duration, Params>],
-//         [Repeat, repeat, Prop<Integer, Params>],
-//         [Acknowledged, acknowleded, Prop<DateTime<Utc>, Params>],
-//         [Proximity, proximity, Prop<ProximityValue<S>, Params>],
-//     }
-//
-//     alarm_accessors!();
-// }
-//
-// /// A VALARM with the DISPLAY action.
-// #[derive(Debug, Clone)]
-// pub struct DisplayAlarm<S> {
-//     props: PropertyTable<S>,
-//     locations: Vec<Location<S>>,
-//     other_subcomponents: Vec<OtherComponent<S>>,
-// }
-//
-// impl<S> DisplayAlarm<S> {
-//     alarm_subtype_methods!();
-// }
-//
-// impl<S> DisplayAlarm<S>
-// where
-//     S: HashCaseless + Equiv,
-// {
-//     mandatory_accessors! {
-//         [Action, action, Prop<DisplayAction, Params>],
-//         [Description, description, Prop<String, Params>],
-//     }
-//
-//     optional_accessors! {
-//         [Uid, uid, Prop<Uid, Params>],
-//         [Duration, duration, Prop<Duration, Params>],
-//         [Repeat, repeat, Prop<Integer, Params>],
-//         [Acknowledged, acknowleded, Prop<DateTime<Utc>, Params>],
-//         [Proximity, proximity, Prop<ProximityValue<S>, Params>],
-//     }
-//
-//     alarm_accessors!();
-// }
-//
-// /// A VALARM with the EMAIL action.
-// #[derive(Debug, Clone)]
-// pub struct EmailAlarm<S> {
-//     props: PropertyTable<S>,
-//     locations: Vec<Location<S>>,
-//     other_subcomponents: Vec<OtherComponent<S>>,
-// }
-//
-// impl<S> EmailAlarm<S> {
-//     alarm_subtype_methods!();
-// }
-//
-// impl<S> EmailAlarm<S>
-// where
-//     S: HashCaseless + Equiv,
-// {
-//     mandatory_accessors! {
-//         [Action, action, Prop<EmailAction, Params>],
-//         [Description, description, Prop<String, Params>],
-//         [Summary, summary, Prop<String, Params>],
-//     }
-//
-//     optional_accessors! {
-//         [Uid, uid, Prop<Uid, Params>],
-//         [Duration, duration, Prop<Duration, Params>],
-//         [Repeat, repeat, Prop<Integer, Params>],
-//         [Acknowledged, acknowleded, Prop<DateTime<Utc>, Params>],
-//         [Proximity, proximity, Prop<ProximityValue<S>, Params>],
-//     }
-//
-//     // seq_accessors! {
-//     //     [Attendee, attendees, Prop<CalAddress<S>, Params>],
-//     //     [Attach, attachments, Prop<Attachment<S>, Params>],
-//     // }
-//
-//     alarm_accessors!();
-// }
-//
-// /// A VALARM with an action other than AUDIO, DISPLAY, or EMAIL.
-// #[derive(Debug, Clone)]
-// pub struct OtherAlarm<S> {
-//     props: PropertyTable<S>,
-//     locations: Vec<Location<S>>,
-//     other_subcomponents: Vec<OtherComponent<S>>,
-// }
-//
-// impl<S> OtherAlarm<S> {
-//     alarm_subtype_methods!();
-// }
-//
-// impl<S> OtherAlarm<S>
-// where
-//     S: HashCaseless + Equiv,
-// {
-//     mandatory_accessors! {
-//         [Action, action, Prop<UnknownAction<S>, Params>],
-//     }
-//
-//     optional_accessors! {
-//         [Description, description, Prop<String, Params>],
-//         [Summary, summary, Prop<String, Params>],
-//         [Uid, uid, Prop<Uid, Params>],
-//         [Duration, duration, Prop<Duration, Params>],
-//         [Repeat, repeat, Prop<Integer, Params>],
-//         [Acknowledged, acknowlegded, Prop<DateTime<Utc>, Params>],
-//         [Proximity, proximity, Prop<ProximityValue<S>, Params>],
-//     }
-//
-//     // seq_accessors! {
-//     //     [Attendee, attendees, Prop<CalAddress<S>, Params<S>>],
-//     //     [Attach, attachments, Prop<Attachment<S>, Params<S>>],
-//     // }
-//
-//     alarm_accessors!();
-// }
-//
-// /// A PARTICIPANT component (RFC 9073 §7.1).
-// #[derive(Debug, Clone)]
-// pub struct Participant<S> {
-//     props: PropertyTable<S>,
-//     locations: Vec<Location<S>>,
-//     resources: Vec<Resource<S>>,
-// }
-//
-// impl<S: PartialEq + HashCaseless + Equiv> PartialEq for Participant<S> {
-//     fn eq(&self, other: &Self) -> bool {
-//         self.props == other.props
-//             && self.locations == other.locations
-//             && self.resources == other.resources
-//     }
-// }
-//
-// impl<S, T> TryFrom<RawComponent<S, T>> for Participant<S>
-// where
-//     S: HashCaseless,
-//     T: SubcomponentSet<S>,
-// {
-//     type Error = FromRawComponentError<S>;
-//
-//     fn try_from(
-//         RawComponent {
-//             name,
-//             props,
-//             subcomponents,
-//         }: RawComponent<S, T>,
-//     ) -> Result<Self, Self::Error> {
-//         if !matches!(name, ComponentName::Participant) {
-//             return Err(FromRawComponentError::InvalidName {
-//                 expected: StaticComponentName::Participant,
-//                 received: name,
-//             });
-//         }
-//
-//         // NOTE: RFC 9073 includes "strucloc" and "strucres" as symbols in the grammer for this
-//         // component, but these were removed in erratum EID 6829.
-//
-//         check_property_mult! {props, Participant; {
-//             // mandatory
-//             Uid: One,
-//             ParticipantType: One,
-//             // optional
-//             CalendarAddress: Optional,
-//             Created: Optional,
-//             Description: Optional,
-//             DtStamp: Optional,
-//             Geo: Optional,
-//             LastModified: Optional,
-//             Priority: Optional,
-//             Sequence: Optional,
-//             Status: Optional,
-//             Summary: Optional,
-//             Url: Optional,
-//             // sequential
-//             Attach: Any,
-//             Categories: Any,
-//             Comment: Any,
-//             Contact: Any,
-//             Location: Any,
-//             RequestStatus: Any,
-//             RelatedTo: Any,
-//             Resources: Any,
-//             StyledDescription: Any,
-//             StructuredData: Any,
-//         }};
-//
-//         let ParticipantSubcomponents {
-//             locations,
-//             resources,
-//         } = subcomponents.try_into_participant_subcomponents()?;
-//
-//         Ok(Self {
-//             props,
-//             locations,
-//             resources,
-//         })
-//     }
-// }
-//
-// impl<S> Participant<S>
-// where
-//     S: HashCaseless + Equiv,
-// {
-//     mandatory_accessors! {
-//         [Uid, uid, Prop<Uid, Params>],
-//         [ParticipantType, participant_type, Prop<ParticipantType<S>, Params>],
-//     }
-//
-//     optional_accessors! {
-//         [CalendarAddress, calendar_address, Prop<CalAddress<S>, Params>],
-//         [Created, created, Prop<DateTime<Utc>, Params>],
-//         [Description, description, Prop<String, Params>],
-//         [DtStamp, timestamp, Prop<DateTime<Utc>, Params>],
-//         [Geo, geo, Prop<Geo, Params>],
-//         [LastModified, last_modified, Prop<DateTime<Utc>, Params>],
-//         [Priority, priority, Prop<Priority, Params>],
-//         [Sequence, sequence, Prop<Integer, Params>],
-//         [Status, status, Prop<Status, Params>],
-//         [Summary, summary, Prop<String, Params>],
-//         [Url, url, Prop<Uri<S>, Params>],
-//     }
-//
-//     // seq_accessors! {
-//     //     [Attach, attachments, Prop<Attachment<S>, Params<S>>],
-//     //     [Categories, categories, Prop<Vec<Text<S>>, Params<S>>],
-//     //     [Comment, comments, Prop<Text<S>, Params<S>>],
-//     //     [Contact, contacts, Prop<Text<S>, Params<S>>],
-//     //     [Location, location_properties, Prop<Text<S>, Params<S>>],
-//     //     [RequestStatus, request_statuses, Prop<RequestStatus<S>, Params<S>>],
-//     //     [RelatedTo, relateds, Prop<Uid<S>, Params<S>>],
-//     //     [Resources, resource_properties, Prop<Vec<Text<S>>, Params<S>>],
-//     //     [StyledDescription, styled_descriptions, Prop<StyledDescriptionValue<S>, Params<S>>],
-//     //     [StructuredData, structured_data, StructuredDataProp<S>],
-//     // }
-//
-//     /// Returns the value of the CALENDAR-ADDRESS property if `self` is _schedulable_ as described
-//     /// in RFC 9073 §7.1.1 and with respect to the given attendee addresses.
-//     pub fn schedulable_calendar_address<'a>(
-//         &'a self,
-//         mut attendees: impl Iterator<Item = &'a CalAddress<S>>,
-//     ) -> Option<&'a CalAddress<S>> {
-//         let address = &self.calendar_address()?.value;
-//
-//         match attendees.any(|x| x.0.equiv(&address.0)) {
-//             true => Some(address),
-//             false => None,
-//         }
-//     }
-// }
-//
-// impl<S> Participant<S> {
-//     pub const fn locations(&self) -> &[Location<S>] {
-//         self.locations.as_slice()
-//     }
-//
-//     pub const fn resources(&self) -> &[Resource<S>] {
-//         self.resources.as_slice()
-//     }
-//
-//     pub const fn locations_mut(&mut self) -> &mut Vec<Location<S>> {
-//         &mut self.locations
-//     }
-//
-//     pub const fn resources_mut(&mut self) -> &mut Vec<Resource<S>> {
-//         &mut self.resources
-//     }
-// }
-//
-// /// A VLOCATION component (RFC 9073 §7.2).
-// #[derive(Debug, Clone)]
-// pub struct Location<S> {
-//     props: PropertyTable<S>,
-// }
-//
-// impl<S: PartialEq + HashCaseless + Equiv> PartialEq for Location<S> {
-//     fn eq(&self, other: &Self) -> bool {
-//         self.props == other.props
-//     }
-// }
-//
-// impl<S> Location<S>
-// where
-//     S: HashCaseless + Equiv,
-// {
-//     mandatory_accessors! {
-//         [Uid, uid, Prop<Uid, Params>],
-//     }
-//
-//     optional_accessors! {
-//         [Description, description, Prop<String, Params>],
-//         [Geo, geo, Prop<Geo, Params>],
-//         [Name, name, Prop<String, Params>],
-//         [LocationType, location_type, Prop<String, Params>],
-//     }
-//
-//     // seq_accessors! {
-//     //     [StructuredData, structured_data, StructuredDataProp<S>],
-//     // }
-// }
-//
-// impl<S, T> TryFrom<RawComponent<S, T>> for Location<S>
-// where
-//     S: HashCaseless,
-//     T: SubcomponentSet<S>,
-// {
-//     type Error = FromRawComponentError<S>;
-//
-//     fn try_from(
-//         RawComponent {
-//             name,
-//             props,
-//             subcomponents,
-//         }: RawComponent<S, T>,
-//     ) -> Result<Self, Self::Error> {
-//         if !matches!(name, ComponentName::Location) {
-//             return Err(FromRawComponentError::InvalidName {
-//                 expected: StaticComponentName::Location,
-//                 received: name,
-//             });
-//         }
-//
-//         check_property_mult! {props, Location; {
-//             Uid: One,
-//             Description: Optional,
-//             Geo: Optional,
-//             Name: Optional,
-//             LocationType: Optional,
-//             Url: Optional, // RFC 9073 EID 7381
-//             StructuredData: Any,
-//         }};
-//
-//         if !subcomponents.is_empty() {
-//             return Err(FromRawComponentError::UnexpectedSubcomponents {
-//                 component: StaticComponentName::Location,
-//             });
-//         }
-//
-//         Ok(Self { props })
-//     }
-// }
-//
-// /// A VRESOURCE component (RFC 9073 §7.3).
-// #[derive(Debug, Clone)]
-// pub struct Resource<S> {
-//     props: PropertyTable<S>,
-// }
-//
-// impl<S: PartialEq + HashCaseless + Equiv> PartialEq for Resource<S> {
-//     fn eq(&self, other: &Self) -> bool {
-//         self.props == other.props
-//     }
-// }
-//
-// impl<S, T> TryFrom<RawComponent<S, T>> for Resource<S>
-// where
-//     S: HashCaseless,
-//     T: SubcomponentSet<S>,
-// {
-//     type Error = FromRawComponentError<S>;
-//
-//     fn try_from(
-//         RawComponent {
-//             name,
-//             props,
-//             subcomponents,
-//         }: RawComponent<S, T>,
-//     ) -> Result<Self, Self::Error> {
-//         if !matches!(name, ComponentName::Resource) {
-//             return Err(FromRawComponentError::InvalidName {
-//                 expected: StaticComponentName::Resource,
-//                 received: name,
-//             });
-//         }
-//
-//         check_property_mult! {props, Resource; {
-//             Uid: One,
-//             Description: Optional,
-//             Geo: Optional,
-//             Name: Optional,
-//             ResourceType: Optional,
-//             StructuredData: Any,
-//         }};
-//
-//         if !subcomponents.is_empty() {
-//             return Err(FromRawComponentError::UnexpectedSubcomponents {
-//                 component: StaticComponentName::Resource,
-//             });
-//         }
-//
-//         Ok(Self { props })
-//     }
-// }
-//
-// impl<S> Resource<S>
-// where
-//     S: HashCaseless + Equiv,
-// {
-//     mandatory_accessors! {
-//         [Uid, uid, Prop<Uid, Params>],
-//     }
-//
-//     optional_accessors! {
-//         [Description, description, Prop<String, Params>],
-//         [Geo, geo, Prop<Geo, Params>],
-//         [Name, name, Prop<String, Params>],
-//         [ResourceType, resource_type, Prop<ResourceType<S>, Params>],
-//     }
-//
-//     // seq_accessors! {
-//     //     [StructuredData, structured_data, StructuredDataProp<S>],
-//     // }
-// }
-//
-// // TODO: should OtherComponent be using PropertyTable? or should it use a more stringly-typed map
-// // internally instead?
-//
-// /// An arbitrary component which may have any properties and subcomponents.
-// #[derive(Debug, Clone)]
-// pub struct OtherComponent<S> {
-//     name: UnknownName<S>,
-//     props: PropertyTable<S>,
-//     subcomponents: Vec<OtherComponent<S>>,
-// }
-//
-// impl<S> OtherComponent<S> {
-//     pub(crate) const fn new(
-//         name: UnknownName<S>,
-//         props: PropertyTable<S>,
-//         subcomponents: Vec<OtherComponent<S>>,
-//     ) -> Self {
-//         Self {
-//             name,
-//             props,
-//             subcomponents,
-//         }
-//     }
-//
-//     pub const fn name(&self) -> &UnknownName<S> {
-//         &self.name
-//     }
-//
-//     pub const fn name_mut(&mut self) -> &mut UnknownName<S> {
-//         &mut self.name
-//     }
-//
-//     pub const fn subcomponents(&self) -> &[OtherComponent<S>] {
-//         self.subcomponents.as_slice()
-//     }
-//
-//     pub const fn subcomponents_mut(&mut self) -> &mut Vec<OtherComponent<S>> {
-//         &mut self.subcomponents
-//     }
-// }
-//
-// #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-// pub struct UnknownName<S> {
-//     pub name: S,
-//     pub kind: UnknownKind,
-// }
-//
-// impl<S> UnknownName<S> {
-//     pub const fn iana(name: S) -> Self {
-//         Self {
-//             name,
-//             kind: UnknownKind::Iana,
-//         }
-//     }
-//
-//     pub const fn x(name: S) -> Self {
-//         Self {
-//             name,
-//             kind: UnknownKind::X,
-//         }
-//     }
-// }
-//
-// fn check_mult<S: HashCaseless>(
-//     props: &PropertyTable<S>,
-//     key: StaticProp,
-//     mult: Mult,
-// ) -> Result<(), usize> {
-//     let len = props
-//         .get_known(key)
-//         .map(RawPropValue::len)
-//         .unwrap_or_default();
-//
-//     match mult.admits(len) {
-//         true => Ok(()),
-//         false => Err(len),
-//     }
-// }
-//
-// #[derive(Debug, Clone)]
-// pub struct RawComponent<S, T> {
-//     pub name: ComponentName<S>,
-//     pub props: PropertyTable<S>,
-//     pub subcomponents: T,
-// }
-//
-// pub enum FromRawComponentError<S> {
-//     InvalidName {
-//         expected: StaticComponentName,
-//         received: ComponentName<S>,
-//     },
-//     InvalidPropMult {
-//         component: StaticComponentName,
-//         prop: StaticProp,
-//         expected: Mult,
-//         received: usize,
-//     },
-//     UnexpectedSubcomponents {
-//         component: StaticComponentName,
-//     },
-// }
-//
-// #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-// pub enum Mult {
-//     Zero,
-//     One,
-//     Optional,
-//     OneOrMore,
-//     Any,
-// }
-//
-// impl Mult {
-//     #[inline(always)]
-//     pub const fn admits(self, value: usize) -> bool {
-//         match self {
-//             Mult::Zero => value == 0,
-//             Mult::One => value == 1,
-//             Mult::Optional => value < 2,
-//             Mult::OneOrMore => value > 0,
-//             Mult::Any => true,
-//         }
-//     }
-// }
-//
-// #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-// pub enum StaticComponentName {
-//     Calendar,
-//     Event,
-//     Todo,
-//     Journal,
-//     FreeBusy,
-//     TimeZone,
-//     Alarm,
-//     Participant,
-//     Location,
-//     Resource,
-// }
-//
-// pub struct ParticipantSubcomponents<S> {
-//     pub locations: Vec<Location<S>>,
-//     pub resources: Vec<Resource<S>>,
-// }
-//
-// impl<S> Default for ParticipantSubcomponents<S> {
-//     fn default() -> Self {
-//         Self {
-//             locations: Default::default(),
-//             resources: Default::default(),
-//         }
-//     }
-// }
-//
-// /// A type representing a set of subcomponents, used when transforming from [`RawComponent`] into a
-// /// specific component type.
-// trait SubcomponentSet<S> {
-//     fn is_empty(&self) -> bool;
-//
-//     fn try_into_participant_subcomponents(
-//         self,
-//     ) -> Result<ParticipantSubcomponents<S>, FromRawComponentError<S>>;
-// }
-//
-// impl<S> SubcomponentSet<S> for () {
-//     #[inline(always)]
-//     fn is_empty(&self) -> bool {
-//         true
-//     }
-//
-//     #[inline(always)]
-//     fn try_into_participant_subcomponents(
-//         self,
-//     ) -> Result<ParticipantSubcomponents<S>, FromRawComponentError<S>> {
-//         Ok(Default::default())
-//     }
-// }
-//
-// impl<S> SubcomponentSet<S> for ParticipantSubcomponents<S> {
-//     fn is_empty(&self) -> bool {
-//         self.locations.is_empty() && self.resources.is_empty()
-//     }
-//
-//     fn try_into_participant_subcomponents(
-//         self,
-//     ) -> Result<ParticipantSubcomponents<S>, FromRawComponentError<S>> {
-//         Ok(self)
-//     }
-// }
