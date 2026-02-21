@@ -4,14 +4,16 @@ use std::{convert::Infallible, fmt, str::FromStr};
 
 use strum::{Display, EnumString};
 
-/// A token which may be a statically [`Known`] value of type `T` or else an unknown value of type
+/// A token which may be a statically known value of type `T` or else an unknown value of type
 /// `S`.
 ///
 /// The principal use of this type is to allow finite enums to be extended with arbitrary values,
 /// most commonly some unknown string which is permissible but statically unknowable.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum Token<T, S> {
+    /// A statically known value.
     Known(T),
+    /// An unknown or vendor-defined value.
     Unknown(S),
 }
 
@@ -37,6 +39,7 @@ where
 }
 
 impl<T, S> Token<T, S> {
+    /// Like [`FromStr`], but uses a fallible conversion for the unknown variant.
     pub fn try_from_str<'a>(s: &'a str) -> Result<Self, <&'a str as TryInto<S>>::Error>
     where
         T: FromStr,

@@ -18,6 +18,7 @@ pub enum Weekday {
 }
 
 impl Weekday {
+    /// Converts a `u8` discriminant (0=Monday through 6=Sunday) to a `Weekday`.
     pub const fn from_repr(repr: u8) -> Option<Self> {
         match repr {
             0..=6 => {
@@ -29,6 +30,7 @@ impl Weekday {
         }
     }
 
+    /// Returns an iterator over all seven weekdays, starting from Monday.
     pub fn iter() -> impl ExactSizeIterator<Item = Self> {
         const VARIANTS: [Weekday; 7] = [
             Weekday::Monday,
@@ -104,10 +106,12 @@ pub enum IsoWeek {
 }
 
 impl IsoWeek {
+    /// Returns the 1-based week number.
     pub const fn index(&self) -> NonZero<u8> {
         NonZero::new(*self as u8).unwrap()
     }
 
+    /// Converts a 1-based week number to an `IsoWeek`, returning `None` if out of range.
     pub const fn from_index(index: u8) -> Option<Self> {
         match index {
             1..=53 => {
@@ -127,10 +131,13 @@ pub struct Utc;
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct Local;
 
+/// An error arising from an invalid [`DateTime`] value.
 #[derive(Debug, Clone, Copy, Error, PartialEq, Eq)]
 pub enum InvalidDateTimeError {
+    /// The date component is invalid.
     #[error("invalid date: {0}")]
     Date(#[from] InvalidDateError),
+    /// The time component is invalid.
     #[error("invalid time: {0}")]
     Time(#[from] InvalidTimeError),
 }
@@ -146,8 +153,11 @@ pub enum InvalidDateTimeError {
 /// [`date`]: DateTime::date
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct DateTime<M> {
+    /// The date component.
     pub date: Date,
+    /// The time component.
     pub time: Time,
+    /// The timezone marker.
     pub marker: M,
 }
 
@@ -160,6 +170,7 @@ pub struct Date {
 }
 
 impl Date {
+    /// Creates a new date, returning an error if the day is out of range for the given month and year.
     #[inline(always)]
     pub const fn new(year: Year, month: Month, day: Day) -> Result<Self, ImpossibleDateError> {
         if (day as u8) <= (Date::maximum_day(year, month) as u8) {
@@ -169,16 +180,19 @@ impl Date {
         }
     }
 
+    /// Returns the year.
     #[inline(always)]
     pub const fn year(&self) -> Year {
         self.year
     }
 
+    /// Returns the month.
     #[inline(always)]
     pub const fn month(&self) -> Month {
         self.month
     }
 
+    /// Returns the day of the month.
     #[inline(always)]
     pub const fn day(&self) -> Day {
         self.day
@@ -201,18 +215,25 @@ impl Date {
     }
 }
 
+/// An error arising from an invalid [`Date`] value.
 #[derive(Debug, Clone, Copy, Error, PartialEq, Eq)]
 pub enum InvalidDateError {
+    /// The year is out of range.
     #[error("invalid year: {0}")]
     Year(#[from] InvalidYearError),
+    /// The month is out of range.
     #[error("invalid month: {0}")]
     Month(#[from] InvalidMonthError),
+    /// The day is out of range.
     #[error("invalid day: {0}")]
     Day(#[from] InvalidDayError),
+    /// The day does not exist for the given month and year.
     #[error(transparent)]
     ImpossibleDate(#[from] ImpossibleDateError),
 }
 
+/// An error indicating that the day does not exist for the given month and year
+/// (e.g. February 30).
 #[derive(Debug, Clone, Copy, Error, PartialEq, Eq)]
 #[error("the given date is impossible")]
 pub struct ImpossibleDateError {
@@ -233,15 +254,19 @@ impl std::fmt::Debug for Year {
 }
 
 impl Year {
+    /// The smallest representable year (0 CE).
     pub const MIN: Self = Self(0);
+    /// The largest representable year (9999 CE).
     pub const MAX: Self = Self(9999);
 
+    /// Returns `true` if this year is a leap year (RFC 3339 Appendix C).
     pub const fn is_leap_year(self) -> bool {
         let year = self.0;
         // as given by RFC 3339, Appendix C
         year.is_multiple_of(4) && (!year.is_multiple_of(100) || year.is_multiple_of(400))
     }
 
+    /// Creates a `Year` from a raw `u16`, returning an error if greater than 9999.
     #[inline(always)]
     pub const fn new(value: u16) -> Result<Self, InvalidYearError> {
         if value <= 9999 {
@@ -251,6 +276,7 @@ impl Year {
         }
     }
 
+    /// Returns the numeric value of this year.
     #[inline(always)]
     pub const fn get(self) -> u16 {
         self.0
@@ -325,6 +351,7 @@ where
 
 /// Marker trait for timezone markers in [`DateTime`] formatting.
 pub trait DateTimeMarker {
+    /// The suffix appended when formatting (e.g. `"Z"` for UTC, `""` for local).
     const SUFFIX: &'static str;
 }
 
@@ -373,6 +400,7 @@ impl std::fmt::Display for DateTime<TimeFormat> {
     }
 }
 
+/// An error indicating that a value exceeds the valid year range (0–9999).
 #[derive(Debug, Clone, Copy, Error, PartialEq, Eq)]
 #[error("expected an integer of at most 9999 but received {0} instead")]
 pub struct InvalidYearError(u16);
@@ -396,6 +424,7 @@ pub enum Month {
 }
 
 impl Month {
+    /// Creates a `Month` from a 1-based month number, returning an error if out of range.
     pub const fn new(value: u8) -> Result<Self, InvalidMonthError> {
         match value {
             1..=12 => Ok({
@@ -413,6 +442,7 @@ impl Month {
         unsafe { NonZero::new_unchecked(self as u8) }
     }
 
+    /// Returns an iterator over all twelve months, starting from January.
     pub fn iter() -> impl ExactSizeIterator<Item = Month> {
         [
             Self::Jan,
@@ -432,6 +462,7 @@ impl Month {
     }
 }
 
+/// An error indicating that a value is not a valid month number (1–12).
 #[derive(Debug, Clone, Copy, Error, PartialEq, Eq)]
 #[error("expected an integer between 1 and 12 but received {0} instead")]
 pub struct InvalidMonthError(u8);
@@ -474,6 +505,7 @@ pub enum Day {
 }
 
 impl Day {
+    /// Creates a `Day` from a 1-based day number, returning an error if out of range.
     #[inline(always)]
     pub const fn new(value: u8) -> Result<Self, InvalidDayError> {
         match value {
@@ -487,10 +519,12 @@ impl Day {
     }
 }
 
+/// An error indicating that a value is not a valid day number (1–31).
 #[derive(Debug, Clone, Copy, Error, PartialEq, Eq)]
 #[error("expected an integer between 1 and 31 but received {0} instead")]
 pub struct InvalidDayError(u8);
 
+/// A time of day consisting of hour, minute, second, and optional fractional second.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct Time {
     hour: Hour,
@@ -500,6 +534,7 @@ pub struct Time {
 }
 
 impl Time {
+    /// Creates a new `Time` from the given components.
     pub const fn new(
         hour: Hour,
         minute: Minute,
@@ -517,35 +552,44 @@ impl Time {
         })
     }
 
+    /// Returns the hour component.
     #[inline(always)]
     pub const fn hour(&self) -> Hour {
         self.hour
     }
 
+    /// Returns the minute component.
     #[inline(always)]
     pub const fn minute(&self) -> Minute {
         self.minute
     }
 
+    /// Returns the second component.
     #[inline(always)]
     pub const fn second(&self) -> Second {
         self.second
     }
 
+    /// Returns the fractional second component, if present.
     #[inline(always)]
     pub const fn frac(&self) -> Option<FractionalSecond> {
         self.frac
     }
 }
 
+/// An error arising from an invalid [`Time`] value.
 #[derive(Debug, Clone, Copy, Error, PartialEq, Eq)]
 pub enum InvalidTimeError {
+    /// The hour is out of range.
     #[error("invalid hour: {0}")]
     Hour(#[from] InvalidHourError),
+    /// The minute is out of range.
     #[error("invalid minute: {0}")]
     Minute(#[from] InvalidMinuteError),
+    /// The second is out of range.
     #[error("invalid second: {0}")]
     Second(#[from] InvalidSecondError),
+    /// The fractional second is invalid.
     #[error("invalid fractional second: {0}")]
     FractionalSecond(#[from] InvalidFractionalSecondError),
 }
@@ -556,6 +600,7 @@ impl From<Infallible> for InvalidTimeError {
     }
 }
 
+/// An hour of the day, ranging from 0 (midnight) through 23.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
 #[repr(u8)]
 pub enum Hour {
@@ -587,6 +632,7 @@ pub enum Hour {
 }
 
 impl Hour {
+    /// Creates an `Hour` from a raw `u8`, returning an error if greater than 23.
     pub const fn new(value: u8) -> Result<Self, InvalidHourError> {
         match NonZero::new(value) {
             None => Ok(Self::H00),
@@ -602,10 +648,12 @@ impl Hour {
     }
 }
 
+/// An error indicating that a value is not a valid hour (0–23).
 #[derive(Debug, Clone, Copy, Error, PartialEq, Eq)]
 #[error("expected an integer between 0 and 23 but received {0}")]
 pub struct InvalidHourError(NonZero<u8>);
 
+/// A minute within an hour, ranging from 0 through 59.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
 #[repr(u8)]
 pub enum Minute {
@@ -673,6 +721,7 @@ pub enum Minute {
 }
 
 impl Minute {
+    /// Creates a `Minute` from a raw `u8`, returning an error if greater than 59.
     pub const fn new(value: u8) -> Result<Self, InvalidMinuteError> {
         match NonZero::new(value) {
             None => Ok(Self::M00),
@@ -688,6 +737,7 @@ impl Minute {
     }
 }
 
+/// An error indicating that a value is not a valid minute (0–59).
 #[derive(Debug, Clone, Copy, Error, PartialEq, Eq)]
 #[error("expected an integer between 0 and 59 but received {0}")]
 pub struct InvalidMinuteError(NonZero<u8>);
@@ -761,6 +811,7 @@ pub enum Second {
 }
 
 impl Second {
+    /// Creates a `Second` from a raw `u8`, returning an error if greater than 60.
     pub const fn new(value: u8) -> Result<Self, InvalidSecondError> {
         match NonZero::new(value) {
             None => Ok(Self::S00),
@@ -776,6 +827,7 @@ impl Second {
     }
 }
 
+/// An error indicating that a value is not a valid second (0–60).
 #[derive(Debug, Clone, Copy, Error, PartialEq, Eq)]
 #[error("expected an integer between 0 and 60 but received {0}")]
 pub struct InvalidSecondError(NonZero<u8>);
@@ -848,6 +900,7 @@ pub enum NonLeapSecond {
 }
 
 impl NonLeapSecond {
+    /// Creates a `NonLeapSecond` from a raw `u8`, returning an error if 60 or greater.
     pub const fn new(value: u8) -> Result<Self, InvalidNonLeapSecondError> {
         match NonZero::new(value) {
             None => Ok(Self::S00),
@@ -862,6 +915,7 @@ impl NonLeapSecond {
         }
     }
 
+    /// Converts this non-leap second into a [`Second`].
     #[inline(always)]
     pub const fn to_second(self) -> Second {
         match Second::new(self as u8) {
@@ -871,6 +925,7 @@ impl NonLeapSecond {
     }
 }
 
+/// An error indicating that a value is not a valid non-leap second (0–59).
 #[derive(Debug, Clone, Copy, Error, PartialEq, Eq)]
 #[error("expected an integer between 0 and 59 but received {0}")]
 pub struct InvalidNonLeapSecondError(NonZero<u8>);
@@ -892,11 +947,14 @@ impl FractionalSecond {
     /// The largest fractional second; this value is 10^9 - 1 nanoseconds.
     pub const MAX: Self = Self(NonZero::new(10u32.pow(9) - 1).unwrap());
 
+    /// Returns the value in nanoseconds.
     #[inline(always)]
     pub const fn get(self) -> NonZero<u32> {
         self.0
     }
 
+    /// Creates a `FractionalSecond` from a nanosecond count, returning an error if zero
+    /// or exceeding nine decimal digits.
     pub const fn new(value: u32) -> Result<Self, InvalidFractionalSecondError> {
         match NonZero::new(value) {
             None => Err(InvalidFractionalSecondError::AllZero),
@@ -908,10 +966,13 @@ impl FractionalSecond {
     }
 }
 
+/// An error arising from an invalid [`FractionalSecond`] value.
 #[derive(Debug, Clone, Copy, Error, PartialEq, Eq)]
 pub enum InvalidFractionalSecondError {
+    /// The value is zero (fractional seconds must be non-zero).
     #[error("at least one fractional second digit must be non-zero")]
     AllZero,
+    /// The value exceeds nine decimal digits.
     #[error("{0} has more than nine decimal digits")]
     TooManyDigits(NonZero<u32>),
 }

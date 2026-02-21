@@ -205,8 +205,11 @@ pub enum AlertAction {
 /// An RGB color value.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct Rgb {
+    /// The red channel (0--255).
     pub red: u8,
+    /// The green channel (0--255).
     pub green: u8,
+    /// The blue channel (0--255).
     pub blue: u8,
 }
 
@@ -264,6 +267,7 @@ impl<V: DestructibleJsonValue> TryFromJson<V> for Color {
     }
 }
 
+/// An integer outside the valid priority range (0--9).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Error)]
 #[error("priority must be an integer in the range 0..=9, got {0}")]
 pub struct InvalidPriorityError(u64);
@@ -292,6 +296,7 @@ impl<V: DestructibleJsonValue> TryFromJson<V> for Priority {
     }
 }
 
+/// An integer outside the valid percent range (0--100).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Error)]
 #[error("percent must be an integer in the range 0..=100, got {0}")]
 pub struct InvalidPercentError(u64);

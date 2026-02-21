@@ -31,9 +31,12 @@ pub struct RRule {
     pub week_start: Option<Weekday>,
 }
 
+/// The termination condition for a recurrence rule: either a count or an until date.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Termination {
+    /// End after a fixed number of occurrences.
     Count(u64),
+    /// End at or before a specific date or datetime.
     Until(DateTimeOrDate),
 }
 
@@ -85,46 +88,69 @@ impl From<&FreqByRules> for Freq {
     }
 }
 
+/// The [`Freq`] value together with the frequency-dependent BYxxx rules it permits.
+///
+/// This enum enforces at the type level that each frequency only carries the BYxxx rules
+/// allowed by RFC 5545 (page 44).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum FreqByRules {
+    /// SECONDLY frequency with BYMONTHDAY and BYYEARDAY rules.
     Secondly(ByPeriodDayRules),
+    /// MINUTELY frequency with BYMONTHDAY and BYYEARDAY rules.
     Minutely(ByPeriodDayRules),
+    /// HOURLY frequency with BYMONTHDAY and BYYEARDAY rules.
     Hourly(ByPeriodDayRules),
+    /// DAILY frequency with BYMONTHDAY rule.
     Daily(ByMonthDayRule),
+    /// WEEKLY frequency (no frequency-dependent BYxxx rules).
     Weekly,
+    /// MONTHLY frequency with BYMONTHDAY rule.
     Monthly(ByMonthDayRule),
+    /// YEARLY frequency with BYMONTHDAY, BYYEARDAY, and BYWEEKNO rules.
     Yearly(YearlyByRules),
 }
 
 /// The BYxxx rules which are permitted for any [`Freq`].
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
 pub struct CoreByRules {
+    /// The BYSECOND rule.
     pub by_second: Option<SecondSet>,
+    /// The BYMINUTE rule.
     pub by_minute: Option<MinuteSet>,
+    /// The BYHOUR rule.
     pub by_hour: Option<HourSet>,
+    /// The BYMONTH rule.
     pub by_month: Option<MonthSet>,
+    /// The BYDAY rule.
     pub by_day: Option<WeekdayNumSet>,
+    /// The BYSETPOS rule.
     pub by_set_pos: Option<BTreeSet<YearDayNum>>,
 }
 
 /// The BYYEARDAY and BYMONTHDAY rules.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ByPeriodDayRules {
+    /// The BYMONTHDAY rule.
     pub by_month_day: Option<MonthDaySet>,
+    /// The BYYEARDAY rule.
     pub by_year_day: Option<BTreeSet<YearDayNum>>,
 }
 
 /// The BYMONTHDAY rule.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ByMonthDayRule {
+    /// The BYMONTHDAY rule.
     pub by_month_day: Option<MonthDaySet>,
 }
 
 /// The BYWEEKNO, BYYEARDAY, and BYMONTHDAY rules.
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
 pub struct YearlyByRules {
+    /// The BYMONTHDAY rule.
     pub by_month_day: Option<MonthDaySet>,
+    /// The BYYEARDAY rule.
     pub by_year_day: Option<BTreeSet<YearDayNum>>,
+    /// The BYWEEKNO rule.
     pub by_week_no: Option<WeekNoSet>,
 }
 
@@ -138,6 +164,7 @@ impl YearDayNum {
         self.0.get()
     }
 
+    /// Creates a `YearDayNum` from a sign and a 1-based day index (1–366).
     pub const fn from_signed_index(sign: Sign, index: u16) -> Option<Self> {
         match index {
             1..=366 => {
@@ -155,7 +182,9 @@ impl YearDayNum {
 /// A value corresponding to the `weekdaynum` grammar rule.
 #[derive(Clone, Copy, PartialEq, Eq, Hash)]
 pub struct WeekdayNum {
+    /// The optional signed ordinal (e.g. +2 for "second", -1 for "last").
     pub ordinal: Option<(Sign, IsoWeek)>,
+    /// The day of the week.
     pub weekday: Weekday,
 }
 
@@ -242,11 +271,13 @@ impl Debug for SecondSet {
 impl SecondSet {
     pub(crate) const EMPTY: Self = Self(NonZero::new(1 << 63).unwrap());
 
+    /// Returns `true` if `second` is in this set.
     pub const fn get(&self, second: Second) -> bool {
         let mask = 1 << (second as u8);
         (self.0.get() & mask) != 0
     }
 
+    /// Inserts `second` into this set.
     pub const fn set(&mut self, second: Second) {
         let mask = 1 << (second as u8);
         let updated = self.0.get() | mask;
@@ -337,6 +368,7 @@ impl Debug for Second {
 }
 
 impl Second {
+    /// Converts a `u8` discriminant (0–60) to a `Second`.
     pub const fn from_repr(repr: u8) -> Option<Self> {
         match repr {
             0..=60 => {
@@ -348,6 +380,7 @@ impl Second {
         }
     }
 
+    /// Returns an iterator over all 61 second values (S0 through S60).
     pub fn iter() -> impl ExactSizeIterator<Item = Self> {
         (0..=60u8).map(|s| {
             // SAFETY: the range 0..=60u8 is exactly the range of valid Second
@@ -386,11 +419,13 @@ impl Debug for MinuteSet {
 impl MinuteSet {
     pub(crate) const EMPTY: Self = Self(NonZero::new(1 << 63).unwrap());
 
+    /// Returns `true` if `minute` is in this set.
     pub const fn get(&self, minute: Minute) -> bool {
         let mask = 1 << (minute as u8);
         (self.0.get() & mask) != 0
     }
 
+    /// Inserts `minute` into this set.
     pub const fn set(&mut self, minute: Minute) {
         let mask = 1 << (minute as u8);
         let updated = self.0.get() | mask;
@@ -480,6 +515,7 @@ impl Debug for Minute {
 }
 
 impl Minute {
+    /// Converts a `u8` discriminant (0–59) to a `Minute`.
     pub const fn from_repr(repr: u8) -> Option<Self> {
         match repr {
             0..=59 => {
@@ -491,6 +527,7 @@ impl Minute {
         }
     }
 
+    /// Returns an iterator over all 60 minute values (M0 through M59).
     pub fn iter() -> impl ExactSizeIterator<Item = Self> {
         (0..=59u8).map(|m| {
             // SAFETY: 0..=59u8 is exactly the range of valid discriminants
@@ -529,11 +566,13 @@ impl Debug for HourSet {
 impl HourSet {
     pub(crate) const EMPTY: Self = Self(NonZero::new(1 << 31).unwrap());
 
+    /// Returns `true` if `hour` is in this set.
     pub const fn get(&self, hour: Hour) -> bool {
         let mask = 1 << (hour as u8);
         (self.0.get() & mask) != 0
     }
 
+    /// Inserts `hour` into this set.
     pub const fn set(&mut self, hour: Hour) {
         let mask = 1 << (hour as u8);
         let updated = self.0.get() | mask;
@@ -587,6 +626,7 @@ impl Debug for Hour {
 }
 
 impl Hour {
+    /// Converts a `u8` discriminant (0–23) to an `Hour`.
     pub const fn from_repr(repr: u8) -> Option<Self> {
         match repr {
             0..=23 => {
@@ -598,6 +638,7 @@ impl Hour {
         }
     }
 
+    /// Returns an iterator over all 24 hour values (H0 through H23).
     pub fn iter() -> impl ExactSizeIterator<Item = Self> {
         (0..=23u8).map(|h| {
             // SAFETY: 0..=23u8 is exactly the range of valid discriminants
@@ -637,11 +678,13 @@ impl Debug for MonthSet {
 impl MonthSet {
     pub(crate) const EMPTY: Self = Self(NonZero::new(1 << 15).unwrap());
 
+    /// Returns `true` if `index` is in this set.
     pub const fn get(&self, index: Month) -> bool {
         let mask = 1 << index.number().get();
         (self.0.get() & mask) != 0
     }
 
+    /// Inserts `index` into this set.
     pub const fn set(&mut self, index: Month) {
         let mask = 1 << index.number().get();
         let updated = self.0.get() | mask;
@@ -677,11 +720,13 @@ pub struct MonthDaySetIndex(NonZero<u8>);
 impl MonthDaySet {
     pub(crate) const EMPTY: Self = Self(NonZero::new(1 << 63).unwrap());
 
+    /// Returns `true` if `index` is in this set.
     pub const fn get(&self, index: MonthDaySetIndex) -> bool {
         let mask = 1 << index.0.get();
         (self.0.get() & mask) != 0
     }
 
+    /// Inserts `index` into this set.
     pub const fn set(&mut self, index: MonthDaySetIndex) {
         let mask = 1 << index.0.get();
         let updated = self.0.get() | mask;
@@ -692,6 +737,7 @@ impl MonthDaySet {
 }
 
 impl MonthDaySetIndex {
+    /// Creates an index from a sign and day (e.g. `+D15` or `-D1`).
     pub const fn from_signed_month_day(sign: Sign, day: MonthDay) -> Self {
         let day = day as u8;
         let offset = match sign {
@@ -731,11 +777,13 @@ pub struct WeekNoSetIndex(NonZero<u8>);
 impl WeekNoSet {
     pub(crate) const EMPTY: Self = Self(NonZero::new(1 << 127).unwrap());
 
+    /// Returns `true` if `index` is in this set.
     pub const fn get(&self, index: WeekNoSetIndex) -> bool {
         let mask = 1 << (index.0.get());
         (mask & self.0.get()) != 0
     }
 
+    /// Inserts `index` into this set.
     pub const fn set(&mut self, index: WeekNoSetIndex) {
         let mask = 1 << (index.0.get());
         let updated = mask | self.0.get();
@@ -746,6 +794,7 @@ impl WeekNoSet {
 }
 
 impl WeekNoSetIndex {
+    /// Creates an index from a sign and ISO week number.
     pub const fn from_signed_week(sign: Sign, week: IsoWeek) -> Self {
         let week = week as u8;
         let offset = match sign {
@@ -802,6 +851,7 @@ pub enum MonthDay {
 }
 
 impl MonthDay {
+    /// Converts a `u8` discriminant (1–31) to a `MonthDay`.
     pub const fn from_repr(repr: u8) -> Option<Self> {
         match repr {
             1..=31 => {
@@ -814,6 +864,7 @@ impl MonthDay {
     }
 }
 
+/// The name of a recurrence rule part.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PartName {
     Freq,
@@ -870,6 +921,7 @@ impl From<ByRuleName> for PartName {
 }
 
 impl PartName {
+    /// Returns the corresponding [`ByRuleName`], or `None` if this is not a BYxxx part.
     pub const fn as_by_rule(&self) -> Option<ByRuleName> {
         match self {
             PartName::BySecond => Some(ByRuleName::BySecond),
