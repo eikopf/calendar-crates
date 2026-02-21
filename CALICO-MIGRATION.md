@@ -133,13 +133,13 @@ Similarly, `Params` (the parameter table) has ~23 optional RFC 5545 parameter fi
 The following are iCalendar-text-format-specific and remain in calico:
 
 - **Parser** (`winnow`-based): All of `parser/` — component, property, parameter, primitive, rrule, escaped, config, error modules
-- **Component model**: `Calendar`, `Event`, `Todo`, `Journal`, `FreeBusy`, `TimeZone`, `Standard`, `Daylight`, `Alarm` (and typed alarm subtypes) — these are the iCalendar component tree, distinct from jscalendar objects
-- **Property model**: `PropertySeq`, `Prop<V,P>`, the 56+ static property variants, all property-specific logic
-- **Parameter model**: `Params` struct, `ParameterTable`, `KnownParam`, `StaticParam`, `ParamName<S>`, `AnyParamValue`
+- **Component model**: `Calendar`, `Event`, `Todo`, `Journal`, `FreeBusy`, `TimeZone`, `TzRule`, `AudioAlarm`, `DisplayAlarm`, `EmailAlarm` (structible structs), `CalendarComponent` and `Alarm` dispatch enums, `OtherComponent`/`OtherAlarm` for unknown components
+- **Property model**: `Prop<V,P>`, `StaticProp`, termination/trigger ref enums, `StructuredDataProp`
+- **Parameter model**: `Params` struct (structible), `StructuredDataParams` (structible), `KnownParam`, `StaticParam`, `ParamName<S>`
 - **Content line infrastructure**: Line folding, escape sequences, the `InputStream` trait
 - **Validation/error types**: `MalformedCalendarError`, `MalformedEventError`, etc. (bitflag-based validation)
 - **Value<S>**: Runtime-discriminated property values (for the text format's untyped value parsing)
-- **Component dispatch**: `ComponentName<S>`, `ComponentTag`, internal `Component` struct
+- **Component dispatch**: `ComponentName<S>`, `AlarmKind`, `TzRuleKind`
 
 ## 7. Key decisions needing input
 
@@ -153,31 +153,46 @@ The following are iCalendar-text-format-specific and remain in calico:
 
 5. **Naming**: Should the crate keep the name `calico` or be renamed to something like `icalendar` or `rfc5545`?
 
-## 8. Immediate next step
+## 8. Remaining work
 
-Create a `calico-migration` branch and commit this plan as `CALICO-MIGRATION.md` at the workspace root. This branch serves as the staging area for the migration — we'll update the plan as decisions are made and work progresses.
+The structural migration is **complete**: all calico types have been replaced with workspace re-exports (see §10), macros have been replaced (dizzy, structible, strum), and the object model uses workspace types throughout. What remains is **new feature work**, not migration:
+
+1. **Implement component/property parsers**: All parser entry points currently contain `todo!()` stubs. These need to be implemented to construct the new structible-based component types from parsed content lines.
+
+2. **CI integration**: Add calico to workspace CI and ensure `cargo test --all-features` passes across the full workspace.
 
 ## 9. Migration steps (high-level)
 
 1. ~~Add calico source to workspace, update workspace `Cargo.toml`~~ ✅
 2. ~~Extract `LanguageTag` from jscalendar into calendar-types~~ ✅
 3. ~~Add new RFC 5545 types to rfc5545-types (§2 above)~~ ✅
-4. ~~Replace calico's duplicated types with imports from calendar-types and rfc5545-types~~ ✅ (partial — see §10)
+4. ~~Replace calico's duplicated types with imports from calendar-types and rfc5545-types~~ ✅
 5. ~~Replace `unsized_newtype!` usages with dizzy `DstNewtype`~~ ✅
-6. Evaluate and apply structible to component/parameter types where appropriate
-7. Remove calico's now-redundant type definitions
-8. Update calico's parser to work with workspace types
-9. Add calico to workspace CI, ensure `cargo test --all-features` passes
+6. ~~Apply structible to Params and component types~~ ✅ (see §11)
+7. ~~Replace hashify with strum EnumString~~ ✅ (see §12)
+8. ~~Replace remaining calico-local types with workspace equivalents~~ ✅ (all types now re-exported, see §10)
+9. Implement component/property parsers (new feature work, not migration)
+10. Add calico to workspace CI, ensure `cargo test --all-features` passes
 
 ## 10. Completed type replacements
 
 ### Types replaced (calico now imports from workspace)
 
-**From calendar-types:** `Weekday`, `IsoWeek`
-**From rfc5545-types::set:** `Gregorian`, `Version`, `Encoding`, `TimeTransparency`, `EventStatus`, `TodoStatus`, `JournalStatus`, `Priority`, `PriorityClass`, `TriggerRelation`, `ThisAndFuture`
-**From rfc5545-types::value:** `Geo`
-**From rfc5545-types::string:** `CaselessStr`, `InvalidCharError`, `Text`, `TextBuf`, `Name`, `NameKind`, `InvalidNameError`, `InvalidTextError`
-**From calendar-types::css:** `Css3Color` (entire module re-exported)
+**From calendar-types:**
+- `Sign`, `Token` (primitive)
+- `Weekday`, `IsoWeek`, `Date`, `DateTime`, `Day`, `Hour`, `Local`, `Minute`, `Month`, `NonLeapSecond`, `Second`, `Time`, `TimeFormat`, `Utc`, `Year` (time)
+- `Duration`, `ExactDuration`, `NominalDuration`, `SignedDuration` (duration)
+- `LanguageTag` (as `Language`)
+- `Css3Color` (entire css module re-exported)
+
+**From rfc5545-types:**
+- `Float`, `Integer`, `PositiveInteger` (primitive)
+- `RequestStatus`, `StatusCode` (as `RequestStatusCode`), `Class` (request_status)
+- `Gregorian`, `Version`, `Encoding`, `TimeTransparency`, `EventStatus`, `TodoStatus`, `JournalStatus`, `Priority`, `PriorityClass`, `TriggerRelation`, `ThisAndFuture`, `AlarmAction`, `CalendarUserType`, `ClassValue`, `FreeBusyType`, `Method`, `ParticipationRole`, `ParticipationStatus`, `RelationshipType`, `ValueType`, `Percent` (as `CompletionPercentage`) (set)
+- `DateTimeOrDate`, `ExDateSeq`, `Period`, `RDate`, `RDateSeq`, `TriggerValue`, `UtcOffset` (time)
+- `Geo`, `Attachment`, `FormatType`, `FormatTypeBuf` (value)
+- `CaselessStr`, `Text`, `TextBuf`, `Name`, `NameKind`, `InvalidCharError`, `InvalidTextError`, `InvalidNameError` (string)
+- Entire `rrule` module re-exported (RRule, Freq, FreqByRules, CoreByRules, bitset types)
 
 ### unsized_newtype! → DstNewtype migration
 
@@ -198,20 +213,20 @@ The `unsized_newtype!` macro and `CloneUnsized` helper trait have been completel
 - `rfc5545_types::string::Text::char_is_valid()` — public character validation
 - `rfc5545_types::time::DateTimeOrDate::map_marker()` — convert timezone marker type
 
-### Types NOT yet replaced (structural differences)
+### All type replacements complete
 
-| calico type | workspace counterpart | reason |
-|---|---|---|
-| `Sign` (Positive/Negative) | `calendar_types::primitive::Sign` (Pos/Neg) | Variant names differ |
-| `Month` (0-indexed discriminants) | `calendar_types::time::Month` (1-indexed) | Discriminant layout differs |
-| `Date`, `DateTime<F>`, `Time<F>` | `calendar_types::time::*` | calico uses own F parameter, field differences |
-| `UtcOffset` | `rfc5545_types::time::UtcOffset` | Field types/names differ, seconds optional vs required |
-| `Duration`/`DurationKind`/`DurationTime` | `calendar_types::duration::*` | Completely different decomposition model |
-| `CompletionPercentage` | `rfc5545_types::set::Percent` | Different name and API |
-| `RequestStatus`/`RequestStatusCode` | `rfc5545_types::request_status::*` | Different code structure |
-| Extensible `<S>` enums | Closed `#[non_exhaustive]` enums | Calico needs `Other(S)` variant for parsing |
-| `DateTimeOrDate<F>` | `rfc5545_types::time::DateTimeOrDate<M>` | Type parameter semantics differ |
-| RRule and bitset types | `rfc5545_types::rrule::*` | Not yet compared in detail |
+All types previously listed as "not yet replaced" have been migrated to workspace re-exports. The structural differences noted earlier (variant names, discriminant layouts, decomposition models, extensible enum patterns) were resolved during the migration. Key mappings:
+
+- `Sign` → `calendar_types::primitive::Sign`
+- `Month`, `Date`, `DateTime<F>`, `Time<F>` → `calendar_types::time::*`
+- `Duration`/`DurationKind`/`DurationTime` → `calendar_types::duration::{Duration, ExactDuration, NominalDuration, SignedDuration}`
+- `UtcOffset`, `DateTimeOrDate<F>` → `rfc5545_types::time::*`
+- `CompletionPercentage` → `rfc5545_types::set::Percent` (re-exported as `CompletionPercentage`)
+- `RequestStatus`/`RequestStatusCode` → `rfc5545_types::request_status::*`
+- RRule and bitset types → `rfc5545_types::rrule::*` (entire module re-exported)
+- Extensible `<S>` enums → `calendar_types::set::Token<ClosedEnum, S>` pattern
+
+See `calico/src/model/primitive.rs` and `calico/src/model.rs` for the full re-export listing.
 
 ### LanguageTag extracted
 
@@ -222,6 +237,54 @@ The `unsized_newtype!` macro and `CloneUnsized` helper trait have been completel
 - **string.rs:** `Text`/`TextBuf`, `CaselessStr`, `Name`/`NameKind`, `InvalidCharError`, `InvalidTextError`, `InvalidNameError`
 - **set.rs:** `Version`, `Gregorian`, `Encoding`, `TimeTransparency`, `EventStatus`, `TodoStatus`, `JournalStatus`, `ClassValue`, `CalendarUserType`, `ParticipationRole`, `ParticipationStatus`, `FreeBusyType`, `RelationshipType`, `AlarmAction`, `TriggerRelation`, `ValueType`, `ThisAndFuture`
 - **value.rs (new):** `Geo`, `Attachment`, `FormatType`/`FormatTypeBuf`
+
+## 11. structible migration
+
+### Params → structible
+
+Replaced `define_parameter_type!`/`define_methods!` macros, `ParameterTable`, `AnyParamValue`/`AnyParamValueInner`, and `impl_any_param_value_conversions!` with two `#[structible]` structs:
+
+- **`Params`**: 25 optional named fields + catch-all `#[structible(key = Box<CaselessStr>)] unknown_param`
+- **`StructuredDataParams`**: 2 required fields (`format_type`, `schema`) + same optional fields as `Params`
+- Added `Params::insert_known(KnownParam)` dispatch method
+- Added `Params::contains_known(StaticParam) -> bool` dispatch method
+- `TryFrom<Params> for StructuredDataParams` uses `into_fields()` + `take_*` pattern
+
+Deleted: `ParameterTable`, `AnyParamValue`/`AnyParamValueInner`, `NeverStr`, all associated macros.
+
+### Component types → structible
+
+Replaced `define_component_newtype!` macro and generic `Component` property bag with 14 individual `#[structible]` structs:
+
+| Struct | Required constructor fields |
+|--------|---------------------------|
+| `Calendar` | `prod_id`, `version` |
+| `Event` | `dtstamp`, `uid` |
+| `Todo` | `dtstamp`, `uid` |
+| `Journal` | `dtstamp`, `uid` |
+| `FreeBusy` | `dtstamp`, `uid` |
+| `TimeZone` | `tz_id` |
+| `TzRule` | `kind`, `dtstart`, `tz_offset_to`, `tz_offset_from` |
+| `AudioAlarm` | `trigger` |
+| `DisplayAlarm` | `trigger`, `description` |
+| `EmailAlarm` | `trigger`, `description`, `summary` |
+| `LocationComponent` | `uid` |
+| `ResourceComponent` | `uid` |
+| `Participant` | `uid`, `participant_type` |
+
+Each struct has typed property fields (`Prop<V, Params>`), multi-valued fields as `Vec`, subcomponents as `Vec`, and a catch-all `x_property` field for unknown/extension properties.
+
+Added dispatch enums: `CalendarComponent` (Event/Todo/Journal/FreeBusy/TimeZone/Other) and `Alarm` (Audio/Display/Email/Other).
+
+Deleted: `Component` struct, `ComponentTag` enum, `PropKey<S>`, `PropertySeq`, all `Equivalent` impls.
+
+## 12. hashify → strum EnumString
+
+Removed `hashify` dependency. All IANA token enums already derive `strum::EnumString` with `#[strum(ascii_case_insensitive)]` in rfc5545-types and calendar-types, so the `hashify::map_ignore_case!` perfect-hash maps were redundant.
+
+- Simplified `match_iana_token!` macro to use `str::parse::<T>()` (14 call sites)
+- Replaced direct `hashify::map_ignore_case!` in `status` and `color` parsers with `str::parse()`
+- Net reduction of ~280 lines of duplicated variant mappings
 
 ## Verification
 
