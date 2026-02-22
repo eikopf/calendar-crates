@@ -15,6 +15,7 @@ cargo test
 cargo test -p calendar-types
 cargo test -p rfc5545-types
 cargo test -p jscalendar
+cargo test -p calico
 
 # Run a specific test
 cargo test -p rfc5545-types behavior_with_table
@@ -25,11 +26,13 @@ cargo check
 
 ## Crate Structure
 
-This workspace contains three crates for working with calendar data formats:
+This workspace contains four crates for working with calendar data formats:
 
 - **calendar-types**: Foundation crate with date/time primitives (Year, Hour, Duration), string types (Uid, Uri), and common primitives (Sign). Based on RFC 3339.
 
 - **rfc5545-types**: iCalendar (RFC 5545) types. Contains recurrence rule (`RRule`) implementation with frequency-dependent BYxxx rules, and efficient bitset types for time components (SecondSet, MinuteSet, HourSet, MonthSet, MonthDaySet, WeekNoSet).
+
+- **calico**: iCalendar (RFC 5545) parser, printer, and data model. Uses winnow for parsing and the `structible` macro for builder-pattern construction.
 
 - **jscalendar**: JSCalendar (RFC 8984) implementation. Parser-agnostic design with optional serde support via feature flags.
 
@@ -40,8 +43,8 @@ This workspace contains three crates for working with calendar data formats:
 calendar-types
      ↓
 rfc5545-types
-     ↓
-jscalendar
+   ↓     ↓
+calico  jscalendar
 ```
 
 ### Key Design Patterns
@@ -50,7 +53,7 @@ jscalendar
 
 **Incremental parsing**: The parser in `jscalendar/src/parser.rs` uses `&mut &str` pattern for incremental parsing with explicit checkpointing for error recovery. Parsers must not modify input unless they succeed.
 
-**Structible macro**: JSCalendar object types (Event, Task, Group, Link) use the `structible` macro for builder-pattern construction with optional fields.
+**Structible macro**: JSCalendar object types (Event, Task, Group, Link) and calico component/parameter types use the `structible` macro for builder-pattern construction with optional fields.
 
 **Type markers**: DateTime uses marker types (Utc, Local, ()) to distinguish timezone context at compile time.
 

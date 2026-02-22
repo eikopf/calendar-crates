@@ -18,6 +18,10 @@ Types specific to iCalendar (RFC 5545). These include
 - Recurrence rule types and representations (e.g. RRule, WeekdayNum, MonthDaySet).
 - String types used by RFC 5545 (e.g. ParamText).
 
+### `calico`
+
+An iCalendar (RFC 5545) parser, printer, and data model. Uses winnow for parsing.
+
 ### `jscalendar`
 
 A parser-agnostic implementation of JSCalendar (RFC 8984).
