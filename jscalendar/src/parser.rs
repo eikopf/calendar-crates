@@ -411,9 +411,7 @@ where
     E: ParserError<&'i str> + FromExternalError<&'i str, JsCalendarParseError>,
 {
     /// Parses optional seconds with optional fractional part, terminated by 'S'.
-    fn dur_second<'i, E>(
-        input: &mut &'i str,
-    ) -> Result<(u32, Option<FractionalSecond>), E>
+    fn dur_second<'i, E>(input: &mut &'i str) -> Result<(u32, Option<FractionalSecond>), E>
     where
         E: ParserError<&'i str> + FromExternalError<&'i str, JsCalendarParseError>,
     {
