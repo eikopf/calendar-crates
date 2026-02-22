@@ -10,16 +10,15 @@ use std::{
 };
 
 use calendar_types::{
-    duration::{Duration, InvalidDurationError, SignedDuration},
+    duration::{Duration, SignedDuration},
     set::Token,
-    time::{DateTime, InvalidDateTimeError, Local, Utc},
+    time::{DateTime, Local, Utc},
 };
 use crate::model::set::{Percent, Priority};
 use thiserror::Error;
 
 use crate::parser::{
-    DateTimeParseError, DurationParseError, OwnedParseError, SignedDurationParseError,
-    UtcDateTimeParseError, duration, local_date_time, parse_full, signed_duration, utc_date_time,
+    OwnedParseError, duration, local_date_time, parse_full, signed_duration, utc_date_time,
 };
 
 /// Fallible conversion from a JSON value into a Rust type.
@@ -52,7 +51,7 @@ impl<V: DestructibleJsonValue> TryFromJson<V> for String {
 }
 
 impl<V: DestructibleJsonValue> TryFromJson<V> for DateTime<Local> {
-    type Error = TypeErrorOr<OwnedParseError<DateTimeParseError, InvalidDateTimeError>>;
+    type Error = TypeErrorOr<OwnedParseError>;
 
     fn try_from_json(value: V) -> Result<Self, Self::Error> {
         let input = value.try_into_string()?;
@@ -62,7 +61,7 @@ impl<V: DestructibleJsonValue> TryFromJson<V> for DateTime<Local> {
 }
 
 impl<V: DestructibleJsonValue> TryFromJson<V> for DateTime<Utc> {
-    type Error = TypeErrorOr<OwnedParseError<UtcDateTimeParseError, InvalidDateTimeError>>;
+    type Error = TypeErrorOr<OwnedParseError>;
 
     fn try_from_json(value: V) -> Result<Self, Self::Error> {
         let input = value.try_into_string()?;
@@ -72,7 +71,7 @@ impl<V: DestructibleJsonValue> TryFromJson<V> for DateTime<Utc> {
 }
 
 impl<V: DestructibleJsonValue> TryFromJson<V> for Duration {
-    type Error = TypeErrorOr<OwnedParseError<DurationParseError, InvalidDurationError>>;
+    type Error = TypeErrorOr<OwnedParseError>;
 
     fn try_from_json(value: V) -> Result<Self, Self::Error> {
         let input = value.try_into_string()?;
@@ -82,7 +81,7 @@ impl<V: DestructibleJsonValue> TryFromJson<V> for Duration {
 }
 
 impl<V: DestructibleJsonValue> TryFromJson<V> for SignedDuration {
-    type Error = TypeErrorOr<OwnedParseError<SignedDurationParseError, InvalidDurationError>>;
+    type Error = TypeErrorOr<OwnedParseError>;
 
     fn try_from_json(value: V) -> Result<Self, Self::Error> {
         let input = value.try_into_string()?;

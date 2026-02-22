@@ -194,6 +194,7 @@ dependencies = [
  "structible",
  "strum",
  "thiserror",
+ "winnow",
 ]
 
 [[package]]

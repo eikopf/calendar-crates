@@ -1,6 +1,10 @@
 //! Parsers for types which are encoded as strings by JSCalendar.
-
-use std::{cmp::Ordering, convert::Infallible};
+//!
+//! All parsers in this module use [winnow](https://docs.rs/winnow) and are generic over the error
+//! type `E`, requiring `ParserError<&'i str> + FromExternalError<&'i str, JsCalendarParseError>`.
+//! At the public API boundary, [`parse_full`] instantiates these parsers with
+//! [`ContextError`](winnow::error::ContextError) and converts the result into an
+//! [`OwnedParseError`].
 
 use calendar_types::{
     duration::{Duration, ExactDuration, InvalidDurationError, NominalDuration, SignedDuration},
@@ -13,468 +17,436 @@ use calendar_types::{
     },
 };
 use thiserror::Error;
-
-// # Implementation
-//
-// An incremental parser is a function which takes &mut &str (and potentially other parameters as
-// well) and returns a Result. The parser *succeeds* if it returns Ok, and *fails* otherwise. We
-// require that a parser function must not (visibly) write through the &mut &str parameter unless
-// it succeeds.
-//
-// This pattern is quite similar to winnow, although winnow also supports non-function parsers. The
-// reason we're not using winnow is because we want total control over the error types produced by
-// parsers, and in particular we want to avoid producing opaque string-based errors.
-//
-// In this module, errors fall into three classes:
-//
-// 1. Non-specific parsing errors.
-// 2. Specific syntactic errors.
-// 3. Specific semantic errors.
-//
-// The first class contains all general parsing errors, represented by GeneralParseError. This is
-// mostly used by lower-level combinators and primitives to return errors that can't be given more
-// specific context based on the type being parsed (e.g. the unexpected end of input or a malformed
-// string slice).
-//
-// The second and third classes are specific to the type being parsed, and are distinguished from
-// one another by their relative scopes. The second kind of error can *only* appear when a parser
-// in this module produces it, and is fundamentally still about parsing; by contrast the third kind
-// may have any scope and appear anywhere in the codebase. For example, Year::new might be called
-// anywhere to return an InvalidYearError (including the downstream code of users), whereas
-// YearParseError can only occur because someone called the year parser in this module.
+use winnow::{
+    Parser,
+    combinator::{alt, opt, preceded, terminated},
+    error::{ContextError, FromExternalError, ParserError},
+    stream::Stream,
+    token::{any, one_of, take_while},
+};
 
 /// Converts an incremental parser into a complete parser, which will return an error if the input
 /// string is not completely consumed.
-pub fn parse_full<'i, T, Sy, Se>(
-    parser: impl FnOnce(&mut &'i str) -> ParseResult<'i, T, Sy, Se>,
-) -> impl FnOnce(&'i str) -> Result<T, OwnedParseError<Sy, Se>> {
-    |s| {
-        let mut input = s;
-        let result = parser(&mut input)
-            .map_err(|error| OwnedParseError::from_parse_error(error, s.into()))?;
-
-        match input.is_empty() {
-            true => Ok(result),
-            false => {
-                let parse_error = ParseError::general(input, GeneralParseError::UnconsumedInput);
-                let error = OwnedParseError::from_parse_error(parse_error, s.into());
-                Err(error)
-            }
-        }
+pub fn parse_full<'i, T>(
+    mut parser: impl Parser<&'i str, T, ContextError> + 'i,
+) -> impl FnOnce(&'i str) -> Result<T, OwnedParseError> {
+    move |input| {
+        parser
+            .parse(input)
+            .map_err(|e| OwnedParseError::from_winnow(e))
     }
+}
+
+/// A unified error type for all domain-specific parse errors in JSCalendar.
+///
+/// This covers both syntactic validation errors (like structural constraints on durations) and
+/// semantic errors (like out-of-range values from calendar-types constructors). Simple mismatches
+/// (e.g. expected 'P' but got 'X') are handled by winnow's native backtracking and do not appear
+/// here.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Error)]
+pub enum JsCalendarParseError {
+    // Duration syntax
+    /// The `T` prefix in a duration was followed by no time components.
+    #[error("expected some data after T")]
+    NoDataAfterTimePrefix,
+    /// A duration has hours and seconds but no minutes component.
+    #[error("exact time contains hours and seconds but not minutes")]
+    HourAndSecondWithoutMinute,
+    // Fractional second syntax
+    /// A fractional second had trailing zeros (e.g. `.100`).
+    #[error("trailing zeros in fractional second")]
+    FractionalSecondTrailingZeros,
+    /// A fractional second had more than 9 digits.
+    #[error("more than 9 digits in fractional second")]
+    FractionalSecondTooManyDigits,
+    // Semantic errors (from calendar-types)
+    #[error(transparent)]
+    InvalidYear(#[from] InvalidYearError),
+    #[error(transparent)]
+    InvalidMonth(#[from] InvalidMonthError),
+    #[error(transparent)]
+    InvalidDay(#[from] InvalidDayError),
+    #[error(transparent)]
+    InvalidDate(#[from] InvalidDateError),
+    #[error(transparent)]
+    InvalidHour(#[from] InvalidHourError),
+    #[error(transparent)]
+    InvalidMinute(#[from] InvalidMinuteError),
+    #[error(transparent)]
+    InvalidSecond(#[from] InvalidSecondError),
+    #[error(transparent)]
+    InvalidTime(#[from] InvalidTimeError),
+    #[error(transparent)]
+    InvalidDateTime(#[from] InvalidDateTimeError),
+    #[error(transparent)]
+    InvalidFractionalSecond(#[from] InvalidFractionalSecondError),
+    #[error(transparent)]
+    InvalidDuration(#[from] InvalidDurationError),
 }
 
 /// A parse error with an owned copy of the complete input string.
 ///
-/// `Sy` is the syntactic error type and `Se` is the semantic error type.
-#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
-#[error("{error} (at index {index} of {complete_input:?})")]
-pub struct OwnedParseError<Sy, Se> {
+/// # Note
+///
+/// This type is a placeholder: its representation is likely to change before the 1.0 release.
+/// See <https://github.com/eikopf/calendar-crates/issues/25> for details.
+// TODO(#25): refine this error type before 1.0
+#[derive(Debug, Clone, PartialEq, Eq, Error)]
+#[error("{}", match &self.kind {
+    Some(e) => format!("{e} (at index {index} of {complete_input:?})", index = self.offset, complete_input = self.complete_input),
+    None => format!("parse error at index {index} of {complete_input:?}", index = self.offset, complete_input = self.complete_input),
+})]
+pub struct OwnedParseError {
     complete_input: Box<str>,
-    index: usize,
-    error: ParseErrorKind<Sy, Se>,
+    offset: usize,
+    kind: Option<JsCalendarParseError>,
 }
 
-impl<Sy, Se> OwnedParseError<Sy, Se> {
-    fn from_parse_error(error: ParseError<&str, Sy, Se>, complete_input: Box<str>) -> Self {
-        debug_assert!(complete_input.contains(error.input));
-        let index = complete_input.len() - error.input.len();
+impl OwnedParseError {
+    fn from_winnow(e: winnow::error::ParseError<&str, ContextError>) -> Self {
+        let complete_input: Box<str> = (*e.input()).into();
+        let offset = e.offset();
+
+        // Try to extract a JsCalendarParseError from the ContextError's cause.
+        let kind = e
+            .into_inner()
+            .cause()
+            .and_then(|c| c.downcast_ref::<JsCalendarParseError>())
+            .copied();
 
         Self {
             complete_input,
-            index,
-            error: error.error,
+            offset,
+            kind,
         }
     }
 
-    #[cfg(test)]
-    fn into_semantic(self) -> Option<Se> {
-        match self.error {
-            ParseErrorKind::Semantic(error) => Some(error),
-            _ => None,
+    /// Returns the byte offset at which the error occurred.
+    pub fn offset(&self) -> usize {
+        self.offset
+    }
+
+    /// Returns the domain-specific error kind, if one is available.
+    pub fn kind(&self) -> Option<&JsCalendarParseError> {
+        self.kind.as_ref()
+    }
+}
+
+// impl std::error::Error for JsCalendarParseError to satisfy ContextError's FromExternalError bound
+// (this is done by thiserror's #[derive(Error)])
+
+// ---------------------------------------------------------------------------
+// Private combinators
+// ---------------------------------------------------------------------------
+
+/// Parses a single ASCII decimal digit, returning its numeric value (0-9).
+fn digit<'i, E>(input: &mut &'i str) -> Result<u8, E>
+where
+    E: ParserError<&'i str>,
+{
+    any.verify_map(|c: char| c.to_digit(10).map(|d| d as u8))
+        .parse_next(input)
+}
+
+/// Parses a u32 from one or more ASCII digits.
+fn parse_u32<'i, E>(input: &mut &'i str) -> Result<u32, E>
+where
+    E: ParserError<&'i str>,
+{
+    take_while(1.., |c: char| c.is_ascii_digit())
+        .verify_map(|s: &str| s.parse::<u32>().ok())
+        .parse_next(input)
+}
+
+// ---------------------------------------------------------------------------
+// Component parsers (date/time primitives)
+// ---------------------------------------------------------------------------
+
+/// Parses a [`Year`] (four digits).
+fn year<'i, E>(input: &mut &'i str) -> Result<Year, E>
+where
+    E: ParserError<&'i str> + FromExternalError<&'i str, JsCalendarParseError>,
+{
+    let checkpoint = input.checkpoint();
+    let (a, b, c, d) = (digit, digit, digit, digit).parse_next(input)?;
+    let value = (a as u16) * 1000 + (b as u16) * 100 + (c as u16) * 10 + d as u16;
+    Year::new(value).map_err(|e| {
+        input.reset(&checkpoint);
+        E::from_external_error(input, e.into())
+    })
+}
+
+/// Parses a [`Month`] (two digits).
+fn month<'i, E>(input: &mut &'i str) -> Result<Month, E>
+where
+    E: ParserError<&'i str> + FromExternalError<&'i str, JsCalendarParseError>,
+{
+    let checkpoint = input.checkpoint();
+    let (a, b) = (digit, digit).parse_next(input)?;
+    let value = a * 10 + b;
+    Month::new(value).map_err(|e| {
+        input.reset(&checkpoint);
+        E::from_external_error(input, e.into())
+    })
+}
+
+/// Parses a [`Day`] (two digits).
+fn day<'i, E>(input: &mut &'i str) -> Result<Day, E>
+where
+    E: ParserError<&'i str> + FromExternalError<&'i str, JsCalendarParseError>,
+{
+    let checkpoint = input.checkpoint();
+    let (a, b) = (digit, digit).parse_next(input)?;
+    let value = a * 10 + b;
+    Day::new(value).map_err(|e| {
+        input.reset(&checkpoint);
+        E::from_external_error(input, e.into())
+    })
+}
+
+/// Parses an [`Hour`] (two digits).
+fn hour<'i, E>(input: &mut &'i str) -> Result<Hour, E>
+where
+    E: ParserError<&'i str> + FromExternalError<&'i str, JsCalendarParseError>,
+{
+    let checkpoint = input.checkpoint();
+    let (a, b) = (digit, digit).parse_next(input)?;
+    let value = a * 10 + b;
+    Hour::new(value).map_err(|e| {
+        input.reset(&checkpoint);
+        E::from_external_error(input, e.into())
+    })
+}
+
+/// Parses a [`Minute`] (two digits).
+fn minute<'i, E>(input: &mut &'i str) -> Result<Minute, E>
+where
+    E: ParserError<&'i str> + FromExternalError<&'i str, JsCalendarParseError>,
+{
+    let checkpoint = input.checkpoint();
+    let (a, b) = (digit, digit).parse_next(input)?;
+    let value = a * 10 + b;
+    Minute::new(value).map_err(|e| {
+        input.reset(&checkpoint);
+        E::from_external_error(input, e.into())
+    })
+}
+
+/// Parses a [`Second`] (two digits).
+fn second<'i, E>(input: &mut &'i str) -> Result<Second, E>
+where
+    E: ParserError<&'i str> + FromExternalError<&'i str, JsCalendarParseError>,
+{
+    let checkpoint = input.checkpoint();
+    let (a, b) = (digit, digit).parse_next(input)?;
+    let value = a * 10 + b;
+    Second::new(value).map_err(|e| {
+        input.reset(&checkpoint);
+        E::from_external_error(input, e.into())
+    })
+}
+
+/// Parses an optional [`FractionalSecond`], including its initial `.` separator.
+fn fractional_second<'i, E>(input: &mut &'i str) -> Result<Option<FractionalSecond>, E>
+where
+    E: ParserError<&'i str> + FromExternalError<&'i str, JsCalendarParseError>,
+{
+    // If there's no '.', no fractional second is present.
+    if !input.starts_with('.') {
+        return Ok(None);
+    }
+
+    let checkpoint = input.checkpoint();
+
+    // Consume the '.'
+    '.'.parse_next(input)?;
+
+    // Consume all digit characters after the dot.
+    let digits: &str = take_while(1.., |c: char| c.is_ascii_digit()).parse_next(input)?;
+
+    match digits.len() {
+        10.. => {
+            input.reset(&checkpoint);
+            Err(E::from_external_error(
+                input,
+                JsCalendarParseError::FractionalSecondTooManyDigits,
+            ))
         }
-    }
-}
+        1..=9 => {
+            const PLACE_VALUES: [u32; 9] = [
+                100_000_000, // 100ms
+                10_000_000,  // 10ms
+                1_000_000,   // 1ms
+                100_000,     // 100us
+                10_000,      // 10us
+                1000,        // 1us
+                100,         // 100ns
+                10,          // 10ns
+                1,           // 1ns
+            ];
 
-/// The result of applying a parser, which is either a `T` or a [`ParseError<&'i str, Sy, Se>`].
-pub type ParseResult<'i, T, Sy, Se> = Result<T, ParseError<&'i str, Sy, Se>>;
+            if digits.as_bytes().last() == Some(&b'0') {
+                input.reset(&checkpoint);
+                return Err(E::from_external_error(
+                    input,
+                    JsCalendarParseError::FractionalSecondTrailingZeros,
+                ));
+            }
 
-/// The error produced by a parser, holding some input `I` and an error which may be general (of
-/// type [`GeneralParseError`]), syntactic (of type `Sy`), or semantic (of type `Se`).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct ParseError<I, Sy, Se> {
-    input: I,
-    error: ParseErrorKind<Sy, Se>,
-}
+            let value = digits
+                .as_bytes()
+                .iter()
+                .zip(PLACE_VALUES)
+                .map(|(&d, p)| ((d - b'0') as u32) * p)
+                .sum::<u32>();
 
-impl<I, Sy, Se> From<Infallible> for ParseError<I, Sy, Se> {
-    fn from(value: Infallible) -> Self {
-        match value {}
-    }
-}
-
-impl<I, Sy, Se> ParseError<I, Sy, Se> {
-    #[inline(always)]
-    pub fn unexpected_eof() -> Self
-    where
-        &'static str: Into<I>,
-    {
-        Self {
-            input: "".into(),
-            error: ParseErrorKind::General(GeneralParseError::UnexpectedEof),
+            match FractionalSecond::new(value) {
+                Ok(frac) => Ok(Some(frac)),
+                Err(e) => {
+                    input.reset(&checkpoint);
+                    Err(E::from_external_error(input, e.into()))
+                }
+            }
         }
-    }
-
-    #[inline(always)]
-    pub const fn invalid_split_index(input: I, index: usize) -> Self {
-        Self {
-            input,
-            error: ParseErrorKind::General(GeneralParseError::InvalidSplitIndex(index)),
-        }
-    }
-
-    #[inline(always)]
-    pub const fn insufficient_input(input: I, count: usize) -> Self {
-        Self {
-            input,
-            error: ParseErrorKind::General(GeneralParseError::InvalidSplitIndex(count)),
-        }
-    }
-
-    #[inline(always)]
-    pub const fn general(input: I, error: GeneralParseError) -> Self {
-        Self {
-            input,
-            error: ParseErrorKind::General(error),
-        }
-    }
-
-    #[inline(always)]
-    pub const fn syntax(input: I, error: Sy) -> Self {
-        Self {
-            input,
-            error: ParseErrorKind::Syntax(error),
-        }
-    }
-
-    #[inline(always)]
-    pub const fn semantic(input: I, error: Se) -> Self {
-        Self {
-            input,
-            error: ParseErrorKind::Semantic(error),
-        }
-    }
-
-    #[inline(always)]
-    pub fn into_semantic(self) -> Option<Se> {
-        match self.error {
-            ParseErrorKind::Semantic(error) => Some(error),
-            _ => None,
-        }
-    }
-
-    pub fn coerce<Sy2, Se2>(self) -> ParseError<I, Sy2, Se2>
-    where
-        Sy: Into<Sy2>,
-        Se: Into<Se2>,
-    {
-        let Self { input, error } = self;
-
-        match error {
-            ParseErrorKind::General(error) => ParseError::general(input, error),
-            ParseErrorKind::Syntax(error) => ParseError::syntax(input, error.into()),
-            ParseErrorKind::Semantic(error) => ParseError::semantic(input, error.into()),
-        }
-    }
-
-    #[inline(always)]
-    pub fn coerce_semantic<Se2>(self) -> ParseError<I, Sy, Se2>
-    where
-        Se: Into<Se2>,
-    {
-        self.coerce()
-    }
-
-    #[inline(always)]
-    pub fn coerce_syntax<Sy2>(self) -> ParseError<I, Sy2, Se>
-    where
-        Sy: Into<Sy2>,
-    {
-        self.coerce()
+        // digits.len() == 0 is impossible since we used take_while(1.., ...)
+        _ => unreachable!(),
     }
 }
 
-/// The kind of a [`ParseError`].
-#[derive(Debug, Clone, Copy, Error, PartialEq, Eq)]
-pub enum ParseErrorKind<Sy, Se> {
-    /// A non-specific parsing error.
-    #[error("parse error: {0}")]
-    General(GeneralParseError),
-    /// A syntactic error specific to the type being parsed.
-    #[error("syntax error: {0}")]
-    Syntax(Sy),
-    /// A semantic error specific to the type being parsed.
-    #[error("semantic error: {0}")]
-    Semantic(Se),
+// ---------------------------------------------------------------------------
+// Composite parsers (date, time, datetime)
+// ---------------------------------------------------------------------------
+
+/// Parses a [`Date`] (YYYY-MM-DD).
+fn date<'i, E>(input: &mut &'i str) -> Result<Date, E>
+where
+    E: ParserError<&'i str> + FromExternalError<&'i str, JsCalendarParseError>,
+{
+    let checkpoint = input.checkpoint();
+    let (y, _, m, _, d) = (year, '-', month, '-', day).parse_next(input)?;
+    Date::new(y, m, d).map_err(|e| {
+        input.reset(&checkpoint);
+        E::from_external_error(input, JsCalendarParseError::InvalidDate(e.into()))
+    })
 }
 
-/// A non-specific parsing error.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Error)]
-pub enum GeneralParseError {
-    /// The input was completely empty.
-    #[error("unexpected end of input")]
-    UnexpectedEof,
-    /// The input did not have enough data to proceed.
-    #[error("insufficient input (expected {0} bytes)")]
-    InsufficientInput(usize),
-    /// The input was split in the middle of a UTF-8 character.
-    #[error("attempted to split input at an invalid index ({0})")]
-    InvalidSplitIndex(usize),
-    /// After parsing, the input was not completely consumed.
-    #[error("unconsumed input")]
-    UnconsumedInput,
+/// Parses a [`Time`] (HH:MM:SS[.frac]).
+fn time<'i, E>(input: &mut &'i str) -> Result<Time, E>
+where
+    E: ParserError<&'i str> + FromExternalError<&'i str, JsCalendarParseError>,
+{
+    let checkpoint = input.checkpoint();
+    let (h, _, mi, _, s) = (hour, ':', minute, ':', second).parse_next(input)?;
+    let frac = fractional_second(input)?;
+    Time::new(h, mi, s, frac).map_err(|e| {
+        input.reset(&checkpoint);
+        E::from_external_error(input, e.into())
+    })
 }
 
-/// Syntactic error from parsing a signed duration string.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Error)]
-pub enum SignedDurationParseError {
-    #[error("expected +, -, or P, but got {0} instead")]
-    InvalidPrefix(char),
-    #[error(transparent)]
-    Duration(#[from] DurationParseError),
+// ---------------------------------------------------------------------------
+// Top-level datetime parsers
+// ---------------------------------------------------------------------------
+
+/// Incrementally parses a datetime (no trailing marker) from `input`.
+pub fn date_time<'i, E>(input: &mut &'i str) -> Result<DateTime<()>, E>
+where
+    E: ParserError<&'i str> + FromExternalError<&'i str, JsCalendarParseError>,
+{
+    let (d, _, t) = (date, 'T', time).parse_next(input)?;
+    Ok(DateTime {
+        date: d,
+        time: t,
+        marker: (),
+    })
 }
 
-/// Syntactic error from parsing a duration string.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Error)]
-pub enum DurationParseError {
-    #[error("expected P but got {0} instead")]
-    InvalidPrefix(char),
-    #[error("expected W or D but got {0} instead")]
-    InvalidNominalTerminator(char),
-    #[error("expected T or an ASCII digit but got {0} instead")]
-    InvalidTimePrefix(char),
-    #[error("expected D but got {0} instead")]
-    InvalidDayTerminator(char),
-    #[error("expected H but got {0} instead")]
-    InvalidHourTerminator(char),
-    #[error("expected M but got {0} instead")]
-    InvalidMinuteTerminator(char),
-    #[error("expected S but got {0} instead")]
-    InvalidSecondTerminator(char),
-    #[error("expected some data after T")]
-    NoDataAfterTimePrefix,
-    #[error("exact time contains hours and seconds but not minutes")]
-    HourAndSecondWithoutMinute,
-    #[error(transparent)]
-    U32(#[from] U32ParseError),
-    #[error(transparent)]
-    FractionalSecond(#[from] FractionalSecondParseError),
+/// Incrementally parses a UTC datetime (ending with `Z`) from `input`.
+pub fn utc_date_time<'i, E>(input: &mut &'i str) -> Result<DateTime<Utc>, E>
+where
+    E: ParserError<&'i str> + FromExternalError<&'i str, JsCalendarParseError>,
+{
+    let dt = terminated(date_time, 'Z').parse_next(input)?;
+    Ok(DateTime {
+        date: dt.date,
+        time: dt.time,
+        marker: Utc,
+    })
 }
 
-/// Syntactic error from parsing a UTC datetime string.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Error)]
-pub enum UtcDateTimeParseError {
-    #[error(transparent)]
-    DateTime(#[from] DateTimeParseError),
-    #[error("expected Z but got {0} instead")]
-    InvalidMarker(char),
+/// Incrementally parses a local datetime (no trailing marker) from `input`.
+pub fn local_date_time<'i, E>(input: &mut &'i str) -> Result<DateTime<Local>, E>
+where
+    E: ParserError<&'i str> + FromExternalError<&'i str, JsCalendarParseError>,
+{
+    let dt = date_time.parse_next(input)?;
+    Ok(DateTime {
+        date: dt.date,
+        time: dt.time,
+        marker: Local,
+    })
 }
 
-/// Syntactic error from parsing a datetime string.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Error)]
-pub enum DateTimeParseError {
-    #[error("invalid date: {0}")]
-    Date(#[from] DateParseError),
-    #[error("invalid time: {0}")]
-    Time(#[from] TimeParseError),
-    #[error("expected T but got {0} instead")]
-    InvalidSeparator(char),
-}
-
-/// Syntactic error from parsing a date string.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Error)]
-pub enum DateParseError {
-    #[error("invalid year: {0}")]
-    Year(#[from] YearParseError),
-    #[error("invalid month: {0}")]
-    Month(#[from] MonthParseError),
-    #[error("invalid day: {0}")]
-    Day(#[from] DayParseError),
-    #[error("expected a hyphen but got {0} instead")]
-    InvalidSeparator(char),
-}
-
-/// Syntactic error from parsing a time string.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Error)]
-pub enum TimeParseError {
-    #[error("invalid hour: {0}")]
-    Hour(#[from] HourParseError),
-    #[error("invalid minute: {0}")]
-    Minute(#[from] MinuteParseError),
-    #[error("invalid second: {0}")]
-    Second(#[from] SecondParseError),
-    #[error("invalid fractional second: {0}")]
-    FractionalSecond(#[from] FractionalSecondParseError),
-    #[error("expected a colon but got {0} instead")]
-    InvalidSeparator(char),
-}
-
-/// Syntactic error from parsing a year component.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Error)]
-#[error(transparent)]
-pub struct YearParseError(#[from] DigitParseError);
-
-/// Syntactic error from parsing a month component.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Error)]
-#[error(transparent)]
-pub struct MonthParseError(#[from] DigitParseError);
-
-/// Syntactic error from parsing a day component.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Error)]
-#[error(transparent)]
-pub struct DayParseError(#[from] DigitParseError);
-
-/// Syntactic error from parsing an hour component.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Error)]
-#[error(transparent)]
-pub struct HourParseError(#[from] DigitParseError);
-
-/// Syntactic error from parsing a minute component.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Error)]
-#[error(transparent)]
-pub struct MinuteParseError(#[from] DigitParseError);
-
-/// Syntactic error from parsing a second component.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Error)]
-#[error(transparent)]
-pub struct SecondParseError(#[from] DigitParseError);
-
-/// Syntactic error from parsing a fractional second component.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Error)]
-pub enum FractionalSecondParseError {
-    #[error(transparent)]
-    Digit(#[from] DigitParseError),
-    #[error("a trailing zero was encountered")]
-    TrailingZeros,
-    #[error("no digits after the decimal point")]
-    NoDigits,
-    #[error("more than 9 digits")]
-    TooManyDigits,
-}
-
-/// Syntactic error from parsing an unsigned 32-bit integer.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Error)]
-pub enum U32ParseError {
-    #[error("expected an ASCII decimal digit")]
-    NoDigits,
-    #[error(transparent)]
-    Digit(#[from] DigitParseError),
-    #[error("encountered an integer greater than u32::MAX")]
-    Overflow,
-}
-
-/// Syntactic error from parsing a single ASCII decimal digit.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Error)]
-#[error("expected an ASCII digit but got the byte {0:02X} instead")]
-pub struct DigitParseError(u8);
-
-/// Incrementally parses a signed duration from `input`.
-pub fn signed_duration<'i>(
-    input: &mut &'i str,
-) -> ParseResult<'i, SignedDuration, SignedDurationParseError, InvalidDurationError> {
-    let sign = match peek(input)? {
-        '+' => {
-            let () = skip(input, 1)?;
-            Ok(Sign::Pos)
-        }
-        '-' => {
-            let () = skip(input, 1)?;
-            Ok(Sign::Neg)
-        }
-        'P' => Ok(Sign::default()),
-        c => Err(ParseError::syntax(
-            *input,
-            SignedDurationParseError::InvalidPrefix(c),
-        )),
-    }?;
-
-    let duration = duration(input).map_err(ParseError::coerce)?;
-    Ok(SignedDuration { sign, duration })
-}
+// ---------------------------------------------------------------------------
+// Duration parsers
+// ---------------------------------------------------------------------------
 
 /// Incrementally parses a duration from `input`.
-pub fn duration<'i>(
-    input: &mut &'i str,
-) -> ParseResult<'i, Duration, DurationParseError, InvalidDurationError> {
-    // # Grammar (from RFC 8984 §1.4.6).
-    //
-    // dur-secfrac = "." 1*DIGIT
-    // dur-second  = 1*DIGIT [dur-secfrac] "S"
-    // dur-minute  = 1*DIGIT "M" [dur-second]
-    // dur-hour    = 1*DIGIT "H" [dur-minute]
-    // dur-time    = "T" (dur-hour / dur-minute / dur-second)
-    // dur-day     = 1*DIGIT "D"
-    // dur-week    = 1*DIGIT "W"
-    // dur-cal     = (dur-week [dur-day] / dur-day)
-    //
-    // duration    = "P" (dur-cal [dur-time] / dur-time)
-    //
-    // # Implementation
-    //
-    // After looking at the first character and checking it's "P", we need to be a little clever
-    // with how we check what grammar rule we should follow; we can also avoid throwing away work
-    // in a few places.
-    //
-    // - duration: check for the literal "T" to decide between the two branches
-    // - dur-cal: parse a number unconditionally and check the next byte ("W" or "D")
-    // - dur-time: parse a number unconditionally and check the next byte ("H", "M", "S", or ".")
-
-    #[inline(always)]
-    fn dur_second<'i>(
+///
+/// Grammar (from RFC 8984 section 1.4.6):
+/// ```text
+/// dur-secfrac = "." 1*DIGIT
+/// dur-second  = 1*DIGIT [dur-secfrac] "S"
+/// dur-minute  = 1*DIGIT "M" [dur-second]
+/// dur-hour    = 1*DIGIT "H" [dur-minute]
+/// dur-time    = "T" (dur-hour / dur-minute / dur-second)
+/// dur-day     = 1*DIGIT "D"
+/// dur-week    = 1*DIGIT "W"
+/// dur-cal     = (dur-week [dur-day] / dur-day)
+///
+/// duration    = "P" (dur-cal [dur-time] / dur-time)
+/// ```
+pub fn duration<'i, E>(input: &mut &'i str) -> Result<Duration, E>
+where
+    E: ParserError<&'i str> + FromExternalError<&'i str, JsCalendarParseError>,
+{
+    /// Parses optional seconds with optional fractional part, terminated by 'S'.
+    fn dur_second<'i, E>(
         input: &mut &'i str,
-    ) -> ParseResult<'i, (u32, Option<FractionalSecond>), DurationParseError, InvalidDurationError>
+    ) -> Result<(u32, Option<FractionalSecond>), E>
+    where
+        E: ParserError<&'i str> + FromExternalError<&'i str, JsCalendarParseError>,
     {
-        let seconds = u32(input).map_err(ParseError::coerce_syntax)?;
-        let frac = fractional_second(input).map_err(ParseError::coerce)?;
-        let () = separator('S', DurationParseError::InvalidSecondTerminator)(input)?;
+        let seconds = parse_u32(input)?;
+        let frac = fractional_second(input)?;
+        'S'.parse_next(input)?;
         Ok((seconds, frac))
     }
 
-    fn u32_char<'i>(
-        terminator: char,
-        f: impl Fn(char) -> DurationParseError,
-    ) -> impl FnOnce(&mut &'i str) -> ParseResult<'i, u32, DurationParseError, InvalidDurationError>
+    /// Parses the time component after the 'T' prefix.
+    fn dur_time<'i, E>(input: &mut &'i str) -> Result<ExactDuration, E>
+    where
+        E: ParserError<&'i str> + FromExternalError<&'i str, JsCalendarParseError>,
     {
-        move |input| {
-            let value = u32(input).map_err(ParseError::coerce_syntax)?;
-            let () = separator(terminator, f)(input)?;
-            Ok(value)
-        }
-    }
+        let checkpoint = input.checkpoint();
 
-    /// A modified version of the `dur-time` rule without the leading `T`.
-    fn dur_time<'i>(
-        input: &mut &'i str,
-    ) -> ParseResult<'i, ExactDuration, DurationParseError, InvalidDurationError> {
-        let checkpoint = *input;
-
-        let hours = optional(u32_char('H', DurationParseError::InvalidHourTerminator))(input)?;
-        let minutes = optional(u32_char('M', DurationParseError::InvalidMinuteTerminator))(input)?;
-        let seconds = optional(dur_second)(input)?;
+        let hours = opt(terminated(parse_u32, 'H')).parse_next(input)?;
+        let minutes = opt(terminated(parse_u32, 'M')).parse_next(input)?;
+        let seconds = opt(dur_second).parse_next(input)?;
 
         match (hours, minutes, seconds) {
             (Some(_), None, Some(_)) => {
-                *input = checkpoint;
-                Err(ParseError::syntax(
+                input.reset(&checkpoint);
+                Err(E::from_external_error(
                     input,
-                    DurationParseError::HourAndSecondWithoutMinute,
+                    JsCalendarParseError::HourAndSecondWithoutMinute,
                 ))
             }
             (None, None, None) => {
-                *input = checkpoint;
-                Err(ParseError::syntax(
+                input.reset(&checkpoint);
+                Err(E::from_external_error(
                     input,
-                    DurationParseError::NoDataAfterTimePrefix,
+                    JsCalendarParseError::NoDataAfterTimePrefix,
                 ))
             }
             (_, _, _) => {
@@ -492,449 +464,78 @@ pub fn duration<'i>(
         }
     }
 
-    fn dur_cal<'i>(
-        input: &mut &'i str,
-    ) -> ParseResult<'i, (u32, u32), DurationParseError, InvalidDurationError> {
-        let value = u32(input).map_err(ParseError::coerce_syntax)?;
+    /// Parses the calendar component (weeks and/or days).
+    fn dur_cal<'i, E>(input: &mut &'i str) -> Result<(u32, u32), E>
+    where
+        E: ParserError<&'i str> + FromExternalError<&'i str, JsCalendarParseError>,
+    {
+        let value = parse_u32(input)?;
+        let terminator: char = one_of(['W', 'D']).parse_next(input)?;
 
-        match char(input)? {
-            'W' => match peek::<(), ()>(input).ok() {
-                Some('0'..='9') => {
-                    let weeks = value;
-                    let days = u32(input).map_err(ParseError::coerce_syntax)?;
-                    let () = separator('D', DurationParseError::InvalidDayTerminator)(input)?;
-
-                    Ok((weeks, days))
-                }
-                _ => Ok((value, 0)),
-            },
+        match terminator {
+            'W' => {
+                // After weeks, optionally parse days.
+                let days = opt(terminated(parse_u32, 'D')).parse_next(input)?;
+                Ok((value, days.unwrap_or(0)))
+            }
             'D' => Ok((0, value)),
-            c => Err(ParseError::syntax(
-                input,
-                DurationParseError::InvalidNominalTerminator(c),
-            )),
+            _ => unreachable!(),
         }
     }
 
-    let () = separator('P', DurationParseError::InvalidPrefix)(input)?;
-    match peek(input)? {
-        'T' => {
-            let () = skip(input, 1)?;
-            Ok(Duration::Exact(dur_time(input)?))
-        }
-        '0'..='9' => {
-            let (weeks, days) = dur_cal(input)?;
-
-            let exact = match peek::<(), ()>(input).ok() {
-                Some('T') => {
-                    let () = skip(input, 1)?;
-                    Some(dur_time(input)?)
-                }
-                _ => None,
-            };
-
-            Ok(Duration::Nominal(NominalDuration { weeks, days, exact }))
-        }
-        c => Err(ParseError::syntax(
-            input,
-            DurationParseError::InvalidTimePrefix(c),
+    // duration = "P" (dur-cal [dur-time] / dur-time)
+    preceded(
+        'P',
+        alt((
+            // dur-time (starts with 'T')
+            preceded('T', dur_time).map(Duration::Exact),
+            // dur-cal [dur-time]
+            (dur_cal, opt(preceded('T', dur_time))).map(|((weeks, days), exact)| {
+                Duration::Nominal(NominalDuration { weeks, days, exact })
+            }),
         )),
-    }
+    )
+    .parse_next(input)
 }
 
-/// Incrementally parses a UTC datetime (ending with `Z`) from `input`.
-pub fn utc_date_time<'i>(
-    input: &mut &'i str,
-) -> ParseResult<'i, DateTime<Utc>, UtcDateTimeParseError, InvalidDateTimeError> {
-    let DateTime { date, time, .. } = date_time(input).map_err(ParseError::coerce)?;
-    let () = separator('Z', UtcDateTimeParseError::InvalidMarker)(input)?;
-
-    Ok(DateTime {
-        date,
-        time,
-        marker: Utc,
-    })
-}
-
-/// Incrementally parses a local datetime (no trailing marker) from `input`.
-pub fn local_date_time<'i>(
-    input: &mut &'i str,
-) -> ParseResult<'i, DateTime<Local>, DateTimeParseError, InvalidDateTimeError> {
-    let DateTime { date, time, .. } = date_time(input).map_err(ParseError::coerce)?;
-
-    Ok(DateTime {
-        date,
-        time,
-        marker: Local,
-    })
-}
-
-pub fn date_time<'i>(
-    input: &mut &'i str,
-) -> ParseResult<'i, DateTime<()>, DateTimeParseError, InvalidDateTimeError> {
-    let date = date(input).map_err(ParseError::coerce)?;
-    let () = separator('T', DateTimeParseError::InvalidSeparator)(input)?;
-    let time = time(input).map_err(ParseError::coerce)?;
-
-    Ok(DateTime {
-        date,
-        time,
-        marker: (),
-    })
-}
-
-fn date<'i>(input: &mut &'i str) -> ParseResult<'i, Date, DateParseError, InvalidDateError> {
-    let checkpoint = *input;
-    let hyphen = separator('-', DateParseError::InvalidSeparator);
-
-    let year = year(input).map_err(ParseError::coerce)?;
-    let () = hyphen(input)?;
-    let month = month(input).map_err(ParseError::coerce)?;
-    let () = hyphen(input)?;
-    let day = day(input).map_err(ParseError::coerce)?;
-
-    match Date::new(year, month, day) {
-        Ok(date) => Ok(date),
-        Err(error) => {
-            *input = checkpoint;
-            Err(ParseError::semantic(input, error.into()))
-        }
-    }
-}
-
-/// Parses a [`Year`].
-fn year<'i>(input: &mut &'i str) -> ParseResult<'i, Year, YearParseError, InvalidYearError> {
-    let checkpoint = *input;
-    let a = digit(input).map_err(ParseError::coerce_syntax)? as u16;
-    let b = digit(input).map_err(ParseError::coerce_syntax)? as u16;
-    let c = digit(input).map_err(ParseError::coerce_syntax)? as u16;
-    let d = digit(input).map_err(ParseError::coerce_syntax)? as u16;
-    let value = (a * 1000) + (b * 100) + (c * 10) + d;
-
-    match Year::new(value) {
-        Ok(year) => Ok(year),
-        Err(error) => {
-            *input = checkpoint;
-            Err(ParseError::semantic(input, error))
-        }
-    }
-}
-
-/// Parses a [`Month`].
-fn month<'i>(input: &mut &'i str) -> ParseResult<'i, Month, MonthParseError, InvalidMonthError> {
-    let checkpoint = *input;
-    let a = digit(input).map_err(ParseError::coerce_syntax)?;
-    let b = digit(input).map_err(ParseError::coerce_syntax)?;
-    let value = (a * 10) + b;
-
-    match Month::new(value) {
-        Ok(month) => Ok(month),
-        Err(error) => {
-            *input = checkpoint;
-            Err(ParseError::semantic(input, error))
-        }
-    }
-}
-
-/// Parses a [`Day`].
-fn day<'i>(input: &mut &'i str) -> ParseResult<'i, Day, DayParseError, InvalidDayError> {
-    let checkpoint = *input;
-    let a = digit(input).map_err(ParseError::coerce_syntax)?;
-    let b = digit(input).map_err(ParseError::coerce_syntax)?;
-    let value = (a * 10) + b;
-
-    match Day::new(value) {
-        Ok(day) => Ok(day),
-        Err(error) => {
-            *input = checkpoint;
-            Err(ParseError::semantic(input, error))
-        }
-    }
-}
-
-/// Parses a [`Time`].
-fn time<'i>(input: &mut &'i str) -> ParseResult<'i, Time, TimeParseError, InvalidTimeError> {
-    let checkpoint = *input;
-    let colon = separator(':', TimeParseError::InvalidSeparator);
-
-    let hour = hour(input).map_err(ParseError::coerce)?;
-    let () = colon(input)?;
-    let minute = minute(input).map_err(ParseError::coerce)?;
-    let () = colon(input)?;
-    let second = second(input).map_err(ParseError::coerce)?;
-    let frac = fractional_second(input).map_err(ParseError::coerce)?;
-
-    match Time::new(hour, minute, second, frac) {
-        Ok(time) => Ok(time),
-        Err(error) => {
-            *input = checkpoint;
-            Err(ParseError::semantic(input, error))
-        }
-    }
-}
-
-/// Parses an [`Hour`].
-fn hour<'i>(input: &mut &'i str) -> ParseResult<'i, Hour, HourParseError, InvalidHourError> {
-    let checkpoint = *input;
-    let a = digit(input).map_err(ParseError::coerce_syntax)?;
-    let b = digit(input).map_err(ParseError::coerce_syntax)?;
-    let value = (a * 10) + b;
-
-    match Hour::new(value) {
-        Ok(hour) => Ok(hour),
-        Err(error) => {
-            *input = checkpoint;
-            Err(ParseError::semantic(input, error))
-        }
-    }
-}
-
-/// Parses a [`Minute`].
-fn minute<'i>(
-    input: &mut &'i str,
-) -> ParseResult<'i, Minute, MinuteParseError, InvalidMinuteError> {
-    let checkpoint = *input;
-    let a = digit(input).map_err(ParseError::coerce_syntax)?;
-    let b = digit(input).map_err(ParseError::coerce_syntax)?;
-    let value = (a * 10) + b;
-
-    match Minute::new(value) {
-        Ok(minute) => Ok(minute),
-        Err(error) => {
-            *input = checkpoint;
-            Err(ParseError::semantic(input, error))
-        }
-    }
-}
-
-/// Parses a [`Second`].
-fn second<'i>(
-    input: &mut &'i str,
-) -> ParseResult<'i, Second, SecondParseError, InvalidSecondError> {
-    let checkpoint = *input;
-    let a = digit(input).map_err(ParseError::coerce_syntax)?;
-    let b = digit(input).map_err(ParseError::coerce_syntax)?;
-    let value = (a * 10) + b;
-
-    match Second::new(value) {
-        Ok(second) => Ok(second),
-        Err(error) => {
-            *input = checkpoint;
-            Err(ParseError::semantic(input, error))
-        }
-    }
-}
-
-/// Parses an optional [`FractionalSecond`], including its initial `.` separator.
-fn fractional_second<'i>(
-    input: &mut &'i str,
-) -> ParseResult<
-    'i,
-    Option<FractionalSecond>,
-    FractionalSecondParseError,
-    InvalidFractionalSecondError,
-> {
-    if input.is_empty() || !input.starts_with('.') {
-        return Ok(None);
-    }
-
-    let checkpoint = *input;
-    let () = skip(input, 1)?;
-    let digits = digits0(input)?;
-
-    match digits.len() {
-        0 => Err(ParseError::syntax(
-            input,
-            FractionalSecondParseError::NoDigits,
-        )),
-        10.. => Err(ParseError::syntax(
-            input,
-            FractionalSecondParseError::TooManyDigits,
-        )),
-        1..=9 => {
-            const PLACE_VALUES: [u32; 9] = [
-                100_000_000, // 100ms
-                10_000_000,  // 10ms
-                1_000_000,   // 1ms
-                100_000,     // 100μs
-                10_000,      // 10μs
-                1000,        // 1μs
-                100,         // 100ns
-                10,          // 10ns
-                1,           // 1ns
-            ];
-
-            if digits.as_bytes().last() == Some(&b'0') {
-                return Err(ParseError::syntax(
-                    input,
-                    FractionalSecondParseError::TrailingZeros,
-                ));
-            }
-
-            let value = digits
-                .as_bytes()
-                .iter()
-                .zip(PLACE_VALUES)
-                .map(|(&d, p)| ((d - b'0') as u32) * p)
-                .sum::<u32>();
-
-            match FractionalSecond::new(value) {
-                Ok(frac) => Ok(Some(frac)),
-                Err(error) => {
-                    *input = checkpoint;
-                    Err(ParseError::semantic(input, error))
-                }
-            }
-        }
-    }
-}
-
-// COMBINATORS
-
-/// Converts a fallible parser of `T` into an infallible parser of [`Option<T>`].
-#[inline(always)]
-fn optional<'i, T, Sy, Se>(
-    parser: impl FnOnce(&mut &'i str) -> ParseResult<'i, T, Sy, Se>,
-) -> impl FnOnce(&mut &'i str) -> Result<Option<T>, Infallible> {
-    |input| Ok(parser(input).ok())
-}
-
-/// Returns the next character of the input without advancing.
-#[inline(always)]
-fn peek<'i, Sy, Se>(input: &&'i str) -> ParseResult<'i, char, Sy, Se> {
-    input
-        .chars()
-        .next()
-        .ok_or_else(|| ParseError::unexpected_eof())
-}
-
-/// Constructs a parser that tries to parse `sep`, and constructs an error message from the parsed
-/// character using `f` if it fails.
-fn separator<'i, Sy, Se>(
-    sep: char,
-    f: impl Fn(char) -> Sy,
-) -> impl Fn(&mut &'i str) -> ParseResult<'i, (), Sy, Se> {
-    move |input| {
-        let checkpoint = *input;
-        let c = char(input)?;
-
-        if c == sep {
-            Ok(())
-        } else {
-            *input = checkpoint;
-            Err(ParseError::syntax(input, f(c)))
-        }
-    }
-}
-
-/// Parses a [`u32`].
-fn u32<'i, Se>(input: &mut &'i str) -> ParseResult<'i, u32, U32ParseError, Se> {
-    let checkpoint = *input;
-    let digits = digits0(input)?;
-
-    if digits.is_empty() {
-        Err(ParseError::syntax(input, U32ParseError::NoDigits))
-    } else {
-        str::parse::<u32>(digits).map_err(|error| {
-            debug_assert_eq!(error.kind(), &std::num::IntErrorKind::PosOverflow);
-            *input = checkpoint;
-            ParseError::syntax(*input, U32ParseError::Overflow)
+/// Incrementally parses a signed duration from `input`.
+pub fn signed_duration<'i, E>(input: &mut &'i str) -> Result<SignedDuration, E>
+where
+    E: ParserError<&'i str> + FromExternalError<&'i str, JsCalendarParseError>,
+{
+    let sign = opt(one_of(['+', '-']))
+        .map(|c| match c {
+            Some('+') => Sign::Pos,
+            Some('-') => Sign::Neg,
+            _ => Sign::default(),
         })
-    }
-}
+        .parse_next(input)?;
 
-/// Parses zero or more digits. Unlike the [`digit`] parser, the resulting slice contains ASCII
-/// digits rather than the literal values of each digit.
-fn digits0<'i, Sy, Se>(input: &mut &'i str) -> ParseResult<'i, &'i str, Sy, Se> {
-    match input.split_once(|c: char| !c.is_ascii_digit()) {
-        None => {
-            let (head, tail) = (*input, "");
-            *input = tail;
-            Ok(head)
-        }
-        Some((head, _)) => {
-            let () = skip(input, head.len())?;
-            Ok(head)
-        }
-    }
-}
-
-/// Parses a single digit.
-fn digit<'i, Se>(input: &mut &'i str) -> ParseResult<'i, u8, DigitParseError, Se> {
-    let checkpoint = *input;
-    let byte = byte(input)?;
-
-    match byte.is_ascii_digit() {
-        true => Ok(byte - b'0'),
-        false => {
-            *input = checkpoint;
-            Err(ParseError::syntax(input, DigitParseError(byte)))
-        }
-    }
-}
-
-/// Parses a single character.
-fn char<'i, Sy, Se>(input: &mut &'i str) -> ParseResult<'i, char, Sy, Se> {
-    let mut chars = input.chars();
-
-    match chars.next() {
-        None => Err(ParseError::unexpected_eof()),
-        Some(c) => {
-            *input = chars.as_str();
-            Ok(c)
-        }
-    }
-}
-
-/// Parses a single byte.
-fn byte<'i, Sy, Se>(input: &mut &'i str) -> ParseResult<'i, u8, Sy, Se> {
-    match input.as_bytes().first() {
-        None => Err(ParseError::unexpected_eof()),
-        Some(&b) => match input.split_at_checked(1) {
-            None => Err(ParseError::invalid_split_index(input, 1)),
-            Some((_, tail)) => {
-                *input = tail;
-                Ok(b)
-            }
-        },
-    }
-}
-
-/// Skips the next `count` bytes in the `input`.
-fn skip<'i, Sy, Se>(input: &mut &'i str, count: usize) -> ParseResult<'i, (), Sy, Se> {
-    take_str(input, count).and(Ok(()))
-}
-
-/// Takes the first `count` bytes from the `input`, returning an error if removing these inputs
-/// would leave the `input` in an invalid state.
-fn take_str<'i, Sy, Se>(input: &mut &'i str, count: usize) -> ParseResult<'i, &'i str, Sy, Se> {
-    match input.len().cmp(&count) {
-        Ordering::Less => Err(ParseError::insufficient_input(input, count)),
-        Ordering::Equal => {
-            let (head, tail) = (*input, "");
-            *input = tail;
-            Ok(head)
-        }
-        Ordering::Greater => match input.split_at_checked(count) {
-            None => Err(ParseError::invalid_split_index(input, count)),
-            Some((head, tail)) => {
-                *input = tail;
-                Ok(head)
-            }
-        },
-    }
+    let dur = duration(input)?;
+    Ok(SignedDuration {
+        sign,
+        duration: dur,
+    })
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
+    // Helper: run a parser through parse_full for convenience in tests.
+    fn full<'i, T>(
+        parser: impl Parser<&'i str, T, ContextError> + 'i,
+        input: &'i str,
+    ) -> Result<T, OwnedParseError> {
+        parse_full(parser)(input)
+    }
+
     #[test]
     fn signed_duration_parser() {
-        assert_eq!(duration(&mut ""), Err(ParseError::unexpected_eof()));
+        assert!(full(duration, "").is_err());
 
         assert_eq!(
-            signed_duration(&mut "+P7W"),
+            full(signed_duration, "+P7W"),
             Ok(Duration::Nominal(NominalDuration {
                 weeks: 7,
                 ..Default::default()
@@ -943,7 +544,7 @@ mod tests {
         );
 
         assert_eq!(
-            signed_duration(&mut "-P15DT5H0M20S"),
+            full(signed_duration, "-P15DT5H0M20S"),
             Ok(SignedDuration {
                 sign: Sign::Neg,
                 duration: Duration::Nominal(NominalDuration {
@@ -962,10 +563,10 @@ mod tests {
 
     #[test]
     fn duration_parser() {
-        assert_eq!(duration(&mut ""), Err(ParseError::unexpected_eof()));
+        assert!(full(duration, "").is_err());
 
         assert_eq!(
-            duration(&mut "P7W"),
+            full(duration, "P7W"),
             Ok(Duration::Nominal(NominalDuration {
                 weeks: 7,
                 ..Default::default()
@@ -973,7 +574,7 @@ mod tests {
         );
 
         assert_eq!(
-            duration(&mut "P15DT5H0M20S"),
+            full(duration, "P15DT5H0M20S"),
             Ok(Duration::Nominal(NominalDuration {
                 weeks: 0,
                 days: 15,
@@ -989,40 +590,24 @@ mod tests {
 
     #[test]
     fn utc_date_time_parser() {
-        assert_eq!(utc_date_time(&mut ""), Err(ParseError::unexpected_eof()));
-
-        assert_eq!(
-            utc_date_time(&mut "2025-03-15T12:00:00"),
-            Err(ParseError::unexpected_eof())
-        );
-
-        assert_eq!(
-            utc_date_time(&mut "2025-03-15T12:00:00z"),
-            Err(ParseError::syntax(
-                "z",
-                UtcDateTimeParseError::InvalidMarker('z')
-            ))
-        );
-
-        assert!(utc_date_time(&mut "2025-03-15T12:00:00Z").is_ok());
+        assert!(full(utc_date_time, "").is_err());
+        assert!(full(utc_date_time, "2025-03-15T12:00:00").is_err());
+        assert!(full(utc_date_time, "2025-03-15T12:00:00z").is_err());
+        assert!(full(utc_date_time, "2025-03-15T12:00:00Z").is_ok());
     }
 
     #[test]
     fn date_time_parser() {
-        assert_eq!(date_time(&mut ""), Err(ParseError::unexpected_eof()));
-
-        let input = &mut "2025-03-15T12:00:00";
+        assert!(full(date_time, "").is_err());
 
         assert_eq!(
-            date_time(input),
+            full(date_time, "2025-03-15T12:00:00"),
             Ok(DateTime {
                 date: Date::new(Year::new(2025).unwrap(), Month::Mar, Day::D15).unwrap(),
                 time: Time::new(Hour::H12, Minute::M00, Second::S00, None).unwrap(),
                 marker: ()
             })
         );
-
-        assert!(input.is_empty());
     }
 
     #[test]
@@ -1036,11 +621,20 @@ mod tests {
                     let month = Month::new(m).unwrap();
                     let day = Day::new(d).unwrap();
 
-                    let parser = parse_full(date);
-                    assert_eq!(
-                        parser(&input).map_err(|e| e.into_semantic().unwrap()),
-                        Date::new(year, month, day).map_err(Into::into)
-                    );
+                    let expected = Date::new(year, month, day);
+
+                    let result = full(date, &input);
+
+                    match (result, expected) {
+                        (Ok(got), Ok(exp)) => assert_eq!(got, exp),
+                        (Err(_), Err(_)) => {} // both errored, fine
+                        (Ok(got), Err(exp_err)) => {
+                            panic!("expected error {exp_err:?} but got {got:?} for {input}")
+                        }
+                        (Err(err), Ok(exp)) => {
+                            panic!("expected {exp:?} but got error {err:?} for {input}")
+                        }
+                    }
                 }
             }
         }
@@ -1050,45 +644,39 @@ mod tests {
     fn year_parser() {
         for i in 0..=9999 {
             let buf = format!("{i:04}");
-            let mut input = buf.as_str();
-            assert_eq!(year(&mut input), Ok(Year::new(i).unwrap()));
-            assert!(input.is_empty());
+            assert_eq!(full(year, &buf), Ok(Year::new(i).unwrap()));
         }
     }
 
     #[test]
     fn month_parser() {
-        assert_eq!(month(&mut ""), Err(ParseError::unexpected_eof()));
-        assert_eq!(month(&mut "0"), Err(ParseError::unexpected_eof()));
-        assert_eq!(month(&mut "1"), Err(ParseError::unexpected_eof()));
-        assert!(month(&mut "00").is_err());
+        assert!(full(month, "").is_err());
+        assert!(full(month, "0").is_err());
+        assert!(full(month, "1").is_err());
+        assert!(full(month, "00").is_err());
 
         for i in 1..=12 {
             let buf = format!("{i:02}");
-            let mut input = buf.as_str();
-            assert_eq!(month(&mut input), Ok(Month::new(i).unwrap()));
-            assert!(input.is_empty());
+            assert_eq!(full(month, &buf), Ok(Month::new(i).unwrap()));
         }
     }
 
     #[test]
     fn day_parser() {
-        assert_eq!(day(&mut ""), Err(ParseError::unexpected_eof()));
-        assert_eq!(day(&mut "0"), Err(ParseError::unexpected_eof()));
-        assert_eq!(day(&mut "1"), Err(ParseError::unexpected_eof()));
-        assert!(day(&mut "00").is_err());
+        assert!(full(day, "").is_err());
+        assert!(full(day, "0").is_err());
+        assert!(full(day, "1").is_err());
+        assert!(full(day, "00").is_err());
 
         for i in 1..=31 {
             let buf = format!("{i:02}");
-            let mut input = buf.as_str();
-            assert_eq!(day(&mut input), Ok(Day::new(i).unwrap()));
-            assert!(input.is_empty());
+            assert_eq!(full(day, &buf), Ok(Day::new(i).unwrap()));
         }
     }
 
     #[test]
     fn time_parser() {
-        assert_eq!(time(&mut ""), Err(ParseError::unexpected_eof()));
+        assert!(full(time, "").is_err());
 
         for hour in 0..=23 {
             for minute in 0..=59 {
@@ -1119,8 +707,6 @@ mod tests {
                         }
                     }
 
-                    let mut input = buf.as_str();
-
                     let expected = Time::new(
                         Hour::new(hour).unwrap(),
                         Minute::new(minute).unwrap(),
@@ -1128,15 +714,18 @@ mod tests {
                         frac,
                     );
 
-                    dbg![&input];
-                    dbg![&expected];
+                    let result = full(time, &buf);
 
-                    assert_eq!(
-                        time(&mut input).map_err(|e| e.into_semantic().unwrap()),
-                        expected
-                    );
-
-                    assert!(input.is_empty());
+                    match (result, expected) {
+                        (Ok(got), Ok(exp)) => assert_eq!(got, exp, "input: {buf}"),
+                        (Err(_), Err(_)) => {}
+                        (Ok(got), Err(exp_err)) => {
+                            panic!("expected error {exp_err:?} but got {got:?} for {buf}")
+                        }
+                        (Err(err), Ok(exp)) => {
+                            panic!("expected {exp:?} but got error {err:?} for {buf}")
+                        }
+                    }
                 }
             }
         }
@@ -1144,117 +733,37 @@ mod tests {
 
     #[test]
     fn fractional_second_parser() {
-        assert_eq!(fractional_second(&mut ""), Ok(None));
-        assert_eq!(fractional_second(&mut "1.00001"), Ok(None));
+        assert_eq!(full(fractional_second, ""), Ok(None));
 
         assert_eq!(
-            fractional_second(&mut ".000000001"),
+            full(fractional_second, ".000000001"),
             Ok(Some(FractionalSecond::MIN))
         );
         assert_eq!(
-            fractional_second(&mut ".999999999"),
+            full(fractional_second, ".999999999"),
             Ok(Some(FractionalSecond::MAX))
         );
 
         assert_eq!(
-            fractional_second(&mut ".001"),
+            full(fractional_second, ".001"),
             Ok(FractionalSecond::new(1_000_000).ok())
         );
 
-        assert!(fractional_second(&mut ".00000").is_err());
-        assert!(fractional_second(&mut ".00100").is_err());
-        assert!(fractional_second(&mut ".1111111111").is_err());
+        assert!(full(fractional_second, ".00000").is_err());
+        assert!(full(fractional_second, ".00100").is_err());
+        assert!(full(fractional_second, ".1111111111").is_err());
     }
 
     #[test]
     fn digit_parser() {
-        assert_eq!(digit::<()>(&mut ""), Err(ParseError::unexpected_eof()));
+        // Test all digits
+        for d in 0..=9u8 {
+            let buf = d.to_string();
+            assert_eq!(full(digit, &buf), Ok(d));
+        }
 
-        assert_eq!(digit::<()>(&mut "0"), Ok(0));
-        assert_eq!(digit::<()>(&mut "1"), Ok(1));
-        assert_eq!(digit::<()>(&mut "2"), Ok(2));
-        assert_eq!(digit::<()>(&mut "3"), Ok(3));
-        assert_eq!(digit::<()>(&mut "4"), Ok(4));
-        assert_eq!(digit::<()>(&mut "5"), Ok(5));
-        assert_eq!(digit::<()>(&mut "6"), Ok(6));
-        assert_eq!(digit::<()>(&mut "7"), Ok(7));
-        assert_eq!(digit::<()>(&mut "8"), Ok(8));
-        assert_eq!(digit::<()>(&mut "9"), Ok(9));
-        assert_eq!(
-            digit::<()>(&mut "A"),
-            Err(ParseError::syntax("A", DigitParseError(b'A')))
-        );
-
-        assert_eq!(digit::<()>(&mut "0dgsahjk"), Ok(0));
-        assert_eq!(digit::<()>(&mut "15674352756743"), Ok(1));
-        assert_eq!(digit::<()>(&mut "2    "), Ok(2));
-        assert_eq!(digit::<()>(&mut "3\t\t\t\t"), Ok(3));
-        assert_eq!(digit::<()>(&mut "4cbzxnmbc"), Ok(4));
-        assert_eq!(digit::<()>(&mut "59888988"), Ok(5));
-        assert_eq!(
-            digit::<()>(&mut "A0"),
-            Err(ParseError::syntax("A0", DigitParseError(b'A')))
-        );
-    }
-
-    #[test]
-    fn skip_parser() {
-        let input = &mut "0123456789ABCDEF";
-
-        assert_eq!(skip::<(), ()>(input, 0), Ok(()));
-        assert_eq!(*input, "0123456789ABCDEF");
-        assert_eq!(skip::<(), ()>(input, 4), Ok(()));
-        assert_eq!(*input, "456789ABCDEF");
-        assert_eq!(skip::<(), ()>(input, 6), Ok(()));
-        assert_eq!(*input, "ABCDEF");
-        assert_eq!(skip::<(), ()>(input, 5), Ok(()));
-        assert_eq!(*input, "F");
-        assert_eq!(skip::<(), ()>(input, 1), Ok(()));
-        assert_eq!(*input, "");
-        assert_eq!(skip::<(), ()>(input, 0), Ok(()));
-        assert_eq!(*input, "");
-        assert_eq!(
-            skip::<(), ()>(input, 1),
-            Err(ParseError::insufficient_input("", 1))
-        );
-    }
-
-    #[test]
-    fn take_str_parser() {
-        let input = &mut "abcdαβγδ";
-
-        assert_eq!(take_str::<(), ()>(input, 0), Ok(""));
-        assert_eq!(*input, "abcdαβγδ");
-        assert_eq!(take_str::<(), ()>(input, 2), Ok("ab"));
-        assert_eq!(*input, "cdαβγδ");
-        assert_eq!(take_str::<(), ()>(input, 2), Ok("cd"));
-        assert_eq!(*input, "αβγδ");
-        assert_eq!(take_str::<(), ()>(input, 2), Ok("α"));
-        assert_eq!(*input, "βγδ");
-
-        assert_eq!(
-            take_str::<(), ()>(input, 3),
-            Err(ParseError::invalid_split_index("βγδ", 3))
-        );
-        assert_eq!(*input, "βγδ");
-
-        assert_eq!(take_str::<(), ()>(input, 4), Ok("βγ"));
-        assert_eq!(*input, "δ");
-
-        assert_eq!(
-            take_str::<(), ()>(input, 1),
-            Err(ParseError::invalid_split_index("δ", 1))
-        );
-        assert_eq!(*input, "δ");
-
-        assert_eq!(
-            take_str::<(), ()>(input, 3),
-            Err(ParseError::insufficient_input("δ", 3))
-        );
-        assert_eq!(*input, "δ");
-        assert_eq!(take_str::<(), ()>(input, 2), Ok("δ"));
-        assert_eq!(*input, "");
-        assert_eq!(take_str::<(), ()>(input, 0), Ok(""));
-        assert_eq!(*input, "");
+        // Non-digit should fail
+        assert!(full(digit, "A").is_err());
+        assert!(full(digit, "").is_err());
     }
 }
