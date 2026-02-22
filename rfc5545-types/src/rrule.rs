@@ -952,7 +952,7 @@ pub enum ByRuleName {
     BySetPos,
 }
 
-/// The values in the table on page 43 of RFC 5545.
+/// The values in the table on page 44 of RFC 5545.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ByRuleBehavior {
     Limit,
