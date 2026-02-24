@@ -1291,15 +1291,6 @@ where
     .parse_next(input)
 }
 
-/// Returns `true` iff `s` starts with `"X-"` or `x-`.
-#[inline(always)]
-const fn str_has_extension_prefix(s: &str) -> bool {
-    match s.as_bytes().first_chunk::<2>() {
-        None => false,
-        Some(prefix) => prefix.eq_ignore_ascii_case(b"X-"),
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use strum::IntoEnumIterator;

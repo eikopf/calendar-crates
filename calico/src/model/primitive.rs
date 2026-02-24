@@ -77,6 +77,30 @@ pub enum Value<S> {
 }
 
 impl<S> Value<S> {
+    /// Maps the text-carrying variants to a different type, potentially failing.
+    pub fn try_map_text<T, E>(self, f: impl Fn(S) -> Result<T, E>) -> Result<Value<T>, E> {
+        Ok(match self {
+            Value::Binary(v) => Value::Binary(v),
+            Value::Boolean(v) => Value::Boolean(v),
+            Value::CalAddress(v) => Value::CalAddress(v),
+            Value::Date(v) => Value::Date(v),
+            Value::DateTime(v) => Value::DateTime(v),
+            Value::Duration(v) => Value::Duration(v),
+            Value::Float(v) => Value::Float(v),
+            Value::Integer(v) => Value::Integer(v),
+            Value::Period(v) => Value::Period(v),
+            Value::Recur(v) => Value::Recur(v),
+            Value::Text(s) => Value::Text(f(s)?),
+            Value::Time(t, fmt) => Value::Time(t, fmt),
+            Value::Uri(v) => Value::Uri(v),
+            Value::UtcOffset(v) => Value::UtcOffset(v),
+            Value::Other { name, value } => Value::Other {
+                name: f(name)?,
+                value: f(value)?,
+            },
+        })
+    }
+
     pub fn as_value_type(&self) -> Token<ValueType, &S> {
         match self {
             Value::Binary(_) => Token::Known(ValueType::Binary),

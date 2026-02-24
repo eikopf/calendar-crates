@@ -53,6 +53,8 @@ pub enum CalendarParseError<S> {
     InvalidMinuteIndex(u8),
     /// Expected a second index, got a value outside the range `0..=60`.
     InvalidSecondIndex(u8),
+    /// Expected a year day index, got a value outside the range `1..=366`.
+    InvalidYearDayIndex(u16),
     /// Received a part in a recurrence rule more than once.
     DuplicateRRulePart(rrule::PartName),
     /// Both the COUNT and UNTIL parts occurred in the same RRULE.
@@ -73,7 +75,7 @@ pub enum CalendarParseError<S> {
     /// A VALUE parameter was expected but did not occur.
     MissingValueType,
     /// A VALUE parameter was present but had an invalid value for the property.
-    InvalidValueType(Token<ValueType, S>),
+    InvalidValueType(Token<ValueType, String>),
     /// A property with the BINARY value did not also have the ENCODING parameter.
     MissingEncodingOnBinaryValue,
     /// A property with the BINARY value had ENCODING=8bit as a parameter.

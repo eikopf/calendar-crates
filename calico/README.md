@@ -1,6 +1,8 @@
 # `calico`
 
-`calico` is a parser, printer, and data model for the iCalendar format.
+`calico` is a parser and data model for the iCalendar format.
+
+As of v0.3.0, `calico` supports end-to-end parsing of iCalendar objects including all standard component types (VEVENT, VTODO, VJOURNAL, VFREEBUSY, VTIMEZONE, VALARM) and RFC 9073 components (PARTICIPANT, VLOCATION, VRESOURCE).
 
 # RFC Support
 - Full Support

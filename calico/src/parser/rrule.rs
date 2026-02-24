@@ -589,7 +589,10 @@ where
 
     match YearDayNum::from_signed_index(sign.unwrap_or_default(), index) {
         Some(year_day_num) => Ok(year_day_num),
-        None => todo!(),
+        None => Err(E::from_external_error(
+            input,
+            CalendarParseError::InvalidYearDayIndex(index),
+        )),
     }
 }
 

@@ -3,29 +3,52 @@
 use winnow::{
     Parser,
     ascii::Caseless,
-    combinator::{fail, preceded},
+    combinator::{fail, preceded, separated},
     error::{FromExternalError, ParserError},
     stream::{AsBStr, AsChar, Compare, SliceLen, Stream, StreamIsPartial},
+    token::take_while,
 };
 
 use crate::{
-    model::{parameter::Params, primitive::Value, property::StaticProp, string::NameKind},
+    model::{
+        css::Css3Color,
+        parameter::{Param, Params, StaticParam, UnknownParam, UpcastParamValue},
+        primitive::{
+            Attachment, ClassValue, CompletionPercentage, DateTime, DateTimeOrDate, Encoding,
+            ExDateSeq, Geo, Gregorian, Integer, Method, ParticipantType, Period, Priority,
+            ProximityValue, RDateSeq, RequestStatus, ResourceType, SignedDuration, Status,
+            StyledDescriptionValue, TimeTransparency, Token, TriggerValue, Utc, UtcOffset, Value,
+            ValueType, Version,
+        },
+        property::{Prop, StaticProp, StructuredDataProp},
+        rrule::RRule,
+        string::{CaselessStr, NameKind, TzId, Uid, Uri},
+    },
     parser::{
+        InputStream,
         config::{Config, DefaultConfig},
         error::CalendarParseError,
-        primitive::ascii_lower,
+        parameter::parameter,
+        primitive::{
+            self, alarm_action, ascii_lower, binary, binary_with_config, bool_caseless,
+            class_value, color, completion_percentage, datetime, datetime_utc,
+            duration, geo_with_config, gregorian, integer, method, participant_type,
+            period, priority, proximity_value, request_status, resource_type, status, text,
+            text_seq, time, time_transparency, tz_id, uid, uri, utc_offset, version,
+        },
+        rrule::rrule,
     },
 };
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum ParsedProp<S> {
-    Known(KnownProp<S>),
+    Known(KnownProp),
     Unknown(UnknownProp<S>),
 }
 
 impl<S> ParsedProp<S> {
     #[allow(clippy::result_large_err)]
-    pub fn try_into_known(self) -> Result<KnownProp<S>, Self> {
+    pub fn try_into_known(self) -> Result<KnownProp, Self> {
         if let Self::Known(v) = self {
             Ok(v)
         } else {
@@ -43,10 +66,72 @@ impl<S> ParsedProp<S> {
     }
 }
 
+/// A known property with its name and typed value.
 #[derive(Debug, Clone, PartialEq)]
-pub struct KnownProp<S> {
+pub struct KnownProp {
     pub name: StaticProp,
-    pub value: S, // was RawPropValue<S>
+    pub value: PropValue,
+}
+
+/// Typed property values produced by the property parser.
+///
+/// Each variant wraps a `Prop<V, Params>` matching the model type for that
+/// property, with the value and parameters already parsed.
+#[derive(Debug, Clone, PartialEq)]
+#[allow(clippy::large_enum_variant)]
+pub enum PropValue {
+    // Simple text
+    Text(Prop<String, Params>),
+    // Comma-separated text sequence (CATEGORIES, RESOURCES, LOCATION-TYPE)
+    TextSeq(Prop<Vec<String>, Params>),
+    // Calendar-level
+    Version(Prop<Version, Params>),
+    Gregorian(Prop<Token<Gregorian, String>, Params>),
+    Method(Prop<Token<Method, String>, Params>),
+    // Identifiers
+    Uid(Prop<Box<Uid>, Params>),
+    Uri(Prop<Box<Uri>, Params>),
+    TzId(Prop<Box<TzId>, Params>),
+    // DateTime
+    DateTimeUtc(Prop<DateTime<Utc>, Params>),
+    DateTimeOrDate(Prop<DateTimeOrDate, Params>),
+    // Duration
+    Duration(Prop<SignedDuration, Params>),
+    // Numeric
+    Integer(Prop<Integer, Params>),
+    Priority(Prop<Priority, Params>),
+    CompletionPercentage(Prop<CompletionPercentage, Params>),
+    Geo(Prop<Geo, Params>),
+    Float(Prop<f64, Params>),
+    Boolean(Prop<bool, Params>),
+    // Enum types
+    Status(Prop<Status, Params>),
+    ClassValue(Prop<Token<ClassValue, String>, Params>),
+    TimeTransparency(Prop<TimeTransparency, Params>),
+    UtcOffset(Prop<UtcOffset, Params>),
+    // Attachment (ATTACH, IMAGE)
+    Attachment(Prop<Attachment, Params>),
+    // Recurrence
+    RRule(Prop<RRule, Params>),
+    RDateSeq(Prop<RDateSeq, Params>),
+    ExDateSeq(ExDateSeq, Params),
+    // FreeBusy periods
+    FreeBusyPeriods(Prop<Vec<Period>, Params>),
+    // Trigger (VALARM)
+    Trigger(Prop<TriggerValue, Params>),
+    // Alarm action
+    AlarmAction(Prop<Token<crate::model::primitive::AlarmAction, String>, Params>),
+    // Request status
+    RequestStatus(Prop<RequestStatus, Params>),
+    // RFC 7986
+    Color(Prop<Css3Color, Params>),
+    // RFC 9073
+    StyledDescription(Prop<StyledDescriptionValue, Params>),
+    StructuredData(StructuredDataProp),
+    ParticipantType(Prop<Token<ParticipantType, String>, Params>),
+    ResourceType(Prop<Token<ResourceType, String>, Params>),
+    // RFC 9074
+    ProximityValue(Prop<Token<ProximityValue, String>, Params>),
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -54,86 +139,732 @@ pub struct UnknownProp<S> {
     pub name: S,
     pub kind: NameKind,
     pub params: Params,
-    pub value: Value<S>,
+    pub value: Value<String>,
 }
 
-// fn parse_value<I, E>(value_type: ValueType<I::Slice>, input: &mut I) -> Result<Value<I::Slice>, E>
-// where
-//     I: StreamIsPartial + Stream + Compare<Caseless<&'static str>> + Compare<char>,
-//     I::Token: AsChar + Clone,
-//     I::Slice: AsBStr + Clone,
-//     E: ParserError<I> + FromExternalError<I, CalendarParseError<I::Slice>>,
-// {
-//     /// Parses the raw text value of a property.
-//     fn text<I, E>(input: &mut I) -> Result<I::Slice, E>
-//     where
-//         I: StreamIsPartial + Stream,
-//         I::Token: AsChar + Clone,
-//         E: ParserError<I>,
-//     {
-//         repeat::<_, _, (), _, _>(0.., none_of((..' ', '\u{007F}')))
-//             .take()
-//             .parse_next(input)
-//     }
-//
-//     match value_type {
-//         ValueType::Binary => binary.map(Value::Binary).parse_next(input),
-//         ValueType::Boolean => bool_caseless.map(Value::Boolean).parse_next(input),
-//         ValueType::CalAddress => cal_address::<_, _, false>
-//             .map(Value::CalAddress)
-//             .parse_next(input),
-//         ValueType::Date => date.map(Value::Date).parse_next(input),
-//         ValueType::DateTime => datetime.map(Value::DateTime).parse_next(input),
-//         ValueType::Duration => duration.map(Value::Duration).parse_next(input),
-//         ValueType::Float => float.map(Value::Float).parse_next(input),
-//         ValueType::Integer => integer.map(Value::Integer).parse_next(input),
-//         ValueType::Period => period.map(Value::Period).parse_next(input),
-//         ValueType::Recur => rrule.map(Value::Recur).parse_next(input),
-//         ValueType::Text => text.map(Value::Text).parse_next(input),
-//         ValueType::Time => time.map(Value::Time).parse_next(input),
-//         ValueType::Uri => uri::<_, _, false>.map(Value::Uri).parse_next(input),
-//         ValueType::UtcOffset => utc_offset.map(Value::UtcOffset).parse_next(input),
-//         ValueType::Iana(name) => text
-//             .map(|value| Value::Iana {
-//                 name: name.clone(),
-//                 value,
-//             })
-//             .parse_next(input),
-//         ValueType::X(name) => text
-//             .map(|value| Value::X {
-//                 name: name.clone(),
-//                 value,
-//             })
-//             .parse_next(input),
-//     }
-// }
+/// Parses a property value based on the VALUE type parameter, producing a [`Value<String>`].
+fn parse_value<I, E>(value_type: Token<ValueType, String>, input: &mut I) -> Result<Value<String>, E>
+where
+    I: InputStream,
+    I::Token: AsChar + Clone,
+    I::Slice: AsBStr + Clone + SliceLen + Stream,
+    <<I as Stream>::Slice as Stream>::Token: AsChar,
+    E: ParserError<I> + FromExternalError<I, CalendarParseError<I::Slice>>,
+{
+    match value_type {
+        Token::Known(ValueType::Binary) => binary.map(Value::Binary).parse_next(input),
+        Token::Known(ValueType::Boolean) => bool_caseless.map(Value::Boolean).parse_next(input),
+        Token::Known(ValueType::CalAddress) => {
+            uri::<_, _, false>.map(Value::CalAddress).parse_next(input)
+        }
+        Token::Known(ValueType::Date) => {
+            primitive::date.map(Value::Date).parse_next(input)
+        }
+        Token::Known(ValueType::DateTime) => datetime.map(Value::DateTime).parse_next(input),
+        Token::Known(ValueType::Duration) => duration.map(Value::Duration).parse_next(input),
+        Token::Known(ValueType::Float) => {
+            primitive::float.map(Value::Float).parse_next(input)
+        }
+        Token::Known(ValueType::Integer) => integer.map(Value::Integer).parse_next(input),
+        Token::Known(ValueType::Period) => period.map(Value::Period).parse_next(input),
+        Token::Known(ValueType::Recur) => rrule.map(Value::Recur).parse_next(input),
+        Token::Known(ValueType::Text) => {
+            text.map(|t| Value::Text(t.into_string())).parse_next(input)
+        }
+        Token::Known(ValueType::Time) => {
+            time.map(|(t, f)| Value::Time(t, f)).parse_next(input)
+        }
+        Token::Known(ValueType::Uri) => {
+            uri::<_, _, false>.map(Value::Uri).parse_next(input)
+        }
+        Token::Known(ValueType::UtcOffset) => {
+            utc_offset.map(Value::UtcOffset).parse_next(input)
+        }
+        Token::Known(_) => {
+            // Unknown known value type variant (non_exhaustive)
+            text.map(|t| Value::Text(t.into_string())).parse_next(input)
+        }
+        Token::Unknown(name) => text
+            .map(|value| Value::Other {
+                name: name.clone(),
+                value: value.into_string(),
+            })
+            .parse_next(input),
+    }
+}
+
+/// Helper: convert `Token<K, Box<Name>>` to `Token<K, String>`.
+fn token_to_string<K>(t: Token<K, Box<crate::model::string::Name>>) -> Token<K, String> {
+    t.map_unknown(|n| n.as_str().to_string())
+}
+
+/// Helper: convert a calico `Box<Uri>` into a `Box<calendar_types::string::Uri>` for use with
+/// rfc5545-types value enums (`Attachment`, `StyledDescriptionValue`).
+fn into_ct_uri(uri: Box<Uri>) -> Box<calendar_types::string::Uri> {
+    let s = uri.as_str().to_string().into_boxed_str();
+    // SAFETY: both types are #[repr(transparent)] newtypes around str with trivial invariants.
+    // This transmute avoids the overhead of re-validating the string.
+    unsafe { Box::from_raw(Box::into_raw(s) as *mut calendar_types::string::Uri) }
+}
 
 /// Parses a property with the [`DefaultConfig`].
 pub fn property<I, E>(input: &mut I) -> Result<ParsedProp<I::Slice>, E>
 where
-    I: StreamIsPartial + Stream + Compare<Caseless<&'static str>> + Compare<char>,
+    I: InputStream,
     I::Token: AsChar + Clone,
     I::Slice: AsBStr + Clone + PartialEq + SliceLen + Stream,
     <<I as Stream>::Slice as Stream>::Token: AsChar,
     E: ParserError<I> + FromExternalError<I, CalendarParseError<I::Slice>>,
 {
     let mut config = DefaultConfig;
-    property_parser_from_config(&mut config).parse_next(input)
+    property_with_config(input, &mut config)
 }
 
 /// Constructs a property parser from the given [`Config`].
 pub fn property_parser_from_config<I, E>(
     config: &mut impl Config,
-) -> impl Parser<I, ParsedProp<I::Slice>, E>
+) -> impl Parser<I, ParsedProp<I::Slice>, E> + '_
 where
-    I: StreamIsPartial + Stream + Compare<Caseless<&'static str>> + Compare<char>,
+    I: InputStream,
     I::Token: AsChar + Clone,
     I::Slice: AsBStr + Clone + PartialEq + SliceLen + Stream,
     <<I as Stream>::Slice as Stream>::Token: AsChar,
     E: ParserError<I> + FromExternalError<I, CalendarParseError<I::Slice>>,
 {
-    // |input: &mut I| property_with_config(input, config)
-    move |input: &mut I| todo!()
+    move |input: &mut I| property_with_config(input, config)
+}
+
+/// Implements property parsing with a given config.
+fn property_with_config<I, E>(
+    input: &mut I,
+    config: &mut impl Config,
+) -> Result<ParsedProp<I::Slice>, E>
+where
+    I: InputStream,
+    I::Token: AsChar + Clone,
+    I::Slice: AsBStr + Clone + PartialEq + SliceLen + Stream,
+    <<I as Stream>::Slice as Stream>::Token: AsChar,
+    E: ParserError<I> + FromExternalError<I, CalendarParseError<I::Slice>>,
+{
+    // parse name
+    let prop_name = property_name.parse_next(input)?;
+
+    // parse parameters
+    let (params, value_type) = {
+        let mut table = Params::new();
+        let mut value_type: Option<Token<ValueType, String>> = None;
+
+        let parsed_params: Vec<Param> =
+            winnow::combinator::repeat(0.., preceded(';', parameter)).parse_next(input)?;
+        for param in parsed_params {
+            match param {
+                Param::Known(param) => {
+                    let key = param.name();
+                    match param.upcast() {
+                        UpcastParamValue::ValueType(vt) => match value_type {
+                            Some(_) => {
+                                return Err(E::from_external_error(
+                                    input,
+                                    CalendarParseError::DuplicateParam(StaticParam::Value),
+                                ));
+                            }
+                            None => {
+                                value_type = Some(token_to_string(vt));
+                            }
+                        },
+                        UpcastParamValue::Known(known_param) => {
+                            if table.contains_known(key) {
+                                return Err(E::from_external_error(
+                                    input,
+                                    CalendarParseError::DuplicateParam(key),
+                                ));
+                            }
+                            table.insert_known(known_param);
+                        }
+                    }
+                }
+                Param::Unknown(UnknownParam { name: uname, value }) => {
+                    let caseless_name =
+                        CaselessStr::from_box_str(uname.as_str().into());
+                    if let Some(existing) = table.unknown_param_mut(&caseless_name) {
+                        // Merge duplicate unknown parameter values
+                        for v in value.values {
+                            existing.push(v);
+                        }
+                    } else {
+                        table.insert_unknown_param(caseless_name, value.values);
+                    }
+                }
+            }
+        }
+
+        (table, value_type)
+    };
+
+    // parse the colon separator
+    let _: I::Slice = Caseless(":").parse_next(input)?;
+
+    match prop_name {
+        PropName::Unknown { name, kind } => {
+            let vt = value_type.unwrap_or(Token::Known(ValueType::Text));
+            let value = parse_value(vt, input)?;
+
+            Ok(ParsedProp::Unknown(UnknownProp {
+                name,
+                kind,
+                params,
+                value,
+            }))
+        }
+        PropName::Known(name) => {
+            macro_rules! trivial {
+                ($parser:expr) => {{
+                    let value = PropValue::from_parsed(
+                        name,
+                        Prop {
+                            value: $parser.parse_next(input)?,
+                            params,
+                        },
+                    );
+                    value
+                }};
+            }
+
+            macro_rules! check_vt {
+                ($expected:ident) => {
+                    if value_type
+                        .as_ref()
+                        .is_some_and(|x| !matches!(x, Token::Known(ValueType::$expected)))
+                    {
+                        return Err(E::from_external_error(
+                            input,
+                            CalendarParseError::InvalidValueType(value_type.unwrap()),
+                        ));
+                    }
+                };
+            }
+
+            macro_rules! require_vt {
+                ($expected:ident) => {
+                    if let Some(ref vt) = value_type {
+                        if !matches!(vt, Token::Known(ValueType::$expected)) {
+                            return Err(E::from_external_error(
+                                input,
+                                CalendarParseError::InvalidValueType(value_type.unwrap()),
+                            ));
+                        }
+                    } else {
+                        return Err(E::from_external_error(
+                            input,
+                            CalendarParseError::MissingValueType,
+                        ));
+                    }
+                };
+            }
+
+            let value = match name {
+                StaticProp::Attach => match &value_type {
+                    None | Some(Token::Known(ValueType::Uri)) => {
+                        PropValue::Attachment(Prop {
+                            value: Attachment::Uri(into_ct_uri(uri::<_, _, false>.parse_next(input)?)),
+                            params,
+                        })
+                    }
+                    Some(Token::Known(ValueType::Binary)) => {
+                        match params.inline_encoding() {
+                            None => {
+                                return Err(E::from_external_error(
+                                    input,
+                                    CalendarParseError::MissingEncodingOnBinaryValue,
+                                ));
+                            }
+                            Some(Encoding::Bit8) => {
+                                return Err(E::from_external_error(
+                                    input,
+                                    CalendarParseError::Bit8EncodingOnBinaryValue,
+                                ));
+                            }
+                            Some(Encoding::Base64) => {
+                                PropValue::Attachment(Prop {
+                                    value: Attachment::Binary(
+                                        binary_with_config(input, config)?,
+                                    ),
+                                    params,
+                                })
+                            }
+                            _ => {
+                                return Err(E::from_external_error(
+                                    input,
+                                    CalendarParseError::MissingEncodingOnBinaryValue,
+                                ));
+                            }
+                        }
+                    }
+                    Some(_) => {
+                        return Err(E::from_external_error(
+                            input,
+                            CalendarParseError::InvalidValueType(value_type.unwrap()),
+                        ));
+                    }
+                },
+                StaticProp::ExDate => match &value_type {
+                    None | Some(Token::Known(ValueType::DateTime)) => {
+                        let dates: Vec<DateTime<_>> =
+                            separated(1.., datetime, ',').parse_next(input)?;
+                        PropValue::ExDateSeq(ExDateSeq::DateTime(dates), params)
+                    }
+                    Some(Token::Known(ValueType::Date)) => {
+                        let dates: Vec<_> =
+                            separated(1.., primitive::date, ',').parse_next(input)?;
+                        PropValue::ExDateSeq(ExDateSeq::Date(dates), params)
+                    }
+                    Some(_) => {
+                        return Err(E::from_external_error(
+                            input,
+                            CalendarParseError::InvalidValueType(value_type.unwrap()),
+                        ));
+                    }
+                },
+                StaticProp::RDate => match &value_type {
+                    None | Some(Token::Known(ValueType::DateTime)) => {
+                        let dates: Vec<DateTime<_>> =
+                            separated(1.., datetime, ',').parse_next(input)?;
+                        PropValue::RDateSeq(Prop {
+                            value: RDateSeq::DateTime(dates),
+                            params,
+                        })
+                    }
+                    Some(Token::Known(ValueType::Date)) => {
+                        let dates: Vec<_> =
+                            separated(1.., primitive::date, ',').parse_next(input)?;
+                        PropValue::RDateSeq(Prop {
+                            value: RDateSeq::Date(dates),
+                            params,
+                        })
+                    }
+                    Some(Token::Known(ValueType::Period)) => {
+                        let periods: Vec<Period> =
+                            separated(1.., period, ',').parse_next(input)?;
+                        PropValue::RDateSeq(Prop {
+                            value: RDateSeq::Period(periods),
+                            params,
+                        })
+                    }
+                    Some(_) => {
+                        return Err(E::from_external_error(
+                            input,
+                            CalendarParseError::InvalidValueType(value_type.unwrap()),
+                        ));
+                    }
+                },
+                StaticProp::Trigger => match &value_type {
+                    None | Some(Token::Known(ValueType::Duration)) => {
+                        PropValue::Trigger(Prop {
+                            value: TriggerValue::Duration(duration.parse_next(input)?),
+                            params,
+                        })
+                    }
+                    Some(Token::Known(ValueType::DateTime)) => {
+                        PropValue::Trigger(Prop {
+                            value: TriggerValue::DateTime(datetime_utc.parse_next(input)?),
+                            params,
+                        })
+                    }
+                    Some(_) => {
+                        return Err(E::from_external_error(
+                            input,
+                            CalendarParseError::InvalidValueType(value_type.unwrap()),
+                        ));
+                    }
+                },
+                StaticProp::Image => match &value_type {
+                    Some(Token::Known(ValueType::Uri)) => {
+                        PropValue::Attachment(Prop {
+                            value: Attachment::Uri(into_ct_uri(uri::<_, _, false>.parse_next(input)?)),
+                            params,
+                        })
+                    }
+                    Some(Token::Known(ValueType::Binary)) => {
+                        match params.inline_encoding() {
+                            None => {
+                                return Err(E::from_external_error(
+                                    input,
+                                    CalendarParseError::MissingEncodingOnBinaryValue,
+                                ));
+                            }
+                            Some(Encoding::Bit8) => {
+                                return Err(E::from_external_error(
+                                    input,
+                                    CalendarParseError::Bit8EncodingOnBinaryValue,
+                                ));
+                            }
+                            Some(Encoding::Base64) => {
+                                PropValue::Attachment(Prop {
+                                    value: Attachment::Binary(
+                                        binary_with_config(input, config)?,
+                                    ),
+                                    params,
+                                })
+                            }
+                            _ => {
+                                return Err(E::from_external_error(
+                                    input,
+                                    CalendarParseError::MissingEncodingOnBinaryValue,
+                                ));
+                            }
+                        }
+                    }
+                    Some(_) => {
+                        return Err(E::from_external_error(
+                            input,
+                            CalendarParseError::InvalidValueType(value_type.unwrap()),
+                        ));
+                    }
+                    None => {
+                        return Err(E::from_external_error(
+                            input,
+                            CalendarParseError::MissingValueType,
+                        ));
+                    }
+                },
+                StaticProp::StyledDescription => {
+                    match &value_type {
+                        Some(Token::Known(ValueType::Text)) => {
+                            let t = text.parse_next(input)?;
+                            PropValue::StyledDescription(Prop {
+                                value: StyledDescriptionValue::Text(t.into_string()),
+                                params,
+                            })
+                        }
+                        Some(Token::Known(ValueType::Uri)) => {
+                            let u = uri::<_, _, false>.parse_next(input)?;
+                            PropValue::StyledDescription(Prop {
+                                value: StyledDescriptionValue::Uri(into_ct_uri(u)),
+                                params,
+                            })
+                        }
+                        Some(_) => {
+                            return Err(E::from_external_error(
+                                input,
+                                CalendarParseError::InvalidValueType(value_type.unwrap()),
+                            ));
+                        }
+                        None => {
+                            return Err(E::from_external_error(
+                                input,
+                                CalendarParseError::MissingValueType,
+                            ));
+                        }
+                    }
+                }
+                StaticProp::StructuredData => {
+                    match &value_type {
+                        Some(Token::Known(ValueType::Binary)) => {
+                            let sd_params =
+                                crate::model::parameter::StructuredDataParams::try_from(params)
+                                    .map_err(|err| E::from_external_error(input, err.into()))?;
+                            PropValue::StructuredData(StructuredDataProp::Binary(Prop {
+                                value: binary_with_config(input, config)?,
+                                params: sd_params,
+                            }))
+                        }
+                        Some(Token::Known(ValueType::Text)) => {
+                            let sd_params =
+                                crate::model::parameter::StructuredDataParams::try_from(params)
+                                    .map_err(|err| E::from_external_error(input, err.into()))?;
+                            PropValue::StructuredData(StructuredDataProp::Text(Prop {
+                                value: text.parse_next(input)?.into_string(),
+                                params: sd_params,
+                            }))
+                        }
+                        Some(Token::Known(ValueType::Uri)) => {
+                            PropValue::StructuredData(StructuredDataProp::Uri(Prop {
+                                value: uri::<_, _, false>.parse_next(input)?,
+                                params,
+                            }))
+                        }
+                        Some(_) => {
+                            return Err(E::from_external_error(
+                                input,
+                                CalendarParseError::InvalidValueType(value_type.unwrap()),
+                            ));
+                        }
+                        None => {
+                            return Err(E::from_external_error(
+                                input,
+                                CalendarParseError::MissingValueType,
+                            ));
+                        }
+                    }
+                }
+                // Simple text properties
+                StaticProp::CalScale => {
+                    check_vt!(Text);
+                    PropValue::Gregorian(Prop {
+                        value: Token::Known(gregorian.parse_next(input)?),
+                        params,
+                    })
+                }
+                StaticProp::Method => {
+                    check_vt!(Text);
+                    PropValue::Method(Prop {
+                        value: token_to_string(method.parse_next(input)?),
+                        params,
+                    })
+                }
+                StaticProp::ProdId
+                | StaticProp::Comment
+                | StaticProp::Description
+                | StaticProp::Location
+                | StaticProp::Summary
+                | StaticProp::TzName
+                | StaticProp::Contact
+                | StaticProp::Name => {
+                    check_vt!(Text);
+                    PropValue::Text(Prop {
+                        value: text.parse_next(input)?.into_string(),
+                        params,
+                    })
+                }
+                StaticProp::Version => {
+                    check_vt!(Text);
+                    PropValue::Version(Prop {
+                        value: version.parse_next(input)?,
+                        params,
+                    })
+                }
+                StaticProp::Categories | StaticProp::Resources => {
+                    check_vt!(Text);
+                    let seq = text_seq.parse_next(input)?;
+                    PropValue::TextSeq(Prop {
+                        value: seq.into_iter().map(|t| t.into_string()).collect(),
+                        params,
+                    })
+                }
+                StaticProp::Class => {
+                    check_vt!(Text);
+                    PropValue::ClassValue(Prop {
+                        value: token_to_string(class_value.parse_next(input)?),
+                        params,
+                    })
+                }
+                StaticProp::Geo => {
+                    check_vt!(Float);
+                    PropValue::Geo(Prop {
+                        value: geo_with_config(input, config)?,
+                        params,
+                    })
+                }
+                StaticProp::PercentComplete => {
+                    check_vt!(Integer);
+                    trivial!(completion_percentage)
+                }
+                StaticProp::Priority => {
+                    check_vt!(Integer);
+                    PropValue::Priority(Prop {
+                        value: priority.parse_next(input)?,
+                        params,
+                    })
+                }
+                StaticProp::Status => {
+                    check_vt!(Text);
+                    PropValue::Status(Prop {
+                        value: status.parse_next(input)?,
+                        params,
+                    })
+                }
+                StaticProp::DtCompleted
+                | StaticProp::Created
+                | StaticProp::DtStamp
+                | StaticProp::LastModified => {
+                    check_vt!(DateTime);
+                    PropValue::DateTimeUtc(Prop {
+                        value: datetime_utc.parse_next(input)?,
+                        params,
+                    })
+                }
+                StaticProp::DtEnd
+                | StaticProp::DtDue
+                | StaticProp::DtStart
+                | StaticProp::RecurId => {
+                    match &value_type {
+                        None | Some(Token::Known(ValueType::DateTime)) => {
+                            PropValue::DateTimeOrDate(Prop {
+                                value: DateTimeOrDate::DateTime(datetime.parse_next(input)?),
+                                params,
+                            })
+                        }
+                        Some(Token::Known(ValueType::Date)) => {
+                            PropValue::DateTimeOrDate(Prop {
+                                value: DateTimeOrDate::Date(
+                                    primitive::date.parse_next(input)?,
+                                ),
+                                params,
+                            })
+                        }
+                        Some(_) => {
+                            return Err(E::from_external_error(
+                                input,
+                                CalendarParseError::InvalidValueType(value_type.unwrap()),
+                            ));
+                        }
+                    }
+                }
+                StaticProp::Duration => {
+                    check_vt!(Duration);
+                    PropValue::Duration(Prop {
+                        value: duration.parse_next(input)?,
+                        params,
+                    })
+                }
+                StaticProp::FreeBusy => {
+                    check_vt!(Period);
+                    let periods: Vec<Period> =
+                        separated(1.., period, ',').parse_next(input)?;
+                    PropValue::FreeBusyPeriods(Prop {
+                        value: periods,
+                        params,
+                    })
+                }
+                StaticProp::Transp => {
+                    check_vt!(Text);
+                    PropValue::TimeTransparency(Prop {
+                        value: time_transparency.parse_next(input)?,
+                        params,
+                    })
+                }
+                StaticProp::TzId => {
+                    check_vt!(Text);
+                    PropValue::TzId(Prop {
+                        value: tz_id.parse_next(input)?,
+                        params,
+                    })
+                }
+                StaticProp::TzOffsetFrom | StaticProp::TzOffsetTo => {
+                    check_vt!(UtcOffset);
+                    PropValue::UtcOffset(Prop {
+                        value: utc_offset.parse_next(input)?,
+                        params,
+                    })
+                }
+                StaticProp::TzUrl | StaticProp::Url => {
+                    check_vt!(Uri);
+                    PropValue::Uri(Prop {
+                        value: uri::<_, _, false>.parse_next(input)?,
+                        params,
+                    })
+                }
+                StaticProp::Attendee | StaticProp::Organizer | StaticProp::CalendarAddress => {
+                    check_vt!(CalAddress);
+                    PropValue::Uri(Prop {
+                        value: uri::<_, _, false>.parse_next(input)?,
+                        params,
+                    })
+                }
+                StaticProp::RelatedTo | StaticProp::Uid => {
+                    check_vt!(Text);
+                    PropValue::Uid(Prop {
+                        value: uid.parse_next(input)?,
+                        params,
+                    })
+                }
+                StaticProp::RRule => {
+                    check_vt!(Recur);
+                    PropValue::RRule(Prop {
+                        value: rrule.parse_next(input)?,
+                        params,
+                    })
+                }
+                StaticProp::Action => {
+                    check_vt!(Text);
+                    PropValue::AlarmAction(Prop {
+                        value: token_to_string(alarm_action.parse_next(input)?),
+                        params,
+                    })
+                }
+                StaticProp::Repeat | StaticProp::Sequence => {
+                    check_vt!(Integer);
+                    PropValue::Integer(Prop {
+                        value: integer.parse_next(input)?,
+                        params,
+                    })
+                }
+                StaticProp::RequestStatus => {
+                    check_vt!(Text);
+                    PropValue::RequestStatus(Prop {
+                        value: request_status.parse_next(input)?,
+                        params,
+                    })
+                }
+                StaticProp::RefreshInterval => {
+                    require_vt!(Duration);
+                    PropValue::Duration(Prop {
+                        value: duration.parse_next(input)?,
+                        params,
+                    })
+                }
+                StaticProp::Source | StaticProp::Conference => {
+                    require_vt!(Uri);
+                    PropValue::Uri(Prop {
+                        value: uri::<_, _, false>.parse_next(input)?,
+                        params,
+                    })
+                }
+                StaticProp::Color => {
+                    check_vt!(Text);
+                    PropValue::Color(Prop {
+                        value: color.parse_next(input)?,
+                        params,
+                    })
+                }
+                StaticProp::LocationType => {
+                    check_vt!(Text);
+                    let seq = text_seq.parse_next(input)?;
+                    PropValue::TextSeq(Prop {
+                        value: seq.into_iter().map(|t| t.into_string()).collect(),
+                        params,
+                    })
+                }
+                StaticProp::ParticipantType => {
+                    check_vt!(Text);
+                    PropValue::ParticipantType(Prop {
+                        value: token_to_string(participant_type.parse_next(input)?),
+                        params,
+                    })
+                }
+                StaticProp::ResourceType => {
+                    check_vt!(Text);
+                    PropValue::ResourceType(Prop {
+                        value: token_to_string(resource_type.parse_next(input)?),
+                        params,
+                    })
+                }
+                StaticProp::Acknowledged => {
+                    check_vt!(DateTime);
+                    PropValue::DateTimeUtc(Prop {
+                        value: datetime_utc.parse_next(input)?,
+                        params,
+                    })
+                }
+                StaticProp::Proximity => {
+                    check_vt!(Text);
+                    PropValue::ProximityValue(Prop {
+                        value: token_to_string(proximity_value.parse_next(input)?),
+                        params,
+                    })
+                }
+            };
+
+            Ok(ParsedProp::Known(KnownProp { name, value }))
+        }
+    }
+}
+
+impl PropValue {
+    /// Construct a PropValue from a parsed CompletionPercentage prop.
+    fn from_parsed(_name: StaticProp, prop: Prop<CompletionPercentage, Params>) -> Self {
+        PropValue::CompletionPercentage(prop)
+    }
 }
 
 // pub fn property_with_config<I, E>(
@@ -728,8 +1459,28 @@ where
         Err(InvalidNameKind::Begin | InvalidNameKind::End) => fail.parse_next(input),
         Err(InvalidNameKind::Unknown) => {
             input.reset(&checkpoint);
-            // alt((x_name.map(PropName::x), iana_token.map(PropName::iana))).parse_next(input)
-            todo!()
+
+            // Peek at the first two characters to determine X- vs IANA.
+            let first = input.next_token().ok_or_else(|| E::from_input(input))?;
+            let is_x = first.as_char().eq_ignore_ascii_case(&'x');
+            let second = input.peek_token();
+            let is_x_prefix = is_x && second.is_some_and(|t| t.as_char() == '-');
+
+            // Reset and parse the full name.
+            input.reset(&checkpoint);
+            let slice: I::Slice = take_while(1.., |t: I::Token| {
+                let c = t.as_char();
+                c == '-' || c.is_ascii_alphanumeric()
+            })
+            .parse_next(input)?;
+
+            let kind = if is_x_prefix {
+                NameKind::X
+            } else {
+                NameKind::Iana
+            };
+
+            Ok(PropName::Unknown { name: slice, kind })
         }
     }
 }

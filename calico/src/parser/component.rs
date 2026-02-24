@@ -1,1044 +1,1786 @@
 //! Parsers for the components of an iCalendar object.
 
-use std::{fmt::Debug, hash::Hash};
+use std::{collections::HashMap, hash::Hash};
 
 use winnow::{
     Parser,
     ascii::Caseless,
-    combinator::{alt, empty, preceded, terminated},
+    combinator::{alt, empty, peek, preceded, repeat, terminated},
     error::{FromExternalError, ParserError},
     stream::{AsBStr, AsChar, Compare, SliceLen, Stream, StreamIsPartial},
 };
 
 use crate::{
     model::component::{
-        Alarm, Calendar, Event, FreeBusy, Journal, OtherComponent, ResourceComponent, TimeZone,
-        Todo,
+        Alarm, AudioAlarm, Calendar, CalendarComponent, DisplayAlarm,
+        EmailAlarm, Event, FreeBusy, Journal, LocationComponent, OtherAlarm,
+        OtherComponent, Participant, ResourceComponent, TimeZone, Todo, TzRule, TzRuleKind,
     },
+    model::parameter::Params,
+    model::primitive::{
+        Attachment, ClassValue, CompletionPercentage, DateTime, DateTimeOrDate, ExDateSeq,
+        Geo, Gregorian, Integer, Method, ParticipantType, Period, Priority, RDateSeq,
+        RequestStatus, ResourceType, SignedDuration, Status, StyledDescriptionValue,
+        TimeTransparency, Token, TriggerValue, Utc, UtcOffset, Value, Version,
+    },
+    model::property::{Prop, StaticProp, StructuredDataProp},
+    model::rrule::RRule,
+    model::string::{CaselessStr, TzId, Uid, Uri},
+    model::css::Css3Color,
     parser::{
-        error::CalendarParseError,
-        property::{ParsedProp, property},
+        InputStream,
+        error::{CalendarParseError, ComponentKind},
+        property::{ParsedProp, KnownProp, PropValue, UnknownProp, PropName, property},
     },
 };
 
+// ============================================================================
+// Macro helpers for property parsing inside components
+// ============================================================================
+
+/// Parses properties in a loop, breaking when BEGIN or END is encountered.
+/// The body of the match is provided by the caller.
+macro_rules! parse_props {
+    ($input:ident, $parsed:ident, $body:block) => {
+        loop {
+            let checkpoint = $input.checkpoint();
+            if alt((begin(empty::<I, E>), end(empty::<I, E>))).parse_next($input).is_ok() {
+                $input.reset(&checkpoint);
+                break;
+            }
+            $input.reset(&checkpoint);
+
+            let $parsed: ParsedProp<I::Slice> = terminated(property, crlf).parse_next($input)?;
+            let result: Result<(), CalendarParseError<I::Slice>> = (|| $body)();
+            result.map_err(|e| E::from_external_error($input, e))?;
+        }
+    };
+}
+
+/// Checks that a once-only property hasn't been set yet.
+macro_rules! once {
+    ($opt:expr, $prop:expr, $component:expr, $val:expr) => {
+        if $opt.is_some() {
+            return Err(CalendarParseError::MoreThanOneProp {
+                prop: PropName::Known($prop),
+                component: $component,
+            });
+        }
+        $opt = Some($val);
+    };
+}
+
+/// Handles unknown properties by inserting into the x_props map.
+macro_rules! handle_unknown {
+    ($x_props:ident, $name:expr, $params:expr, $value:expr) => {{
+        let name_str: Box<CaselessStr> = $name.into();
+        $x_props
+            .entry(name_str)
+            .or_insert_with(Vec::new)
+            .push(Prop {
+                value: $value,
+                params: $params,
+            });
+    }};
+}
+
+// ============================================================================
+// Calendar parser (RFC 5545 §3.4)
+// ============================================================================
+
 pub fn calendar<I, E>(input: &mut I) -> Result<Calendar, E>
 where
-    I: StreamIsPartial
-        + Stream
-        + Compare<Caseless<&'static str>>
-        + Compare<Caseless<I::Slice>>
-        + Compare<char>,
+    I: InputStream,
     I::Token: AsChar + Clone,
     I::Slice: AsBStr + Clone + PartialEq + Eq + SliceLen + Stream + Hash + AsRef<[u8]>,
     <<I as Stream>::Slice as Stream>::Token: AsChar,
     E: ParserError<I> + FromExternalError<I, CalendarParseError<I::Slice>>,
 {
-    // fn step<S>(
-    //     prop: ParsedProp<S>,
-    //     state: &mut PropertyTable<S>,
-    // ) -> Result<(), CalendarParseError<S>>
-    // where
-    //     S: HashCaseless + PartialEq + Debug + Equiv + AsRef<[u8]>,
-    // {
-    //     //     define_local_helpers!(Calendar, state, unknown_params, universals);
-    //     //
-    //     //     step_inner! {state, Calendar, prop, unknown_params, universals;
-    //     //         ParserProp::Known(KnownProp::ProdId(value)) => {
-    //     //             once!(ProdId, PropName::Rfc5545(Rfc5545PropName::ProductIdentifier), value, ())
-    //     //         },
-    //     //         ParserProp::Known(KnownProp::Version) => {
-    //     //             once!(Version, PropName::Rfc5545(Rfc5545PropName::Version), (), ())
-    //     //         },
-    //     //         ParserProp::Known(KnownProp::CalScale) => {
-    //     //             once!(CalScale, PropName::Rfc5545(Rfc5545PropName::CalendarScale), (), ())
-    //     //         },
-    //     //         ParserProp::Known(KnownProp::Name(value, params)) => {
-    //     //             seq!(Name, value, params)
-    //     //         },
-    //     //         ParserProp::Known(KnownProp::Uid(value)) => {
-    //     //             once!(Uid, PropName::Rfc5545(Rfc5545PropName::UniqueIdentifier), value, ())
-    //     //         },
-    //     //         ParserProp::Known(KnownProp::LastModified(value)) => {
-    //     //             once!(LastModified, PropName::Rfc5545(Rfc5545PropName::LastModified), value, ())
-    //     //         },
-    //     //         ParserProp::Known(KnownProp::Url(value)) => {
-    //     //             once!(Url, PropName::Rfc5545(Rfc5545PropName::UniformResourceLocator), value, ())
-    //     //         },
-    //     //         ParserProp::Known(KnownProp::RefreshInterval(value)) => {
-    //     //             once!(RefreshInterval, PropName::Rfc7986(Rfc7986PropName::RefreshInterval), value, ())
-    //     //         },
-    //     //         ParserProp::Known(KnownProp::Source(value)) => {
-    //     //             once!(Source, PropName::Rfc7986(Rfc7986PropName::Source), value, ())
-    //     //         },
-    //     //         ParserProp::Known(KnownProp::Color(value)) => {
-    //     //             once!(Color, PropName::Rfc7986(Rfc7986PropName::Color), value, ())
-    //     //         },
-    //     //         ParserProp::Known(KnownProp::Description(value, params)) => {
-    //     //             seq!(Description, value, params)
-    //     //         },
-    //     //         ParserProp::Known(KnownProp::Categories(value, params)) => {
-    //     //             seq!(Categories, value, params)
-    //     //         },
-    //     //         ParserProp::Known(KnownProp::Image(value, params)) => {
-    //     //             seq!(Image, value, params)
-    //     //         },
-    //     //     }
-    //     // }
-    //     //
-    //     // fn name<I, E>(input: &mut I) -> Result<(), E>
-    //     // where
-    //     //     I: StreamIsPartial + Stream + Compare<Caseless<&'static str>>,
-    //     //     E: ParserError<I>,
-    //     // {
-    //     //     Caseless("VCALENDAR").void().parse_next(input)
-    //     // }
-    //     //
-    //     // terminated(begin(name), crlf).parse_next(input)?;
-    //     // let props = StateMachine::new(step).parse_next(input)?;
-    //     // let components: Vec<_> = repeat(0.., component).parse_next(input)?;
-    //     // dbg![components.len()];
-    //     // terminated(end(name), crlf).parse_next(input)?;
-    //     //
-    //     // check_mandatory_fields! {input, props, Calendar;
-    //     //     ProdId => PropName::Rfc5545(Rfc5545PropName::ProductIdentifier),
-    //     //     Version => PropName::Rfc5545(Rfc5545PropName::Version),
-    //     // }
-    //     //
-    //     // Ok(Calendar::new(props, components))
-    //
-    //     todo!()
-    // }
+    terminated(begin(Caseless("VCALENDAR")), crlf).parse_next(input)?;
 
-    todo!()
+    // Once-only properties
+    let mut prod_id: Option<Prop<String, Params>> = None;
+    let mut version: Option<Prop<Version, Params>> = None;
+    let mut cal_scale: Option<Prop<Token<Gregorian, String>, Params>> = None;
+    let mut method: Option<Prop<Token<Method, String>, Params>> = None;
+    // RFC 7986 optional
+    let mut uid: Option<Prop<Box<Uid>, Params>> = None;
+    let mut last_modified: Option<Prop<DateTime<Utc>, Params>> = None;
+    let mut url: Option<Prop<Box<Uri>, Params>> = None;
+    let mut refresh_interval: Option<Prop<SignedDuration, Params>> = None;
+    let mut source: Option<Prop<Box<Uri>, Params>> = None;
+    let mut color: Option<Prop<Css3Color, Params>> = None;
+    // Multi-valued
+    let mut name: Vec<Prop<String, Params>> = Vec::new();
+    let mut description: Vec<Prop<String, Params>> = Vec::new();
+    let mut categories: Vec<Prop<Vec<String>, Params>> = Vec::new();
+    let mut image: Vec<Prop<Attachment, Params>> = Vec::new();
+    // Unknown
+    let mut x_props: HashMap<Box<CaselessStr>, Vec<Prop<Value<String>, Params>>> = HashMap::new();
+
+    parse_props!(input, parsed, {
+        match parsed {
+            ParsedProp::Known(KnownProp { name: prop_name, value }) => {
+                match (prop_name, value) {
+                    (StaticProp::ProdId, PropValue::Text(p)) => {
+                        once!(prod_id, StaticProp::ProdId, ComponentKind::Calendar, p);
+                    }
+                    (StaticProp::Version, PropValue::Version(p)) => {
+                        once!(version, StaticProp::Version, ComponentKind::Calendar, p);
+                    }
+                    (StaticProp::CalScale, PropValue::Gregorian(p)) => {
+                        once!(cal_scale, StaticProp::CalScale, ComponentKind::Calendar, p);
+                    }
+                    (StaticProp::Method, PropValue::Method(p)) => {
+                        once!(method, StaticProp::Method, ComponentKind::Calendar, p);
+                    }
+                    (StaticProp::Uid, PropValue::Uid(p)) => {
+                        once!(uid, StaticProp::Uid, ComponentKind::Calendar, p);
+                    }
+                    (StaticProp::LastModified, PropValue::DateTimeUtc(p)) => {
+                        once!(last_modified, StaticProp::LastModified, ComponentKind::Calendar, p);
+                    }
+                    (StaticProp::Url, PropValue::Uri(p)) => {
+                        once!(url, StaticProp::Url, ComponentKind::Calendar, p);
+                    }
+                    (StaticProp::RefreshInterval, PropValue::Duration(p)) => {
+                        once!(refresh_interval, StaticProp::RefreshInterval, ComponentKind::Calendar, p);
+                    }
+                    (StaticProp::Source, PropValue::Uri(p)) => {
+                        once!(source, StaticProp::Source, ComponentKind::Calendar, p);
+                    }
+                    (StaticProp::Color, PropValue::Color(p)) => {
+                        once!(color, StaticProp::Color, ComponentKind::Calendar, p);
+                    }
+                    (StaticProp::Name, PropValue::Text(p)) => {
+                        name.push(p);
+                    }
+                    (StaticProp::Description, PropValue::Text(p)) => {
+                        description.push(p);
+                    }
+                    (StaticProp::Categories, PropValue::TextSeq(p)) => {
+                        categories.push(p);
+                    }
+                    (StaticProp::Image, PropValue::Attachment(p)) => {
+                        image.push(p);
+                    }
+                    _ => { /* ignore - property parser guarantees correct variant */ }
+                }
+            }
+            ParsedProp::Unknown(UnknownProp { name: uname, params, value, .. }) => {
+                let name_string: String = I::try_into_string(&uname)?;
+                handle_unknown!(x_props, name_string, params, value);
+            }
+        }
+        Ok(())
+    });
+
+    // Parse subcomponents
+    let components: Vec<CalendarComponent> = repeat(0.., calendar_component).parse_next(input)?;
+
+    terminated(end(Caseless("VCALENDAR")), crlf).parse_next(input)?;
+
+    // Check mandatory fields
+    let prod_id = prod_id.ok_or_else(|| {
+        E::from_external_error(
+            input,
+            CalendarParseError::MissingProp {
+                prop: PropName::Known(StaticProp::ProdId),
+                component: ComponentKind::Calendar,
+            },
+        )
+    })?;
+    let version = version.ok_or_else(|| {
+        E::from_external_error(
+            input,
+            CalendarParseError::MissingProp {
+                prop: PropName::Known(StaticProp::Version),
+                component: ComponentKind::Calendar,
+            },
+        )
+    })?;
+
+    let mut cal = Calendar::new(prod_id, version, components);
+    if let Some(v) = cal_scale { cal.set_cal_scale(v); }
+    if let Some(v) = method { cal.set_method(v); }
+    if let Some(v) = uid { cal.set_uid(v); }
+    if let Some(v) = last_modified { cal.set_last_modified(v); }
+    if let Some(v) = url { cal.set_url(v); }
+    if let Some(v) = refresh_interval { cal.set_refresh_interval(v); }
+    if let Some(v) = source { cal.set_source(v); }
+    if let Some(v) = color { cal.set_color(v); }
+    if !name.is_empty() { cal.set_name(name); }
+    if !description.is_empty() { cal.set_description(description); }
+    if !categories.is_empty() { cal.set_categories(categories); }
+    if !image.is_empty() { cal.set_image(image); }
+    for (k, v) in x_props {
+        cal.insert_x_property(k, v);
+    }
+
+    Ok(cal)
 }
+
+// ============================================================================
+// CalendarComponent dispatcher
+// ============================================================================
 
 /// Parses a [`CalendarComponent`].
-pub fn calendar_component<I, E>(input: &mut I) -> Result<(), E>
+pub fn calendar_component<I, E>(input: &mut I) -> Result<CalendarComponent, E>
 where
-    I: StreamIsPartial
-        + Stream
-        + Compare<Caseless<&'static str>>
-        + Compare<Caseless<I::Slice>>
-        + Compare<char>,
+    I: InputStream,
     I::Token: AsChar + Clone,
     I::Slice: AsBStr + Clone + PartialEq + Eq + SliceLen + Stream + Hash + AsRef<[u8]>,
     <<I as Stream>::Slice as Stream>::Token: AsChar,
     E: ParserError<I> + FromExternalError<I, CalendarParseError<I::Slice>>,
 {
-    // // hacky lookahead to figure out which branch to take
-    // let kind = peek(begin(component_name)).parse_next(input)?;
-    //
-    // let result = match kind {
-    //     ComponentName::Event => event.map(Component::Event).parse_next(input),
-    //     ComponentName::Todo => todo.map(Component::Todo).parse_next(input),
-    //     ComponentName::Journal => journal.map(Component::Journal).parse_next(input),
-    //     ComponentName::FreeBusy => free_busy.map(Component::FreeBusy).parse_next(input),
-    //     ComponentName::TimeZone => timezone.map(Component::TimeZone).parse_next(input),
-    //     ComponentName::Unknown(name) => other(name).map(Component::Other).parse_next(input),
-    // }?;
-    //
-    // Ok(result)
-
-    todo!()
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-struct StateMachine<S, F> {
-    state: S,
-    step: F,
-}
-
-impl<S, F> StateMachine<S, F> {
-    fn new(step: F) -> Self
-    where
-        S: Default,
-    {
-        Self {
-            state: Default::default(),
-            step,
-        }
-    }
-
-    fn parse_next<I, E>(mut self, input: &mut I) -> Result<S, E>
-    where
-        I: StreamIsPartial + Stream + Compare<Caseless<&'static str>> + Compare<char>,
-        I::Token: AsChar + Clone,
-        I::Slice: AsBStr + Clone + Eq + SliceLen + Stream,
-        <<I as Stream>::Slice as Stream>::Token: AsChar,
-        E: ParserError<I> + FromExternalError<I, CalendarParseError<I::Slice>>,
-        F: FnMut(ParsedProp<I::Slice>, &mut S) -> Result<(), CalendarParseError<I::Slice>>,
-    {
-        loop {
+    // Peek at the component name by trying each known BEGIN:<name>
+    macro_rules! try_component {
+        ($name:literal, $parser:expr, $variant:expr) => {{
             let checkpoint = input.checkpoint();
-
-            // if we run into a BEGIN or END line, we're done
-            if let Ok(()) = alt((begin(empty::<I, E>), end(empty::<I, E>))).parse_next(input) {
-                input.reset(&checkpoint);
-                return Ok(self.state);
-            // otherwise reset the input
-            } else {
-                input.reset(&checkpoint);
+            let matched: Result<I::Slice, E> = begin(Caseless($name)).parse_next(input);
+            input.reset(&checkpoint);
+            if matched.is_ok() {
+                return $parser.map($variant).parse_next(input);
             }
-
-            // parse a property and apply the step function
-            let parsed_prop = terminated(property, crlf).parse_next(input)?;
-            match (self.step)(parsed_prop, &mut self.state) {
-                Ok(()) => (),
-                Err(err) => return Err(E::from_external_error(input, err)),
-            }
-        }
+        }};
     }
+
+    try_component!("VEVENT", event, CalendarComponent::Event);
+    try_component!("VTODO", todo_comp, CalendarComponent::Todo);
+    try_component!("VJOURNAL", journal, CalendarComponent::Journal);
+    try_component!("VFREEBUSY", free_busy, CalendarComponent::FreeBusy);
+    try_component!("VTIMEZONE", timezone, CalendarComponent::TimeZone);
+
+    // Anything else (including VALARM at calendar level) → other
+    other_with_name.map(CalendarComponent::Other).parse_next(input)
 }
 
-/// Parses an [`Event`].
+// ============================================================================
+// Event parser (RFC 5545 §3.6.1)
+// ============================================================================
+
+/// Parses a [`Event`].
 fn event<I, E>(input: &mut I) -> Result<Event, E>
 where
-    I: StreamIsPartial
-        + Stream
-        + Compare<Caseless<&'static str>>
-        + Compare<Caseless<I::Slice>>
-        + Compare<char>,
+    I: InputStream,
     I::Token: AsChar + Clone,
     I::Slice: AsBStr + Clone + PartialEq + Eq + SliceLen + Stream + AsRef<[u8]> + Hash,
     <<I as Stream>::Slice as Stream>::Token: AsChar,
     E: ParserError<I> + FromExternalError<I, CalendarParseError<I::Slice>>,
 {
-    // PROPERTIES (RFC 5545 unless otherwise stated)
-    // -------------------
-    // 1. MANDATORY
-    //   - DTSTAMP
-    //   - UID
-    // 2. OPTIONAL
-    //   - CLASS
-    //   - CREATED
-    //   - DESCRIPTION
-    //   - GEO
-    //   - LAST-MODIFIED
-    //   - LOCATION
-    //   - ORGANIZER
-    //   - PRIORITY
-    //   - SEQ
-    //   - STATUS (VEVENT subset)
-    //   - SUMMARY
-    //   - TRANSP
-    //   - URL
-    //   - RECURID
-    //   - DTEND (mutually exclusive with DURATION)
-    //   - DURATION (mutually exclusive with DTEND)
-    //   - COLOR (RFC 7986)
-    // 3. ANY MULTIPLICITY
-    //   - ATTACH
-    //   - ATTENDEE
-    //   - CATEGORIES
-    //   - COMMENT
-    //   - CONTACT
-    //   - EXDATE
-    //   - REQUEST-STATUS
-    //   - RELATED
-    //   - RESOURCES
-    //   - RDATE
-    //   - RRULE (SHOULD NOT occur more than once)
-    //   - IMAGE (RFC 7986)
-    //   - CONFERENCE (RFC 7986)
-    //   - STYLED-DESCRIPTION (RFC 9073)
-    //   - STRUCTURED-DATA (RFC 9073)
-    //
-    // SUBCOMPONENTS (RFC 5545 unless otherwise stated)
-    // --------------------
-    // In the following order:
-    // 1. VALARM, any number (RFC 5545)
-    // 2. PARTICIPANT, any number (RFC 9073)
-    // 3. VLOCATION, any number (RFC 9073)
-    // 4. VRESOURCE, any number (RFC 9073)
+    terminated(begin(Caseless("VEVENT")), crlf).parse_next(input)?;
 
-    todo!()
+    // Once-only properties
+    let mut dtstamp: Option<Prop<DateTime<Utc>, Params>> = None;
+    let mut uid: Option<Prop<Box<Uid>, Params>> = None;
+    let mut dtstart: Option<Prop<DateTimeOrDate, Params>> = None;
+    let mut class: Option<Prop<Token<ClassValue, String>, Params>> = None;
+    let mut created: Option<Prop<DateTime<Utc>, Params>> = None;
+    let mut description: Option<Prop<String, Params>> = None;
+    let mut geo: Option<Prop<Geo, Params>> = None;
+    let mut last_modified: Option<Prop<DateTime<Utc>, Params>> = None;
+    let mut loc_prop: Option<Prop<String, Params>> = None;
+    let mut organizer: Option<Prop<Box<Uri>, Params>> = None;
+    let mut priority: Option<Prop<Priority, Params>> = None;
+    let mut sequence: Option<Prop<Integer, Params>> = None;
+    let mut status: Option<Prop<Status, Params>> = None;
+    let mut summary: Option<Prop<String, Params>> = None;
+    let mut transp: Option<Prop<TimeTransparency, Params>> = None;
+    let mut url: Option<Prop<Box<Uri>, Params>> = None;
+    let mut recurrence_id: Option<Prop<DateTimeOrDate, Params>> = None;
+    let mut dtend: Option<Prop<DateTimeOrDate, Params>> = None;
+    let mut duration: Option<Prop<SignedDuration, Params>> = None;
+    let mut color: Option<Prop<Css3Color, Params>> = None;
+    // Multi-valued
+    let mut attach: Vec<Prop<Attachment, Params>> = Vec::new();
+    let mut attendee: Vec<Prop<Box<Uri>, Params>> = Vec::new();
+    let mut categories: Vec<Prop<Vec<String>, Params>> = Vec::new();
+    let mut comment: Vec<Prop<String, Params>> = Vec::new();
+    let mut contact: Vec<Prop<String, Params>> = Vec::new();
+    let mut exdate: Vec<Prop<DateTimeOrDate, Params>> = Vec::new();
+    let mut request_status: Vec<Prop<RequestStatus, Params>> = Vec::new();
+    let mut related_to: Vec<Prop<Box<Uid>, Params>> = Vec::new();
+    let mut resources: Vec<Prop<Vec<String>, Params>> = Vec::new();
+    let mut rdate: Vec<Prop<RDateSeq, Params>> = Vec::new();
+    let mut rrule: Vec<Prop<RRule, Params>> = Vec::new();
+    let mut image: Vec<Prop<Attachment, Params>> = Vec::new();
+    let mut conference: Vec<Prop<Box<Uri>, Params>> = Vec::new();
+    let mut styled_description: Vec<Prop<StyledDescriptionValue, Params>> = Vec::new();
+    let mut structured_data: Vec<StructuredDataProp> = Vec::new();
+    // Unknown
+    let mut x_props: HashMap<Box<CaselessStr>, Vec<Prop<Value<String>, Params>>> = HashMap::new();
+
+    parse_props!(input, parsed, {
+        match parsed {
+            ParsedProp::Known(KnownProp { name: prop_name, value }) => {
+                match (prop_name, value) {
+                    (StaticProp::DtStamp, PropValue::DateTimeUtc(p)) => {
+                        once!(dtstamp, StaticProp::DtStamp, ComponentKind::Event, p);
+                    }
+                    (StaticProp::Uid, PropValue::Uid(p)) => {
+                        once!(uid, StaticProp::Uid, ComponentKind::Event, p);
+                    }
+                    (StaticProp::DtStart, PropValue::DateTimeOrDate(p)) => {
+                        once!(dtstart, StaticProp::DtStart, ComponentKind::Event, p);
+                    }
+                    (StaticProp::Class, PropValue::ClassValue(p)) => {
+                        once!(class, StaticProp::Class, ComponentKind::Event, p);
+                    }
+                    (StaticProp::Created, PropValue::DateTimeUtc(p)) => {
+                        once!(created, StaticProp::Created, ComponentKind::Event, p);
+                    }
+                    (StaticProp::Description, PropValue::Text(p)) => {
+                        once!(description, StaticProp::Description, ComponentKind::Event, p);
+                    }
+                    (StaticProp::Geo, PropValue::Geo(p)) => {
+                        once!(geo, StaticProp::Geo, ComponentKind::Event, p);
+                    }
+                    (StaticProp::LastModified, PropValue::DateTimeUtc(p)) => {
+                        once!(last_modified, StaticProp::LastModified, ComponentKind::Event, p);
+                    }
+                    (StaticProp::Location, PropValue::Text(p)) => {
+                        once!(loc_prop, StaticProp::Location, ComponentKind::Event, p);
+                    }
+                    (StaticProp::Organizer, PropValue::Uri(p)) => {
+                        once!(organizer, StaticProp::Organizer, ComponentKind::Event, p);
+                    }
+                    (StaticProp::Priority, PropValue::Priority(p)) => {
+                        once!(priority, StaticProp::Priority, ComponentKind::Event, p);
+                    }
+                    (StaticProp::Sequence, PropValue::Integer(p)) => {
+                        once!(sequence, StaticProp::Sequence, ComponentKind::Event, p);
+                    }
+                    (StaticProp::Status, PropValue::Status(p)) => {
+                        if status.is_some() {
+                            return Err(CalendarParseError::MoreThanOneProp {
+                                prop: PropName::Known(StaticProp::Status),
+                                component: ComponentKind::Event,
+                            });
+                        }
+                        match p.value {
+                            Status::Tentative | Status::Confirmed | Status::Cancelled => {}
+                            s => return Err(CalendarParseError::InvalidEventStatus(s)),
+                        }
+                        status = Some(p);
+                    }
+                    (StaticProp::Summary, PropValue::Text(p)) => {
+                        once!(summary, StaticProp::Summary, ComponentKind::Event, p);
+                    }
+                    (StaticProp::Transp, PropValue::TimeTransparency(p)) => {
+                        once!(transp, StaticProp::Transp, ComponentKind::Event, p);
+                    }
+                    (StaticProp::Url, PropValue::Uri(p)) => {
+                        once!(url, StaticProp::Url, ComponentKind::Event, p);
+                    }
+                    (StaticProp::RecurId, PropValue::DateTimeOrDate(p)) => {
+                        once!(recurrence_id, StaticProp::RecurId, ComponentKind::Event, p);
+                    }
+                    (StaticProp::DtEnd, PropValue::DateTimeOrDate(p)) => {
+                        if duration.is_some() {
+                            return Err(CalendarParseError::EventTerminationCollision);
+                        }
+                        once!(dtend, StaticProp::DtEnd, ComponentKind::Event, p);
+                    }
+                    (StaticProp::Duration, PropValue::Duration(p)) => {
+                        if dtend.is_some() {
+                            return Err(CalendarParseError::EventTerminationCollision);
+                        }
+                        once!(duration, StaticProp::Duration, ComponentKind::Event, p);
+                    }
+                    (StaticProp::Color, PropValue::Color(p)) => {
+                        once!(color, StaticProp::Color, ComponentKind::Event, p);
+                    }
+                    // Multi-valued
+                    (StaticProp::Attach, PropValue::Attachment(p)) => {
+                        attach.push(p);
+                    }
+                    (StaticProp::Attendee, PropValue::Uri(p)) => {
+                        attendee.push(p);
+                    }
+                    (StaticProp::Categories, PropValue::TextSeq(p)) => {
+                        categories.push(p);
+                    }
+                    (StaticProp::Comment, PropValue::Text(p)) => {
+                        comment.push(p);
+                    }
+                    (StaticProp::Contact, PropValue::Text(p)) => {
+                        contact.push(p);
+                    }
+                    (StaticProp::ExDate, PropValue::ExDateSeq(seq, params)) => {
+                        match seq {
+                            ExDateSeq::DateTime(dates) => {
+                                for dt in dates {
+                                    exdate.push(Prop { value: DateTimeOrDate::DateTime(dt), params: params.clone() });
+                                }
+                            }
+                            ExDateSeq::Date(dates) => {
+                                for d in dates {
+                                    exdate.push(Prop { value: DateTimeOrDate::Date(d), params: params.clone() });
+                                }
+                            }
+                        }
+                    }
+                    (StaticProp::RequestStatus, PropValue::RequestStatus(p)) => {
+                        request_status.push(p);
+                    }
+                    (StaticProp::RelatedTo, PropValue::Uid(p)) => {
+                        related_to.push(p);
+                    }
+                    (StaticProp::Resources, PropValue::TextSeq(p)) => {
+                        resources.push(p);
+                    }
+                    (StaticProp::RDate, PropValue::RDateSeq(p)) => {
+                        rdate.push(p);
+                    }
+                    (StaticProp::RRule, PropValue::RRule(p)) => {
+                        rrule.push(p);
+                    }
+                    (StaticProp::Image, PropValue::Attachment(p)) => {
+                        image.push(p);
+                    }
+                    (StaticProp::Conference, PropValue::Uri(p)) => {
+                        conference.push(p);
+                    }
+                    (StaticProp::StyledDescription, PropValue::StyledDescription(p)) => {
+                        styled_description.push(p);
+                    }
+                    (StaticProp::StructuredData, PropValue::StructuredData(p)) => {
+                        structured_data.push(p);
+                    }
+                    _ => { /* ignore - property parser guarantees correct variant */ }
+                }
+            }
+            ParsedProp::Unknown(UnknownProp { name: uname, params, value, .. }) => {
+                let name_string: String = I::try_into_string(&uname)?;
+                handle_unknown!(x_props, name_string, params, value);
+            }
+        }
+        Ok(())
+    });
+
+    // Parse subcomponents
+    let alarms: Vec<Alarm> = repeat(0.., preceded(peek(begin(Caseless("VALARM"))), alarm)).parse_next(input)?;
+    let participants: Vec<Participant> = repeat(0.., preceded(peek(begin(Caseless("PARTICIPANT"))), participant)).parse_next(input)?;
+    let locations: Vec<LocationComponent> = repeat(0.., preceded(peek(begin(Caseless("VLOCATION"))), location)).parse_next(input)?;
+    let resource_components: Vec<ResourceComponent> = repeat(0.., preceded(peek(begin(Caseless("VRESOURCE"))), resource)).parse_next(input)?;
+
+    terminated(end(Caseless("VEVENT")), crlf).parse_next(input)?;
+
+    // Check mandatory fields
+    let dtstamp = dtstamp.ok_or_else(|| {
+        E::from_external_error(input, CalendarParseError::MissingProp {
+            prop: PropName::Known(StaticProp::DtStamp),
+            component: ComponentKind::Event,
+        })
+    })?;
+    let uid = uid.ok_or_else(|| {
+        E::from_external_error(input, CalendarParseError::MissingProp {
+            prop: PropName::Known(StaticProp::Uid),
+            component: ComponentKind::Event,
+        })
+    })?;
+
+    let mut ev = Event::new(dtstamp, uid, alarms, participants, locations, resource_components);
+    if let Some(v) = dtstart { ev.set_dtstart(v); }
+    if let Some(v) = class { ev.set_class(v); }
+    if let Some(v) = created { ev.set_created(v); }
+    if let Some(v) = description { ev.set_description(v); }
+    if let Some(v) = geo { ev.set_geo(v); }
+    if let Some(v) = last_modified { ev.set_last_modified(v); }
+    if let Some(v) = loc_prop { ev.set_location(v); }
+    if let Some(v) = organizer { ev.set_organizer(v); }
+    if let Some(v) = priority { ev.set_priority(v); }
+    if let Some(v) = sequence { ev.set_sequence(v); }
+    if let Some(v) = status { ev.set_status(v); }
+    if let Some(v) = summary { ev.set_summary(v); }
+    if let Some(v) = transp { ev.set_transp(v); }
+    if let Some(v) = url { ev.set_url(v); }
+    if let Some(v) = recurrence_id { ev.set_recurrence_id(v); }
+    if let Some(v) = dtend { ev.set_dtend(v); }
+    if let Some(v) = duration { ev.set_duration(v); }
+    if let Some(v) = color { ev.set_color(v); }
+    if !attach.is_empty() { ev.set_attach(attach); }
+    if !attendee.is_empty() { ev.set_attendee(attendee); }
+    if !categories.is_empty() { ev.set_categories(categories); }
+    if !comment.is_empty() { ev.set_comment(comment); }
+    if !contact.is_empty() { ev.set_contact(contact); }
+    if !exdate.is_empty() { ev.set_exdate(exdate); }
+    if !request_status.is_empty() { ev.set_request_status(request_status); }
+    if !related_to.is_empty() { ev.set_related_to(related_to); }
+    if !resources.is_empty() { ev.set_resources(resources); }
+    if !rdate.is_empty() { ev.set_rdate(rdate); }
+    if !rrule.is_empty() { ev.set_rrule(rrule); }
+    if !image.is_empty() { ev.set_image(image); }
+    if !conference.is_empty() { ev.set_conference(conference); }
+    if !styled_description.is_empty() { ev.set_styled_description(styled_description); }
+    if !structured_data.is_empty() { ev.set_structured_data(structured_data); }
+    for (k, v) in x_props {
+        ev.insert_x_property(k, v);
+    }
+
+    Ok(ev)
 }
+
+// ============================================================================
+// Todo parser (RFC 5545 §3.6.2)
+// ============================================================================
 
 /// Parses a [`Todo`].
-fn todo<I, E>(input: &mut I) -> Result<Todo, E>
+fn todo_comp<I, E>(input: &mut I) -> Result<Todo, E>
 where
-    I: StreamIsPartial
-        + Stream
-        + Compare<Caseless<&'static str>>
-        + Compare<Caseless<I::Slice>>
-        + Compare<char>,
+    I: InputStream,
     I::Token: AsChar + Clone,
     I::Slice: AsBStr + Clone + PartialEq + Eq + SliceLen + Stream + AsRef<[u8]> + Hash,
     <<I as Stream>::Slice as Stream>::Token: AsChar,
     E: ParserError<I> + FromExternalError<I, CalendarParseError<I::Slice>>,
 {
-    // fn step<S>(
-    //     (prop, universals, unknown_params): ParsedProp<S>,
-    //     state: &mut PropertyTable<S>,
-    // ) -> Result<(), CalendarParseError<S>>
-    // where
-    //     S: HashCaseless + PartialEq + Debug + Equiv + AsRef<[u8]>,
-    // {
-    //     define_local_helpers!(Todo, state, unknown_params, universals);
-    //
-    //     step_inner! {state, Todo, prop, unknown_params, universals;
-    //         ParserProp::Known(KnownProp::DtStamp(value)) => {
-    //             once!(DtStamp, PropName::Rfc5545(Rfc5545PropName::DateTimeStamp), value, ())
-    //         },
-    //         ParserProp::Known(KnownProp::Uid(value)) => {
-    //             once!(Uid, PropName::Rfc5545(Rfc5545PropName::UniqueIdentifier), value, ())
-    //         },
-    //         ParserProp::Known(KnownProp::Class(value)) => {
-    //             once!(Class, PropName::Rfc5545(Rfc5545PropName::Classification), value, ())
-    //         },
-    //         ParserProp::Known(KnownProp::DtCompleted(value)) => {
-    //             once!(DtCompleted, PropName::Rfc5545(Rfc5545PropName::DateTimeCompleted), value, ())
-    //         },
-    //         ParserProp::Known(KnownProp::Created(value)) => {
-    //             once!(Created, PropName::Rfc5545(Rfc5545PropName::DateTimeCreated), value, ())
-    //         },
-    //         ParserProp::Known(KnownProp::Description(value, params)) => {
-    //             once!(Description, PropName::Rfc5545(Rfc5545PropName::Description), value, params)
-    //         },
-    //         ParserProp::Known(KnownProp::DtStart(value, params)) => {
-    //             once!(DtStart, PropName::Rfc5545(Rfc5545PropName::DateTimeStart), value, params)
-    //         },
-    //         ParserProp::Known(KnownProp::Geo(value)) => {
-    //             once!(Geo, PropName::Rfc5545(Rfc5545PropName::GeographicPosition), value, ())
-    //         },
-    //         ParserProp::Known(KnownProp::LastModified(value)) => {
-    //             once!(LastModified, PropName::Rfc5545(Rfc5545PropName::LastModified), value, ())
-    //         },
-    //         ParserProp::Known(KnownProp::Location(value, params)) => {
-    //             once!(Location, PropName::Rfc5545(Rfc5545PropName::Location), value, params)
-    //         },
-    //         ParserProp::Known(KnownProp::Organizer(value, params)) => {
-    //             once!(Organizer, PropName::Rfc5545(Rfc5545PropName::Organizer), value, Box::new(params))
-    //         },
-    //         ParserProp::Known(KnownProp::PercentComplete(value)) => {
-    //             once!(PercentComplete, PropName::Rfc5545(Rfc5545PropName::PercentComplete), value, ())
-    //         },
-    //         ParserProp::Known(KnownProp::Priority(value)) => {
-    //             once!(Priority, PropName::Rfc5545(Rfc5545PropName::Priority), value, ())
-    //         },
-    //         ParserProp::Known(KnownProp::RecurrenceId(value, params)) => {
-    //             once!(RecurId, PropName::Rfc5545(Rfc5545PropName::RecurrenceId), value, params)
-    //         },
-    //         ParserProp::Known(KnownProp::Sequence(value)) => {
-    //             once!(Sequence, PropName::Rfc5545(Rfc5545PropName::SequenceNumber), value, ())
-    //         },
-    //         ParserProp::Known(KnownProp::Status(value)) => {
-    //             if state.contains_known_key(StaticProp::Status) {
-    //                 return Err(CalendarParseError::MoreThanOneProp { prop: PropName::Rfc5545(Rfc5545PropName::Status), component: ComponentKind::Todo });
-    //             }
-    //
-    //             let value = match value {
-    //                 Status::NeedsAction => TodoStatus::NeedsAction,
-    //                 Status::Completed => TodoStatus::Completed,
-    //                 Status::InProcess => TodoStatus::InProcess,
-    //                 Status::Cancelled => TodoStatus::Cancelled,
-    //                 status => return Err(CalendarParseError::InvalidTodoStatus(status)),
-    //             };
-    //
-    //             once!(Status, PropName::Rfc5545(Rfc5545PropName::Status), value, ())
-    //         },
-    //         ParserProp::Known(KnownProp::Summary(value, params)) => {
-    //             once!(Summary, PropName::Rfc5545(Rfc5545PropName::Summary), value, params)
-    //         },
-    //         ParserProp::Known(KnownProp::Url(value)) => {
-    //             once!(Url, PropName::Rfc5545(Rfc5545PropName::UniformResourceLocator), value, ())
-    //         },
-    //         ParserProp::Known(KnownProp::RRule(value)) => {
-    //             seq!(RRule, Box::new(value), ())
-    //         },
-    //         ParserProp::Known(KnownProp::Color(value)) => {
-    //             once!(Color, PropName::Rfc7986(Rfc7986PropName::Color), value, ())
-    //         },
-    //         ParserProp::Known(KnownProp::DtDue(value, params)) => {
-    //             match state.contains_known_key(StaticProp::Duration) {
-    //                 true => Err(CalendarParseError::TodoTerminationCollision),
-    //                 false => once!(DtDue, PropName::Rfc5545(Rfc5545PropName::DateTimeDue), value, params),
-    //             }
-    //         },
-    //         ParserProp::Known(KnownProp::Duration(value)) => {
-    //             match state.contains_known_key(StaticProp::DtDue) {
-    //                 true => Err(CalendarParseError::TodoTerminationCollision),
-    //                 false => once!(Duration, PropName::Rfc5545(Rfc5545PropName::Duration), value, ()),
-    //             }
-    //         },
-    //         ParserProp::Known(KnownProp::Attach(value, params)) => {
-    //             seq!(Attach, value, params)
-    //         },
-    //         ParserProp::Known(KnownProp::Attendee(value, params)) => {
-    //             seq!(Attendee, value, Box::new(params))
-    //         },
-    //         ParserProp::Known(KnownProp::Categories(value, params)) => {
-    //             seq!(Categories, value, params)
-    //         },
-    //         ParserProp::Known(KnownProp::Comment(value, params)) => {
-    //             seq!(Comment, value, params)
-    //         },
-    //         ParserProp::Known(KnownProp::Contact(value, params)) => {
-    //             seq!(Contact, value, params)
-    //         },
-    //         ParserProp::Known(KnownProp::ExDate(value, params)) => {
-    //             seq!(ExDate, value, params)
-    //         },
-    //         ParserProp::Known(KnownProp::RequestStatus(value, params)) => {
-    //             seq!(RequestStatus, value, params)
-    //         },
-    //         ParserProp::Known(KnownProp::RelatedTo(value, params)) => {
-    //             seq!(RelatedTo, value, params)
-    //         },
-    //         ParserProp::Known(KnownProp::Resources(value, params)) => {
-    //             seq!(Resources, value, params)
-    //         },
-    //         ParserProp::Known(KnownProp::RDate(value, params)) => {
-    //             seq!(RDate, value, params)
-    //         },
-    //         ParserProp::Known(KnownProp::Conference(value, params)) => {
-    //             seq!(Conference, value, params)
-    //         },
-    //         ParserProp::Known(KnownProp::Image(value, params)) => {
-    //             seq!(Image, value, params)
-    //         },
-    //     }
-    // }
-    //
-    // fn name<I, E>(input: &mut I) -> Result<(), E>
-    // where
-    //     I: StreamIsPartial + Stream + Compare<Caseless<&'static str>>,
-    //     E: ParserError<I>,
-    // {
-    //     Caseless("VTODO").void().parse_next(input)
-    // }
-    //
-    // terminated(begin(name), crlf).parse_next(input)?;
-    // let props = StateMachine::new(step).parse_next(input)?;
-    // let alarms = repeat(0.., alarm).parse_next(input)?;
-    // terminated(end(name), crlf).parse_next(input)?;
-    //
-    // check_mandatory_fields! {input, props, Todo;
-    //     DtStamp => PropName::Rfc5545(Rfc5545PropName::DateTimeStamp),
-    //     Uid => PropName::Rfc5545(Rfc5545PropName::UniqueIdentifier),
-    // }
-    //
-    // Ok(Todo::new(props, alarms))
+    terminated(begin(Caseless("VTODO")), crlf).parse_next(input)?;
 
-    todo!()
+    // Once-only properties
+    let mut dtstamp: Option<Prop<DateTime<Utc>, Params>> = None;
+    let mut uid: Option<Prop<Box<Uid>, Params>> = None;
+    let mut dtstart: Option<Prop<DateTimeOrDate, Params>> = None;
+    let mut class: Option<Prop<Token<ClassValue, String>, Params>> = None;
+    let mut completed: Option<Prop<DateTime<Utc>, Params>> = None;
+    let mut created: Option<Prop<DateTime<Utc>, Params>> = None;
+    let mut description: Option<Prop<String, Params>> = None;
+    let mut geo: Option<Prop<Geo, Params>> = None;
+    let mut last_modified: Option<Prop<DateTime<Utc>, Params>> = None;
+    let mut loc_prop: Option<Prop<String, Params>> = None;
+    let mut organizer: Option<Prop<Box<Uri>, Params>> = None;
+    let mut percent_complete: Option<Prop<CompletionPercentage, Params>> = None;
+    let mut priority: Option<Prop<Priority, Params>> = None;
+    let mut recurrence_id: Option<Prop<DateTimeOrDate, Params>> = None;
+    let mut sequence: Option<Prop<Integer, Params>> = None;
+    let mut status: Option<Prop<Status, Params>> = None;
+    let mut summary: Option<Prop<String, Params>> = None;
+    let mut url: Option<Prop<Box<Uri>, Params>> = None;
+    let mut due: Option<Prop<DateTimeOrDate, Params>> = None;
+    let mut duration: Option<Prop<SignedDuration, Params>> = None;
+    let mut color: Option<Prop<Css3Color, Params>> = None;
+    // Multi-valued
+    let mut attach: Vec<Prop<Attachment, Params>> = Vec::new();
+    let mut attendee: Vec<Prop<Box<Uri>, Params>> = Vec::new();
+    let mut categories: Vec<Prop<Vec<String>, Params>> = Vec::new();
+    let mut comment: Vec<Prop<String, Params>> = Vec::new();
+    let mut contact: Vec<Prop<String, Params>> = Vec::new();
+    let mut exdate: Vec<Prop<DateTimeOrDate, Params>> = Vec::new();
+    let mut request_status: Vec<Prop<RequestStatus, Params>> = Vec::new();
+    let mut related_to: Vec<Prop<Box<Uid>, Params>> = Vec::new();
+    let mut resources: Vec<Prop<Vec<String>, Params>> = Vec::new();
+    let mut rdate: Vec<Prop<RDateSeq, Params>> = Vec::new();
+    let mut rrule: Vec<Prop<RRule, Params>> = Vec::new();
+    let mut image: Vec<Prop<Attachment, Params>> = Vec::new();
+    let mut conference: Vec<Prop<Box<Uri>, Params>> = Vec::new();
+    let mut styled_description: Vec<Prop<StyledDescriptionValue, Params>> = Vec::new();
+    let mut structured_data: Vec<StructuredDataProp> = Vec::new();
+    // Unknown
+    let mut x_props: HashMap<Box<CaselessStr>, Vec<Prop<Value<String>, Params>>> = HashMap::new();
+
+    parse_props!(input, parsed, {
+        match parsed {
+            ParsedProp::Known(KnownProp { name: prop_name, value }) => {
+                match (prop_name, value) {
+                    (StaticProp::DtStamp, PropValue::DateTimeUtc(p)) => {
+                        once!(dtstamp, StaticProp::DtStamp, ComponentKind::Todo, p);
+                    }
+                    (StaticProp::Uid, PropValue::Uid(p)) => {
+                        once!(uid, StaticProp::Uid, ComponentKind::Todo, p);
+                    }
+                    (StaticProp::DtStart, PropValue::DateTimeOrDate(p)) => {
+                        once!(dtstart, StaticProp::DtStart, ComponentKind::Todo, p);
+                    }
+                    (StaticProp::Class, PropValue::ClassValue(p)) => {
+                        once!(class, StaticProp::Class, ComponentKind::Todo, p);
+                    }
+                    (StaticProp::DtCompleted, PropValue::DateTimeUtc(p)) => {
+                        once!(completed, StaticProp::DtCompleted, ComponentKind::Todo, p);
+                    }
+                    (StaticProp::Created, PropValue::DateTimeUtc(p)) => {
+                        once!(created, StaticProp::Created, ComponentKind::Todo, p);
+                    }
+                    (StaticProp::Description, PropValue::Text(p)) => {
+                        once!(description, StaticProp::Description, ComponentKind::Todo, p);
+                    }
+                    (StaticProp::Geo, PropValue::Geo(p)) => {
+                        once!(geo, StaticProp::Geo, ComponentKind::Todo, p);
+                    }
+                    (StaticProp::LastModified, PropValue::DateTimeUtc(p)) => {
+                        once!(last_modified, StaticProp::LastModified, ComponentKind::Todo, p);
+                    }
+                    (StaticProp::Location, PropValue::Text(p)) => {
+                        once!(loc_prop, StaticProp::Location, ComponentKind::Todo, p);
+                    }
+                    (StaticProp::Organizer, PropValue::Uri(p)) => {
+                        once!(organizer, StaticProp::Organizer, ComponentKind::Todo, p);
+                    }
+                    (StaticProp::PercentComplete, PropValue::CompletionPercentage(p)) => {
+                        once!(percent_complete, StaticProp::PercentComplete, ComponentKind::Todo, p);
+                    }
+                    (StaticProp::Priority, PropValue::Priority(p)) => {
+                        once!(priority, StaticProp::Priority, ComponentKind::Todo, p);
+                    }
+                    (StaticProp::RecurId, PropValue::DateTimeOrDate(p)) => {
+                        once!(recurrence_id, StaticProp::RecurId, ComponentKind::Todo, p);
+                    }
+                    (StaticProp::Sequence, PropValue::Integer(p)) => {
+                        once!(sequence, StaticProp::Sequence, ComponentKind::Todo, p);
+                    }
+                    (StaticProp::Status, PropValue::Status(p)) => {
+                        if status.is_some() {
+                            return Err(CalendarParseError::MoreThanOneProp {
+                                prop: PropName::Known(StaticProp::Status),
+                                component: ComponentKind::Todo,
+                            });
+                        }
+                        match p.value {
+                            Status::NeedsAction | Status::Completed | Status::InProcess | Status::Cancelled => {}
+                            s => return Err(CalendarParseError::InvalidTodoStatus(s)),
+                        }
+                        status = Some(p);
+                    }
+                    (StaticProp::Summary, PropValue::Text(p)) => {
+                        once!(summary, StaticProp::Summary, ComponentKind::Todo, p);
+                    }
+                    (StaticProp::Url, PropValue::Uri(p)) => {
+                        once!(url, StaticProp::Url, ComponentKind::Todo, p);
+                    }
+                    (StaticProp::DtDue, PropValue::DateTimeOrDate(p)) => {
+                        if duration.is_some() {
+                            return Err(CalendarParseError::TodoTerminationCollision);
+                        }
+                        once!(due, StaticProp::DtDue, ComponentKind::Todo, p);
+                    }
+                    (StaticProp::Duration, PropValue::Duration(p)) => {
+                        if due.is_some() {
+                            return Err(CalendarParseError::TodoTerminationCollision);
+                        }
+                        once!(duration, StaticProp::Duration, ComponentKind::Todo, p);
+                    }
+                    (StaticProp::Color, PropValue::Color(p)) => {
+                        once!(color, StaticProp::Color, ComponentKind::Todo, p);
+                    }
+                    // Multi-valued
+                    (StaticProp::Attach, PropValue::Attachment(p)) => { attach.push(p); }
+                    (StaticProp::Attendee, PropValue::Uri(p)) => { attendee.push(p); }
+                    (StaticProp::Categories, PropValue::TextSeq(p)) => { categories.push(p); }
+                    (StaticProp::Comment, PropValue::Text(p)) => { comment.push(p); }
+                    (StaticProp::Contact, PropValue::Text(p)) => { contact.push(p); }
+                    (StaticProp::ExDate, PropValue::ExDateSeq(seq, params)) => {
+                        match seq {
+                            ExDateSeq::DateTime(dates) => {
+                                for dt in dates {
+                                    exdate.push(Prop { value: DateTimeOrDate::DateTime(dt), params: params.clone() });
+                                }
+                            }
+                            ExDateSeq::Date(dates) => {
+                                for d in dates {
+                                    exdate.push(Prop { value: DateTimeOrDate::Date(d), params: params.clone() });
+                                }
+                            }
+                        }
+                    }
+                    (StaticProp::RequestStatus, PropValue::RequestStatus(p)) => { request_status.push(p); }
+                    (StaticProp::RelatedTo, PropValue::Uid(p)) => { related_to.push(p); }
+                    (StaticProp::Resources, PropValue::TextSeq(p)) => { resources.push(p); }
+                    (StaticProp::RDate, PropValue::RDateSeq(p)) => { rdate.push(p); }
+                    (StaticProp::RRule, PropValue::RRule(p)) => { rrule.push(p); }
+                    (StaticProp::Image, PropValue::Attachment(p)) => { image.push(p); }
+                    (StaticProp::Conference, PropValue::Uri(p)) => { conference.push(p); }
+                    (StaticProp::StyledDescription, PropValue::StyledDescription(p)) => { styled_description.push(p); }
+                    (StaticProp::StructuredData, PropValue::StructuredData(p)) => { structured_data.push(p); }
+                    _ => { /* ignore - property parser guarantees correct variant */ }
+                }
+            }
+            ParsedProp::Unknown(UnknownProp { name: uname, params, value, .. }) => {
+                let name_string: String = I::try_into_string(&uname)?;
+                handle_unknown!(x_props, name_string, params, value);
+            }
+        }
+        Ok(())
+    });
+
+    // Parse subcomponents
+    let alarms: Vec<Alarm> = repeat(0.., preceded(peek(begin(Caseless("VALARM"))), alarm)).parse_next(input)?;
+    let participants: Vec<Participant> = repeat(0.., preceded(peek(begin(Caseless("PARTICIPANT"))), participant)).parse_next(input)?;
+    let locations: Vec<LocationComponent> = repeat(0.., preceded(peek(begin(Caseless("VLOCATION"))), location)).parse_next(input)?;
+    let resource_components: Vec<ResourceComponent> = repeat(0.., preceded(peek(begin(Caseless("VRESOURCE"))), resource)).parse_next(input)?;
+
+    terminated(end(Caseless("VTODO")), crlf).parse_next(input)?;
+
+    let dtstamp = dtstamp.ok_or_else(|| {
+        E::from_external_error(input, CalendarParseError::MissingProp {
+            prop: PropName::Known(StaticProp::DtStamp),
+            component: ComponentKind::Todo,
+        })
+    })?;
+    let uid = uid.ok_or_else(|| {
+        E::from_external_error(input, CalendarParseError::MissingProp {
+            prop: PropName::Known(StaticProp::Uid),
+            component: ComponentKind::Todo,
+        })
+    })?;
+
+    let mut td = Todo::new(dtstamp, uid, alarms, participants, locations, resource_components);
+    if let Some(v) = dtstart { td.set_dtstart(v); }
+    if let Some(v) = class { td.set_class(v); }
+    if let Some(v) = completed { td.set_completed(v); }
+    if let Some(v) = created { td.set_created(v); }
+    if let Some(v) = description { td.set_description(v); }
+    if let Some(v) = geo { td.set_geo(v); }
+    if let Some(v) = last_modified { td.set_last_modified(v); }
+    if let Some(v) = loc_prop { td.set_location(v); }
+    if let Some(v) = organizer { td.set_organizer(v); }
+    if let Some(v) = percent_complete { td.set_percent_complete(v); }
+    if let Some(v) = priority { td.set_priority(v); }
+    if let Some(v) = recurrence_id { td.set_recurrence_id(v); }
+    if let Some(v) = sequence { td.set_sequence(v); }
+    if let Some(v) = status { td.set_status(v); }
+    if let Some(v) = summary { td.set_summary(v); }
+    if let Some(v) = url { td.set_url(v); }
+    if let Some(v) = due { td.set_due(v); }
+    if let Some(v) = duration { td.set_duration(v); }
+    if let Some(v) = color { td.set_color(v); }
+    if !attach.is_empty() { td.set_attach(attach); }
+    if !attendee.is_empty() { td.set_attendee(attendee); }
+    if !categories.is_empty() { td.set_categories(categories); }
+    if !comment.is_empty() { td.set_comment(comment); }
+    if !contact.is_empty() { td.set_contact(contact); }
+    if !exdate.is_empty() { td.set_exdate(exdate); }
+    if !request_status.is_empty() { td.set_request_status(request_status); }
+    if !related_to.is_empty() { td.set_related_to(related_to); }
+    if !resources.is_empty() { td.set_resources(resources); }
+    if !rdate.is_empty() { td.set_rdate(rdate); }
+    if !rrule.is_empty() { td.set_rrule(rrule); }
+    if !image.is_empty() { td.set_image(image); }
+    if !conference.is_empty() { td.set_conference(conference); }
+    if !styled_description.is_empty() { td.set_styled_description(styled_description); }
+    if !structured_data.is_empty() { td.set_structured_data(structured_data); }
+    for (k, v) in x_props {
+        td.insert_x_property(k, v);
+    }
+
+    Ok(td)
 }
+
+// ============================================================================
+// Journal parser (RFC 5545 §3.6.3)
+// ============================================================================
 
 /// Parses a [`Journal`].
 fn journal<I, E>(input: &mut I) -> Result<Journal, E>
 where
-    I: StreamIsPartial + Stream + Compare<Caseless<&'static str>> + Compare<char>,
+    I: InputStream,
     I::Token: AsChar + Clone,
     I::Slice: AsBStr + Clone + PartialEq + Eq + SliceLen + Stream + AsRef<[u8]> + Hash,
     <<I as Stream>::Slice as Stream>::Token: AsChar,
     E: ParserError<I> + FromExternalError<I, CalendarParseError<I::Slice>>,
 {
-    // fn step<S>(
-    //     (prop, universals, unknown_params): ParsedProp<S>,
-    //     state: &mut PropertyTable<S>,
-    // ) -> Result<(), CalendarParseError<S>>
-    // where
-    //     S: HashCaseless + PartialEq + Debug + Equiv + AsRef<[u8]>,
-    // {
-    //     define_local_helpers!(Journal, state, unknown_params, universals);
-    //
-    //     step_inner! {state, Journal, prop, unknown_params, universals;
-    //         ParserProp::Known(KnownProp::DtStamp(value)) => {
-    //             once!(DtStamp, PropName::Rfc5545(Rfc5545PropName::DateTimeStamp), value, ())
-    //         },
-    //         ParserProp::Known(KnownProp::Uid(value)) => {
-    //             once!(Uid, PropName::Rfc5545(Rfc5545PropName::UniqueIdentifier), value, ())
-    //         },
-    //         ParserProp::Known(KnownProp::Class(value)) => {
-    //             once!(Class, PropName::Rfc5545(Rfc5545PropName::Classification), value, ())
-    //         },
-    //         ParserProp::Known(KnownProp::Created(value)) => {
-    //             once!(Created, PropName::Rfc5545(Rfc5545PropName::DateTimeCreated), value, ())
-    //         },
-    //         ParserProp::Known(KnownProp::DtStart(value, params)) => {
-    //             once!(DtStart, PropName::Rfc5545(Rfc5545PropName::DateTimeStart), value, params)
-    //         },
-    //         ParserProp::Known(KnownProp::LastModified(value)) => {
-    //             once!(LastModified, PropName::Rfc5545(Rfc5545PropName::LastModified), value, ())
-    //         },
-    //         ParserProp::Known(KnownProp::Organizer(value, params)) => {
-    //             once!(Organizer, PropName::Rfc5545(Rfc5545PropName::Organizer), value, Box::new(params))
-    //         },
-    //         ParserProp::Known(KnownProp::RecurrenceId(value, params)) => {
-    //             once!(RecurId, PropName::Rfc5545(Rfc5545PropName::RecurrenceId), value, params)
-    //         },
-    //         ParserProp::Known(KnownProp::Sequence(value)) => {
-    //             once!(Sequence, PropName::Rfc5545(Rfc5545PropName::SequenceNumber), value, ())
-    //         },
-    //         ParserProp::Known(KnownProp::Status(value)) => {
-    //             if state.contains_known_key(StaticProp::Status) {
-    //                 return Err(CalendarParseError::MoreThanOneProp { prop: PropName::Rfc5545(Rfc5545PropName::Status), component: ComponentKind::Journal });
-    //             }
-    //
-    //             let value = match value {
-    //                 Status::Cancelled => JournalStatus::Cancelled,
-    //                 Status::Draft => JournalStatus::Draft,
-    //                 Status::Final => JournalStatus::Final,
-    //                 status => return Err(CalendarParseError::InvalidJournalStatus(status)),
-    //             };
-    //
-    //             once!(Status, PropName::Rfc5545(Rfc5545PropName::Status), value, ())
-    //         },
-    //         ParserProp::Known(KnownProp::Summary(value, params)) => {
-    //             once!(Summary, PropName::Rfc5545(Rfc5545PropName::Summary), value, params)
-    //         },
-    //         ParserProp::Known(KnownProp::Url(value)) => {
-    //             once!(Url, PropName::Rfc5545(Rfc5545PropName::UniformResourceLocator), value, ())
-    //         },
-    //         ParserProp::Known(KnownProp::RRule(value)) => {
-    //             seq!(RRule, Box::new(value), ())
-    //         },
-    //         ParserProp::Known(KnownProp::Attach(value, params)) => {
-    //             seq!(Attach, value, params)
-    //         },
-    //         ParserProp::Known(KnownProp::Attendee(value, params)) => {
-    //             seq!(Attendee, value, Box::new(params))
-    //         },
-    //         ParserProp::Known(KnownProp::Categories(value, params)) => {
-    //             seq!(Categories, value, params)
-    //         },
-    //         ParserProp::Known(KnownProp::Comment(value, params)) => {
-    //             seq!(Comment, value, params)
-    //         },
-    //         ParserProp::Known(KnownProp::Contact(value, params)) => {
-    //             seq!(Contact, value, params)
-    //         },
-    //         ParserProp::Known(KnownProp::Description(value, params)) => {
-    //             seq!(Description, value, params)
-    //         },
-    //         ParserProp::Known(KnownProp::ExDate(value, params)) => {
-    //             seq!(ExDate, value, params)
-    //         },
-    //         ParserProp::Known(KnownProp::RelatedTo(value, params)) => {
-    //             seq!(RelatedTo, value, params)
-    //         },
-    //         ParserProp::Known(KnownProp::RDate(value, params)) => {
-    //             seq!(RDate, value, params)
-    //         },
-    //         ParserProp::Known(KnownProp::RequestStatus(value, params)) => {
-    //             seq!(RequestStatus, value, params)
-    //         },
-    //     }
-    // }
-    //
-    // fn name<I, E>(input: &mut I) -> Result<(), E>
-    // where
-    //     I: StreamIsPartial + Stream + Compare<Caseless<&'static str>>,
-    //     E: ParserError<I>,
-    // {
-    //     Caseless("VJOURNAL").void().parse_next(input)
-    // }
-    //
-    // terminated(begin(name), crlf).parse_next(input)?;
-    // let props = StateMachine::new(step).parse_next(input)?;
-    // terminated(end(name), crlf).parse_next(input)?;
-    //
-    // check_mandatory_fields! {input, props, Journal;
-    //     DtStamp => PropName::Rfc5545(Rfc5545PropName::DateTimeStamp),
-    //     Uid => PropName::Rfc5545(Rfc5545PropName::UniqueIdentifier),
-    // }
-    //
-    // Ok(Journal::new(props))
+    terminated(begin(Caseless("VJOURNAL")), crlf).parse_next(input)?;
 
-    todo!()
+    let mut dtstamp: Option<Prop<DateTime<Utc>, Params>> = None;
+    let mut uid: Option<Prop<Box<Uid>, Params>> = None;
+    let mut dtstart: Option<Prop<DateTimeOrDate, Params>> = None;
+    let mut class: Option<Prop<Token<ClassValue, String>, Params>> = None;
+    let mut created: Option<Prop<DateTime<Utc>, Params>> = None;
+    let mut last_modified: Option<Prop<DateTime<Utc>, Params>> = None;
+    let mut organizer: Option<Prop<Box<Uri>, Params>> = None;
+    let mut recurrence_id: Option<Prop<DateTimeOrDate, Params>> = None;
+    let mut sequence: Option<Prop<Integer, Params>> = None;
+    let mut status: Option<Prop<Status, Params>> = None;
+    let mut summary: Option<Prop<String, Params>> = None;
+    let mut url: Option<Prop<Box<Uri>, Params>> = None;
+    // Multi-valued
+    let mut attach: Vec<Prop<Attachment, Params>> = Vec::new();
+    let mut attendee: Vec<Prop<Box<Uri>, Params>> = Vec::new();
+    let mut categories: Vec<Prop<Vec<String>, Params>> = Vec::new();
+    let mut comment: Vec<Prop<String, Params>> = Vec::new();
+    let mut contact: Vec<Prop<String, Params>> = Vec::new();
+    let mut description: Vec<Prop<String, Params>> = Vec::new();
+    let mut exdate: Vec<Prop<DateTimeOrDate, Params>> = Vec::new();
+    let mut related_to: Vec<Prop<Box<Uid>, Params>> = Vec::new();
+    let mut rdate: Vec<Prop<RDateSeq, Params>> = Vec::new();
+    let mut rrule: Vec<Prop<RRule, Params>> = Vec::new();
+    let mut request_status: Vec<Prop<RequestStatus, Params>> = Vec::new();
+    let mut x_props: HashMap<Box<CaselessStr>, Vec<Prop<Value<String>, Params>>> = HashMap::new();
+
+    parse_props!(input, parsed, {
+        match parsed {
+            ParsedProp::Known(KnownProp { name: prop_name, value }) => {
+                match (prop_name, value) {
+                    (StaticProp::DtStamp, PropValue::DateTimeUtc(p)) => {
+                        once!(dtstamp, StaticProp::DtStamp, ComponentKind::Journal, p);
+                    }
+                    (StaticProp::Uid, PropValue::Uid(p)) => {
+                        once!(uid, StaticProp::Uid, ComponentKind::Journal, p);
+                    }
+                    (StaticProp::DtStart, PropValue::DateTimeOrDate(p)) => {
+                        once!(dtstart, StaticProp::DtStart, ComponentKind::Journal, p);
+                    }
+                    (StaticProp::Class, PropValue::ClassValue(p)) => {
+                        once!(class, StaticProp::Class, ComponentKind::Journal, p);
+                    }
+                    (StaticProp::Created, PropValue::DateTimeUtc(p)) => {
+                        once!(created, StaticProp::Created, ComponentKind::Journal, p);
+                    }
+                    (StaticProp::LastModified, PropValue::DateTimeUtc(p)) => {
+                        once!(last_modified, StaticProp::LastModified, ComponentKind::Journal, p);
+                    }
+                    (StaticProp::Organizer, PropValue::Uri(p)) => {
+                        once!(organizer, StaticProp::Organizer, ComponentKind::Journal, p);
+                    }
+                    (StaticProp::RecurId, PropValue::DateTimeOrDate(p)) => {
+                        once!(recurrence_id, StaticProp::RecurId, ComponentKind::Journal, p);
+                    }
+                    (StaticProp::Sequence, PropValue::Integer(p)) => {
+                        once!(sequence, StaticProp::Sequence, ComponentKind::Journal, p);
+                    }
+                    (StaticProp::Status, PropValue::Status(p)) => {
+                        if status.is_some() {
+                            return Err(CalendarParseError::MoreThanOneProp {
+                                prop: PropName::Known(StaticProp::Status),
+                                component: ComponentKind::Journal,
+                            });
+                        }
+                        match p.value {
+                            Status::Draft | Status::Final | Status::Cancelled => {}
+                            s => return Err(CalendarParseError::InvalidJournalStatus(s)),
+                        }
+                        status = Some(p);
+                    }
+                    (StaticProp::Summary, PropValue::Text(p)) => {
+                        once!(summary, StaticProp::Summary, ComponentKind::Journal, p);
+                    }
+                    (StaticProp::Url, PropValue::Uri(p)) => {
+                        once!(url, StaticProp::Url, ComponentKind::Journal, p);
+                    }
+                    // Multi-valued
+                    (StaticProp::Attach, PropValue::Attachment(p)) => { attach.push(p); }
+                    (StaticProp::Attendee, PropValue::Uri(p)) => { attendee.push(p); }
+                    (StaticProp::Categories, PropValue::TextSeq(p)) => { categories.push(p); }
+                    (StaticProp::Comment, PropValue::Text(p)) => { comment.push(p); }
+                    (StaticProp::Contact, PropValue::Text(p)) => { contact.push(p); }
+                    (StaticProp::Description, PropValue::Text(p)) => { description.push(p); }
+                    (StaticProp::ExDate, PropValue::ExDateSeq(seq, params)) => {
+                        match seq {
+                            ExDateSeq::DateTime(dates) => {
+                                for dt in dates {
+                                    exdate.push(Prop { value: DateTimeOrDate::DateTime(dt), params: params.clone() });
+                                }
+                            }
+                            ExDateSeq::Date(dates) => {
+                                for d in dates {
+                                    exdate.push(Prop { value: DateTimeOrDate::Date(d), params: params.clone() });
+                                }
+                            }
+                        }
+                    }
+                    (StaticProp::RelatedTo, PropValue::Uid(p)) => { related_to.push(p); }
+                    (StaticProp::RDate, PropValue::RDateSeq(p)) => { rdate.push(p); }
+                    (StaticProp::RRule, PropValue::RRule(p)) => { rrule.push(p); }
+                    (StaticProp::RequestStatus, PropValue::RequestStatus(p)) => { request_status.push(p); }
+                    _ => { /* ignore - property parser guarantees correct variant */ }
+                }
+            }
+            ParsedProp::Unknown(UnknownProp { name: uname, params, value, .. }) => {
+                let name_string: String = I::try_into_string(&uname)?;
+                handle_unknown!(x_props, name_string, params, value);
+            }
+        }
+        Ok(())
+    });
+
+    // Parse subcomponents
+    let participants: Vec<Participant> = repeat(0.., preceded(peek(begin(Caseless("PARTICIPANT"))), participant)).parse_next(input)?;
+    let locations: Vec<LocationComponent> = repeat(0.., preceded(peek(begin(Caseless("VLOCATION"))), location)).parse_next(input)?;
+    let resource_components: Vec<ResourceComponent> = repeat(0.., preceded(peek(begin(Caseless("VRESOURCE"))), resource)).parse_next(input)?;
+
+    terminated(end(Caseless("VJOURNAL")), crlf).parse_next(input)?;
+
+    let dtstamp = dtstamp.ok_or_else(|| {
+        E::from_external_error(input, CalendarParseError::MissingProp {
+            prop: PropName::Known(StaticProp::DtStamp),
+            component: ComponentKind::Journal,
+        })
+    })?;
+    let uid = uid.ok_or_else(|| {
+        E::from_external_error(input, CalendarParseError::MissingProp {
+            prop: PropName::Known(StaticProp::Uid),
+            component: ComponentKind::Journal,
+        })
+    })?;
+
+    let mut jn = Journal::new(dtstamp, uid, participants, locations, resource_components);
+    if let Some(v) = dtstart { jn.set_dtstart(v); }
+    if let Some(v) = class { jn.set_class(v); }
+    if let Some(v) = created { jn.set_created(v); }
+    if let Some(v) = last_modified { jn.set_last_modified(v); }
+    if let Some(v) = organizer { jn.set_organizer(v); }
+    if let Some(v) = recurrence_id { jn.set_recurrence_id(v); }
+    if let Some(v) = sequence { jn.set_sequence(v); }
+    if let Some(v) = status { jn.set_status(v); }
+    if let Some(v) = summary { jn.set_summary(v); }
+    if let Some(v) = url { jn.set_url(v); }
+    if !attach.is_empty() { jn.set_attach(attach); }
+    if !attendee.is_empty() { jn.set_attendee(attendee); }
+    if !categories.is_empty() { jn.set_categories(categories); }
+    if !comment.is_empty() { jn.set_comment(comment); }
+    if !contact.is_empty() { jn.set_contact(contact); }
+    if !description.is_empty() { jn.set_description(description); }
+    if !exdate.is_empty() { jn.set_exdate(exdate); }
+    if !related_to.is_empty() { jn.set_related_to(related_to); }
+    if !rdate.is_empty() { jn.set_rdate(rdate); }
+    if !rrule.is_empty() { jn.set_rrule(rrule); }
+    if !request_status.is_empty() { jn.set_request_status(request_status); }
+    for (k, v) in x_props {
+        jn.insert_x_property(k, v);
+    }
+
+    Ok(jn)
 }
+
+// ============================================================================
+// FreeBusy parser (RFC 5545 §3.6.4)
+// ============================================================================
 
 /// Parses a [`FreeBusy`].
 fn free_busy<I, E>(input: &mut I) -> Result<FreeBusy, E>
 where
-    I: StreamIsPartial + Stream + Compare<Caseless<&'static str>> + Compare<char>,
+    I: InputStream,
     I::Token: AsChar + Clone,
     I::Slice: AsBStr + Clone + PartialEq + Eq + SliceLen + Stream + AsRef<[u8]> + Hash,
     <<I as Stream>::Slice as Stream>::Token: AsChar,
     E: ParserError<I> + FromExternalError<I, CalendarParseError<I::Slice>>,
 {
-    // fn step<S>(
-    //     (prop, universals, unknown_params): ParsedProp<S>,
-    //     state: &mut PropertyTable<S>,
-    // ) -> Result<(), CalendarParseError<S>>
-    // where
-    //     S: HashCaseless + PartialEq + Debug + Equiv + AsRef<[u8]>,
-    // {
-    //     define_local_helpers!(FreeBusy, state, unknown_params, universals);
-    //
-    //     step_inner! {state, FreeBusy, prop, unknown_params, universals;
-    //         ParserProp::Known(KnownProp::DtStamp(value)) => {
-    //             once!(DtStamp, PropName::Rfc5545(Rfc5545PropName::DateTimeStamp), value, ())
-    //         },
-    //         ParserProp::Known(KnownProp::Uid(value)) => {
-    //             once!(Uid, PropName::Rfc5545(Rfc5545PropName::UniqueIdentifier), value, ())
-    //         },
-    //         ParserProp::Known(KnownProp::Contact(value, params)) => {
-    //             once!(Contact, PropName::Rfc5545(Rfc5545PropName::Contact), value, params)
-    //         },
-    //         ParserProp::Known(KnownProp::DtStart(value, params)) => {
-    //             once!(DtStart, PropName::Rfc5545(Rfc5545PropName::DateTimeStart), value, params)
-    //         },
-    //         ParserProp::Known(KnownProp::DtEnd(value, params)) => {
-    //             once!(DtEnd, PropName::Rfc5545(Rfc5545PropName::DateTimeEnd), value, params)
-    //         },
-    //         ParserProp::Known(KnownProp::Organizer(value, params)) => {
-    //             once!(Organizer, PropName::Rfc5545(Rfc5545PropName::Organizer), value, Box::new(params))
-    //         },
-    //         ParserProp::Known(KnownProp::Url(value)) => {
-    //             once!(Url, PropName::Rfc5545(Rfc5545PropName::UniformResourceLocator), value, ())
-    //         },
-    //         ParserProp::Known(KnownProp::Attendee(value, params)) => {
-    //             seq!(Attendee, value, Box::new(params))
-    //         },
-    //         ParserProp::Known(KnownProp::Comment(value, params)) => {
-    //             seq!(Comment, value, params)
-    //         },
-    //         ParserProp::Known(KnownProp::FreeBusy(value, params)) => {
-    //             seq!(FreeBusy, value, params)
-    //         },
-    //         ParserProp::Known(KnownProp::RequestStatus(value, params)) => {
-    //             seq!(RequestStatus, value, params)
-    //         },
-    //     }
-    // }
-    //
-    // fn name<I, E>(input: &mut I) -> Result<(), E>
-    // where
-    //     I: StreamIsPartial + Stream + Compare<Caseless<&'static str>>,
-    //     E: ParserError<I>,
-    // {
-    //     Caseless("VFREEBUSY").void().parse_next(input)
-    // }
-    //
-    // terminated(begin(name), crlf).parse_next(input)?;
-    // let props = StateMachine::new(step).parse_next(input)?;
-    // terminated(end(name), crlf).parse_next(input)?;
-    //
-    // check_mandatory_fields! {input, props, FreeBusy;
-    //     DtStamp => PropName::Rfc5545(Rfc5545PropName::DateTimeStamp),
-    //     Uid => PropName::Rfc5545(Rfc5545PropName::UniqueIdentifier),
-    // }
-    //
-    // Ok(FreeBusy::new(props))
+    terminated(begin(Caseless("VFREEBUSY")), crlf).parse_next(input)?;
 
-    todo!()
+    let mut dtstamp: Option<Prop<DateTime<Utc>, Params>> = None;
+    let mut uid: Option<Prop<Box<Uid>, Params>> = None;
+    let mut contact: Option<Prop<String, Params>> = None;
+    let mut dtstart: Option<Prop<DateTimeOrDate, Params>> = None;
+    let mut dtend: Option<Prop<DateTimeOrDate, Params>> = None;
+    let mut organizer: Option<Prop<Box<Uri>, Params>> = None;
+    let mut url: Option<Prop<Box<Uri>, Params>> = None;
+    // Multi-valued
+    let mut attendee: Vec<Prop<Box<Uri>, Params>> = Vec::new();
+    let mut comment: Vec<Prop<String, Params>> = Vec::new();
+    let mut freebusy: Vec<Prop<Vec<Period>, Params>> = Vec::new();
+    let mut request_status: Vec<Prop<RequestStatus, Params>> = Vec::new();
+    let mut x_props: HashMap<Box<CaselessStr>, Vec<Prop<Value<String>, Params>>> = HashMap::new();
+
+    parse_props!(input, parsed, {
+        match parsed {
+            ParsedProp::Known(KnownProp { name: prop_name, value }) => {
+                match (prop_name, value) {
+                    (StaticProp::DtStamp, PropValue::DateTimeUtc(p)) => {
+                        once!(dtstamp, StaticProp::DtStamp, ComponentKind::FreeBusy, p);
+                    }
+                    (StaticProp::Uid, PropValue::Uid(p)) => {
+                        once!(uid, StaticProp::Uid, ComponentKind::FreeBusy, p);
+                    }
+                    (StaticProp::Contact, PropValue::Text(p)) => {
+                        once!(contact, StaticProp::Contact, ComponentKind::FreeBusy, p);
+                    }
+                    (StaticProp::DtStart, PropValue::DateTimeOrDate(p)) => {
+                        once!(dtstart, StaticProp::DtStart, ComponentKind::FreeBusy, p);
+                    }
+                    (StaticProp::DtEnd, PropValue::DateTimeOrDate(p)) => {
+                        once!(dtend, StaticProp::DtEnd, ComponentKind::FreeBusy, p);
+                    }
+                    (StaticProp::Organizer, PropValue::Uri(p)) => {
+                        once!(organizer, StaticProp::Organizer, ComponentKind::FreeBusy, p);
+                    }
+                    (StaticProp::Url, PropValue::Uri(p)) => {
+                        once!(url, StaticProp::Url, ComponentKind::FreeBusy, p);
+                    }
+                    // Multi-valued
+                    (StaticProp::Attendee, PropValue::Uri(p)) => { attendee.push(p); }
+                    (StaticProp::Comment, PropValue::Text(p)) => { comment.push(p); }
+                    (StaticProp::FreeBusy, PropValue::FreeBusyPeriods(p)) => { freebusy.push(p); }
+                    (StaticProp::RequestStatus, PropValue::RequestStatus(p)) => { request_status.push(p); }
+                    _ => { /* ignore - property parser guarantees correct variant */ }
+                }
+            }
+            ParsedProp::Unknown(UnknownProp { name: uname, params, value, .. }) => {
+                let name_string: String = I::try_into_string(&uname)?;
+                handle_unknown!(x_props, name_string, params, value);
+            }
+        }
+        Ok(())
+    });
+
+    // Parse subcomponents
+    let participants: Vec<Participant> = repeat(0.., preceded(peek(begin(Caseless("PARTICIPANT"))), participant)).parse_next(input)?;
+    let locations: Vec<LocationComponent> = repeat(0.., preceded(peek(begin(Caseless("VLOCATION"))), location)).parse_next(input)?;
+    let resource_components: Vec<ResourceComponent> = repeat(0.., preceded(peek(begin(Caseless("VRESOURCE"))), resource)).parse_next(input)?;
+
+    terminated(end(Caseless("VFREEBUSY")), crlf).parse_next(input)?;
+
+    let dtstamp = dtstamp.ok_or_else(|| {
+        E::from_external_error(input, CalendarParseError::MissingProp {
+            prop: PropName::Known(StaticProp::DtStamp),
+            component: ComponentKind::FreeBusy,
+        })
+    })?;
+    let uid = uid.ok_or_else(|| {
+        E::from_external_error(input, CalendarParseError::MissingProp {
+            prop: PropName::Known(StaticProp::Uid),
+            component: ComponentKind::FreeBusy,
+        })
+    })?;
+
+    let mut fb = FreeBusy::new(dtstamp, uid, participants, locations, resource_components);
+    if let Some(v) = contact { fb.set_contact(v); }
+    if let Some(v) = dtstart { fb.set_dtstart(v); }
+    if let Some(v) = dtend { fb.set_dtend(v); }
+    if let Some(v) = organizer { fb.set_organizer(v); }
+    if let Some(v) = url { fb.set_url(v); }
+    if !attendee.is_empty() { fb.set_attendee(attendee); }
+    if !comment.is_empty() { fb.set_comment(comment); }
+    if !freebusy.is_empty() { fb.set_freebusy(freebusy); }
+    if !request_status.is_empty() { fb.set_request_status(request_status); }
+    for (k, v) in x_props {
+        fb.insert_x_property(k, v);
+    }
+
+    Ok(fb)
 }
+
+// ============================================================================
+// TimeZone parser (RFC 5545 §3.6.5)
+// ============================================================================
 
 /// Parses a [`TimeZone`].
 fn timezone<I, E>(input: &mut I) -> Result<TimeZone, E>
 where
-    I: StreamIsPartial + Stream + Compare<Caseless<&'static str>> + Compare<char>,
+    I: InputStream,
     I::Token: AsChar + Clone,
     I::Slice: AsBStr + Clone + PartialEq + Eq + SliceLen + Stream + AsRef<[u8]> + Hash,
     <<I as Stream>::Slice as Stream>::Token: AsChar,
     E: ParserError<I> + FromExternalError<I, CalendarParseError<I::Slice>>,
 {
-    // fn tz_step<S>(
-    //     prop: ParsedProp<S>,
-    //     state: &mut PropertyTable<S>,
-    // ) -> Result<(), CalendarParseError<S>>
-    // where
-    //     S: HashCaseless + PartialEq + Debug + Equiv + AsRef<[u8]>,
-    // {
-    //     // macro_rules! once {
-    //     //     ($name:ident, $long_name:expr, $value:expr, $params:expr) => {
-    //     //         try_insert_once!(
-    //     //             state,
-    //     //             TimeZone,
-    //     //             $name,
-    //     //             $long_name,
-    //     //             Prop {
-    //     //                 derived: universals.derived.unwrap_or_default(),
-    //     //                 value: $value,
-    //     //                 params: $params,
-    //     //                 unknown_params
-    //     //             },
-    //     //         )
-    //     //     };
-    //     // }
-    //     //
-    //     // step_inner! {state, TimeZone, prop, unknown_params, universals;
-    //     //     ParserProp::Known(KnownProp::TzId(value)) => {
-    //     //         once!(TzId, PropName::Rfc5545(Rfc5545PropName::TimeZoneIdentifier), value, ())
-    //     //     },
-    //     //     ParserProp::Known(KnownProp::LastModified(value)) => {
-    //     //         once!(LastModified, PropName::Rfc5545(Rfc5545PropName::LastModified), value, ())
-    //     //     },
-    //     //     ParserProp::Known(KnownProp::TzUrl(value)) => {
-    //     //         once!(TzUrl, PropName::Rfc5545(Rfc5545PropName::TimeZoneUrl), value, ())
-    //     //     }
-    //     // }
-    //
-    //     todo!()
-    // }
-    //
-    // fn rule_step<S>(
-    //     prop: ParsedProp<S>,
-    //     state: &mut PropertyTable<S>,
-    // ) -> Result<(), CalendarParseError<S>>
-    // where
-    //     S: HashCaseless + PartialEq + Debug + Equiv + AsRef<[u8]>,
-    // {
-    //     // define_local_helpers!(StandardOrDaylight, state, unknown_params, universals);
-    //     //
-    //     // step_inner! {state, StandardOrDaylight, prop, unknown_params, universals;
-    //     //     ParserProp::Known(KnownProp::DtStart(value, params)) => {
-    //     //         once!(DtStart, PropName::Rfc5545(Rfc5545PropName::DateTimeStart), value, params)
-    //     //     },
-    //     //     ParserProp::Known(KnownProp::TzOffsetTo(value)) => {
-    //     //         once!(TzOffsetTo, PropName::Rfc5545(Rfc5545PropName::TimeZoneOffsetTo), value, ())
-    //     //     },
-    //     //     ParserProp::Known(KnownProp::TzOffsetFrom(value)) => {
-    //     //         once!(TzOffsetFrom, PropName::Rfc5545(Rfc5545PropName::TimeZoneOffsetFrom), value, ())
-    //     //     },
-    //     //     ParserProp::Known(KnownProp::RRule(value)) => {
-    //     //         seq!(RRule, Box::new(value), ())
-    //     //     },
-    //     //     ParserProp::Known(KnownProp::Comment(value, params)) => {
-    //     //         seq!(Comment, value, params)
-    //     //     },
-    //     //     ParserProp::Known(KnownProp::RDate(value, params)) => {
-    //     //         seq!(RDate, value, params)
-    //     //     },
-    //     //     ParserProp::Known(KnownProp::TzName(value, params)) => {
-    //     //         seq!(TzName, value, params)
-    //     //     },
-    //     // }
-    //
-    //     todo!()
-    // }
-    //
-    // fn rule_kind<I, E>(input: &mut I) -> Result<TzRuleKind, E>
-    // where
-    //     I: StreamIsPartial + Stream + Compare<Caseless<&'static str>>,
-    //     E: ParserError<I>,
-    // {
-    //     alt((
-    //         Caseless("STANDARD").value(TzRuleKind::Standard),
-    //         Caseless("DAYLIGHT").value(TzRuleKind::Daylight),
-    //     ))
-    //     .parse_next(input)
-    // }
-    //
-    // fn rule<I, E>(input: &mut I) -> Result<TzRule<I::Slice>, E>
-    // where
-    //     I: StreamIsPartial + Stream + Compare<Caseless<&'static str>> + Compare<char>,
-    //     I::Token: AsChar + Clone,
-    //     I::Slice: AsBStr
-    //         + Clone
-    //         + Stream
-    //         + SliceLen
-    //         + Hash
-    //         + HashCaseless
-    //         + PartialEq
-    //         + Eq
-    //         + Debug
-    //         + Equiv
-    //         + AsRef<[u8]>,
-    //     <<I as Stream>::Slice as Stream>::Token: AsChar,
-    //     E: ParserError<I> + FromExternalError<I, CalendarParseError<I::Slice>>,
-    // {
-    //     let kind = terminated(begin(rule_kind), crlf).parse_next(input)?;
-    //     let props = StateMachine::new(rule_step).parse_next(input)?;
-    //
-    //     // check_mandatory_fields! {input, props, StandardOrDaylight;
-    //     //     DtStart => PropName::Known(StaticProp::DtStart),
-    //     //     TzOffsetFrom => PropName::Known(StaticProp::TzOffsetFrom),
-    //     //     TzOffsetTo => PropName::Known(StaticProp::TzOffsetTo),
-    //     // }
-    //
-    //     match terminated(end(rule_kind), crlf).parse_next(input)? == kind {
-    //         true => Ok(TzRule::new(props, kind)),
-    //         false => fail.parse_next(input),
-    //     }
-    // }
-    //
-    // terminated(begin(ComponentName::TimeZone.parser()), crlf).parse_next(input)?;
-    // let props = StateMachine::new(tz_step).parse_next(input)?;
-    // let subcomponents = repeat(1.., rule).parse_next(input)?;
-    // terminated(end(ComponentName::TimeZone.parser()), crlf).parse_next(input)?;
-    //
-    // // check_mandatory_fields! {input, props, TimeZone;
-    // //     TzId => PropName::Known(StaticProp::TzId),
-    // // }
-    //
-    // Ok(TimeZone::new(props, subcomponents))
+    terminated(begin(Caseless("VTIMEZONE")), crlf).parse_next(input)?;
 
-    todo!()
+    let mut tz_id: Option<Prop<Box<TzId>, Params>> = None;
+    let mut last_modified: Option<Prop<DateTime<Utc>, Params>> = None;
+    let mut tz_url: Option<Prop<Box<Uri>, Params>> = None;
+    let mut x_props: HashMap<Box<CaselessStr>, Vec<Prop<Value<String>, Params>>> = HashMap::new();
+
+    parse_props!(input, parsed, {
+        match parsed {
+            ParsedProp::Known(KnownProp { name: prop_name, value }) => {
+                match (prop_name, value) {
+                    (StaticProp::TzId, PropValue::TzId(p)) => {
+                        once!(tz_id, StaticProp::TzId, ComponentKind::TimeZone, p);
+                    }
+                    (StaticProp::LastModified, PropValue::DateTimeUtc(p)) => {
+                        once!(last_modified, StaticProp::LastModified, ComponentKind::TimeZone, p);
+                    }
+                    (StaticProp::TzUrl, PropValue::Uri(p)) => {
+                        once!(tz_url, StaticProp::TzUrl, ComponentKind::TimeZone, p);
+                    }
+                    _ => { /* ignore - property parser guarantees correct variant */ }
+                }
+            }
+            ParsedProp::Unknown(UnknownProp { name: uname, params, value, .. }) => {
+                let name_string: String = I::try_into_string(&uname)?;
+                handle_unknown!(x_props, name_string, params, value);
+            }
+        }
+        Ok(())
+    });
+
+    // Parse STANDARD/DAYLIGHT subcomponents (at least one required)
+    let rules: Vec<TzRule> = repeat(1.., tz_rule).parse_next(input)?;
+
+    terminated(end(Caseless("VTIMEZONE")), crlf).parse_next(input)?;
+
+    let tz_id = tz_id.ok_or_else(|| {
+        E::from_external_error(input, CalendarParseError::MissingProp {
+            prop: PropName::Known(StaticProp::TzId),
+            component: ComponentKind::TimeZone,
+        })
+    })?;
+
+    let mut tz = TimeZone::new(tz_id, rules);
+    if let Some(v) = last_modified { tz.set_last_modified(v); }
+    if let Some(v) = tz_url { tz.set_tz_url(v); }
+    for (k, v) in x_props {
+        tz.insert_x_property(k, v);
+    }
+
+    Ok(tz)
 }
+
+/// Parses a STANDARD or DAYLIGHT subcomponent of a VTIMEZONE.
+fn tz_rule<I, E>(input: &mut I) -> Result<TzRule, E>
+where
+    I: InputStream,
+    I::Token: AsChar + Clone,
+    I::Slice: AsBStr + Clone + PartialEq + Eq + SliceLen + Stream + AsRef<[u8]> + Hash,
+    <<I as Stream>::Slice as Stream>::Token: AsChar,
+    E: ParserError<I> + FromExternalError<I, CalendarParseError<I::Slice>>,
+{
+    let kind: TzRuleKind = terminated(
+        begin(alt((
+            Caseless("STANDARD").value(TzRuleKind::Standard),
+            Caseless("DAYLIGHT").value(TzRuleKind::Daylight),
+        ))),
+        crlf,
+    )
+    .parse_next(input)?;
+
+    let mut dtstart: Option<Prop<DateTimeOrDate, Params>> = None;
+    let mut tz_offset_to: Option<Prop<UtcOffset, Params>> = None;
+    let mut tz_offset_from: Option<Prop<UtcOffset, Params>> = None;
+    let mut comment: Vec<Prop<String, Params>> = Vec::new();
+    let mut rdate: Vec<Prop<RDateSeq, Params>> = Vec::new();
+    let mut rrule: Vec<Prop<RRule, Params>> = Vec::new();
+    let mut tz_name: Vec<Prop<String, Params>> = Vec::new();
+    let mut x_props: HashMap<Box<CaselessStr>, Vec<Prop<Value<String>, Params>>> = HashMap::new();
+
+    parse_props!(input, parsed, {
+        match parsed {
+            ParsedProp::Known(KnownProp { name: prop_name, value }) => {
+                match (prop_name, value) {
+                    (StaticProp::DtStart, PropValue::DateTimeOrDate(p)) => {
+                        once!(dtstart, StaticProp::DtStart, ComponentKind::StandardOrDaylight, p);
+                    }
+                    (StaticProp::TzOffsetTo, PropValue::UtcOffset(p)) => {
+                        once!(tz_offset_to, StaticProp::TzOffsetTo, ComponentKind::StandardOrDaylight, p);
+                    }
+                    (StaticProp::TzOffsetFrom, PropValue::UtcOffset(p)) => {
+                        once!(tz_offset_from, StaticProp::TzOffsetFrom, ComponentKind::StandardOrDaylight, p);
+                    }
+                    (StaticProp::Comment, PropValue::Text(p)) => { comment.push(p); }
+                    (StaticProp::RDate, PropValue::RDateSeq(p)) => { rdate.push(p); }
+                    (StaticProp::RRule, PropValue::RRule(p)) => { rrule.push(p); }
+                    (StaticProp::TzName, PropValue::Text(p)) => { tz_name.push(p); }
+                    _ => { /* ignore - property parser guarantees correct variant */ }
+                }
+            }
+            ParsedProp::Unknown(UnknownProp { name: uname, params, value, .. }) => {
+                let name_string: String = I::try_into_string(&uname)?;
+                handle_unknown!(x_props, name_string, params, value);
+            }
+        }
+        Ok(())
+    });
+
+    // End the rule with the matching END line
+    let end_kind: TzRuleKind = terminated(
+        end(alt((
+            Caseless("STANDARD").value(TzRuleKind::Standard),
+            Caseless("DAYLIGHT").value(TzRuleKind::Daylight),
+        ))),
+        crlf,
+    )
+    .parse_next(input)?;
+
+    if end_kind != kind {
+        return Err(E::from_external_error(
+            input,
+            CalendarParseError::MissingProp {
+                prop: PropName::Known(StaticProp::DtStart),
+                component: ComponentKind::StandardOrDaylight,
+            },
+        ));
+    }
+
+    let dtstart = dtstart.ok_or_else(|| {
+        E::from_external_error(input, CalendarParseError::MissingProp {
+            prop: PropName::Known(StaticProp::DtStart),
+            component: ComponentKind::StandardOrDaylight,
+        })
+    })?;
+    let tz_offset_to = tz_offset_to.ok_or_else(|| {
+        E::from_external_error(input, CalendarParseError::MissingProp {
+            prop: PropName::Known(StaticProp::TzOffsetTo),
+            component: ComponentKind::StandardOrDaylight,
+        })
+    })?;
+    let tz_offset_from = tz_offset_from.ok_or_else(|| {
+        E::from_external_error(input, CalendarParseError::MissingProp {
+            prop: PropName::Known(StaticProp::TzOffsetFrom),
+            component: ComponentKind::StandardOrDaylight,
+        })
+    })?;
+
+    let mut rule = TzRule::new(kind, dtstart, tz_offset_to, tz_offset_from);
+    if !comment.is_empty() { rule.set_comment(comment); }
+    if !rdate.is_empty() { rule.set_rdate(rdate); }
+    if !rrule.is_empty() { rule.set_rrule(rrule); }
+    if !tz_name.is_empty() { rule.set_tz_name(tz_name); }
+    for (k, v) in x_props {
+        rule.insert_x_property(k, v);
+    }
+
+    Ok(rule)
+}
+
+// ============================================================================
+// Alarm parser (RFC 5545 §3.6.6)
+// ============================================================================
 
 fn alarm<I, E>(input: &mut I) -> Result<Alarm, E>
 where
-    I: StreamIsPartial
-        + Stream
-        + Compare<Caseless<&'static str>>
-        + Compare<Caseless<I::Slice>>
-        + Compare<char>,
+    I: InputStream,
     I::Token: AsChar + Clone,
     I::Slice: AsBStr + Clone + PartialEq + Eq + SliceLen + Stream + AsRef<[u8]> + Hash,
     <<I as Stream>::Slice as Stream>::Token: AsChar,
     E: ParserError<I> + FromExternalError<I, CalendarParseError<I::Slice>>,
 {
-    // fn step<S>(
-    //     (prop, universals, unknown_params): ParsedProp<S>,
-    //     state: &mut PropertyTable<S>,
-    // ) -> Result<(), CalendarParseError<S>>
-    // where
-    //     S: HashCaseless + PartialEq + Debug + Equiv + AsRef<[u8]>,
-    // {
-    //     define_local_helpers!(Alarm, state, unknown_params, universals);
-    //
-    //     step_inner! {state, Alarm, prop, unknown_params, universals;
-    //         ParserProp::Known(KnownProp::Action(value)) => {
-    //             if state.contains_known_key(StaticProp::Action) {
-    //                 return Err(CalendarParseError::MoreThanOneProp {
-    //                     prop: PropName::Rfc5545(Rfc5545PropName::Action),
-    //                     component: ComponentKind::Alarm,
-    //                 });
-    //             }
-    //
-    //             match value {
-    //                 AlarmAction::Audio => {
-    //                     once!(Action, PropName::Rfc5545(Rfc5545PropName::Action), AudioAction, ())
-    //                 },
-    //                 AlarmAction::Display => {
-    //                     once!(Action, PropName::Rfc5545(Rfc5545PropName::Action), DisplayAction, ())
-    //                 },
-    //                 AlarmAction::Email => {
-    //                     once!(Action, PropName::Rfc5545(Rfc5545PropName::Action), EmailAction, ())
-    //                 },
-    //                 AlarmAction::Iana(action) => {
-    //                     once!(Action, PropName::Rfc5545(Rfc5545PropName::Action), UnknownAction::Iana(action), ())
-    //                 },
-    //                 AlarmAction::X(action) => {
-    //                     once!(Action, PropName::Rfc5545(Rfc5545PropName::Action), UnknownAction::X(action), ())
-    //                 }
-    //             }
-    //         },
-    //         ParserProp::Known(KnownProp::Description(value, params)) => {
-    //             once!(Description, PropName::Rfc5545(Rfc5545PropName::Description), value, params)
-    //         },
-    //         ParserProp::Known(KnownProp::TriggerRelative(value, params)) => {
-    //             once!(Trigger, PropName::Rfc5545(Rfc5545PropName::Trigger), value, params)
-    //         },
-    //         ParserProp::Known(KnownProp::TriggerAbsolute(value)) => {
-    //             once!(Trigger, PropName::Rfc5545(Rfc5545PropName::Trigger), value, ())
-    //         },
-    //         ParserProp::Known(KnownProp::Summary(value, params)) => {
-    //             once!(Summary, PropName::Rfc5545(Rfc5545PropName::Summary), value, params)
-    //         },
-    //         ParserProp::Known(KnownProp::Duration(value)) => {
-    //             once!(Duration, PropName::Rfc5545(Rfc5545PropName::Duration), value, ())
-    //         },
-    //         ParserProp::Known(KnownProp::Repeat(value)) => {
-    //             once!(Repeat, PropName::Rfc5545(Rfc5545PropName::RepeatCount), value, ())
-    //         },
-    //         ParserProp::Known(KnownProp::Uid(value)) => {
-    //             once!(Uid, PropName::Rfc5545(Rfc5545PropName::UniqueIdentifier), value, ())
-    //         },
-    //         ParserProp::Known(KnownProp::Acknowledged(value)) => {
-    //             once!(Acknowledged, PropName::Rfc9074(Rfc9074PropName::Acknowledged), value, ())
-    //         },
-    //         ParserProp::Known(KnownProp::Proximity(value)) => {
-    //             once!(Proximity, PropName::Rfc9074(Rfc9074PropName::Proximity), value, ())
-    //         },
-    //         ParserProp::Known(KnownProp::Attendee(value, params)) => {
-    //             seq!(Attendee, value, Box::new(params))
-    //         },
-    //         ParserProp::Known(KnownProp::Attach(value, params)) => {
-    //             seq!(Attach, value, params)
-    //         },
-    //         ParserProp::Known(KnownProp::RelatedTo(value, params)) => {
-    //             seq!(RelatedTo, value, params)
-    //         },
-    //     }
-    // }
-    //
-    // fn name<I, E>(input: &mut I) -> Result<(), E>
-    // where
-    //     I: StreamIsPartial + Stream + Compare<Caseless<&'static str>>,
-    //     E: ParserError<I>,
-    // {
-    //     Caseless("VALARM").void().parse_next(input)
-    // }
-    //
-    // terminated(begin(name), crlf).parse_next(input)?;
-    // let mut props = StateMachine::new(step).parse_next(input)?;
-    // let subcomponents = repeat(0.., other_with_name).parse_next(input)?;
-    // terminated(end(name), crlf).parse_next(input)?;
-    //
-    // check_mandatory_fields! {input, props, Alarm;
-    //     Action => PropName::Rfc5545(Rfc5545PropName::Action),
-    //     Trigger => PropName::Rfc5545(Rfc5545PropName::Trigger),
-    // }
-    //
-    // enum ActionKind {
-    //     Audio,
-    //     Display,
-    //     Email,
-    //     Unknown,
-    // }
-    //
-    // let action = match props
-    //     .get_known(StaticProp::Action)
-    //     .unwrap()
-    //     .try_into()
-    //     .unwrap()
-    // {
-    //     AlarmAction::Audio => ActionKind::Audio,
-    //     AlarmAction::Display => ActionKind::Display,
-    //     AlarmAction::Email => ActionKind::Email,
-    //     AlarmAction::Iana(_) | AlarmAction::X(_) => ActionKind::Unknown,
-    // };
-    //
-    // // we need to check certain multiplicities depending on the action:
-    // // 1. audio alarms require zero or one attachments
-    // // 2. display alarms require exactly one description
-    // // 3. email alarms require one description, one summary, and at least one attendee
-    // // 4. unknown action alarms have no multiplicity requirements
-    //
-    // macro_rules! one {
-    //     ($key:ident, $t:ty, $prop_name:expr, $component:ident) => {{
-    //         let item: Option<$t> = props
-    //             .remove_known(StaticProp::$key)
-    //             .and_then(|x| x.try_into().ok());
-    //
-    //         let () = match item {
-    //             None => Err(CalendarParseError::MissingProp {
-    //                 prop: $prop_name,
-    //                 component: ComponentKind::$component,
-    //             }),
-    //             Some(item) => {
-    //                 let _prev = props.insert_known(StaticProp::$key, RawPropValue::from(item));
-    //                 debug_assert!(_prev.is_none());
-    //                 Ok(())
-    //             }
-    //         }
-    //         .map_err(|err| E::from_external_error(input, err))?;
-    //     }};
-    // }
-    //
-    // dbg![&props];
-    //
-    // match action {
-    //     ActionKind::Audio => {
-    //         // get attachments if they are present
-    //         let attachments: Option<Vec<Prop<_, AttachValue<_>, AttachParams<_>>>> = props
-    //             .remove_known(StaticProp::Attach)
-    //             .and_then(|x| x.try_into().ok());
-    //
-    //         // handle multiplicities
-    //         let () = match attachments.as_ref().map(Vec::len) {
-    //             None | Some(0) => Ok(()),
-    //             Some(1) => {
-    //                 let prop = attachments.unwrap().pop().unwrap();
-    //                 let _prev = props.insert_known(StaticProp::Attach, RawPropValue::from(prop));
-    //                 debug_assert!(_prev.is_none());
-    //                 Ok(())
-    //             }
-    //             Some(_) => Err(CalendarParseError::TooManyAttachmentsOnAudioAlarm),
-    //         }
-    //         .map_err(|err| E::from_external_error(input, err))?;
-    //
-    //         Ok(Alarm::Audio(AudioAlarm::new(props, subcomponents)))
-    //     }
-    //     ActionKind::Display => {
-    //         one! {
-    //             Description,
-    //             Prop<_, Text<_>, TextParams<_>>,
-    //             PropName::Rfc5545(Rfc5545PropName::Description),
-    //             DisplayAlarm
-    //         };
-    //
-    //         Ok(Alarm::Display(DisplayAlarm::new(props, subcomponents)))
-    //     }
-    //     ActionKind::Email => {
-    //         one! {
-    //             Description,
-    //             Prop<_, Text<_>, TextParams<_>>,
-    //             PropName::Rfc5545(Rfc5545PropName::Description),
-    //             EmailAlarm
-    //         };
-    //
-    //         one! {
-    //             Summary,
-    //             Prop<_, Text<_>, TextParams<_>>,
-    //             PropName::Rfc5545(Rfc5545PropName::Summary),
-    //             EmailAlarm
-    //         };
-    //
-    //         let attendees: Option<&Vec<Prop<_, CalAddress<_>, Box<AttendeeParams<_>>>>> = props
-    //             .get_known(StaticProp::Attendee)
-    //             .and_then(|x| x.try_into().ok());
-    //
-    //         let () = match attendees.map(Vec::len) {
-    //             None | Some(0) => Err(CalendarParseError::MissingProp {
-    //                 prop: PropName::Rfc5545(Rfc5545PropName::Attendee),
-    //                 component: ComponentKind::EmailAlarm,
-    //             }),
-    //             Some(_) => Ok(()),
-    //         }
-    //         .map_err(|err| E::from_external_error(input, err))?;
-    //
-    //         Ok(Alarm::Email(EmailAlarm::new(props, subcomponents)))
-    //     }
-    //     ActionKind::Unknown => Ok(Alarm::Other(OtherAlarm::new(props, subcomponents))),
-    // }
+    use crate::model::primitive::AlarmAction;
 
-    todo!()
+    terminated(begin(Caseless("VALARM")), crlf).parse_next(input)?;
+
+    // Shared alarm properties
+    let mut action: Option<Prop<Token<AlarmAction, String>, Params>> = None;
+    let mut trigger: Option<Prop<TriggerValue, Params>> = None;
+    let mut duration: Option<Prop<SignedDuration, Params>> = None;
+    let mut repeat: Option<Prop<Integer, Params>> = None;
+    let mut uid: Option<Prop<Box<Uid>, Params>> = None;
+    let mut acknowledged: Option<Prop<DateTime<Utc>, Params>> = None;
+    let mut description: Option<Prop<String, Params>> = None;
+    let mut summary: Option<Prop<String, Params>> = None;
+    // Multi-valued
+    let mut attach: Vec<Prop<Attachment, Params>> = Vec::new();
+    let mut attendee: Vec<Prop<Box<Uri>, Params>> = Vec::new();
+    let mut related_to: Vec<Prop<Box<Uid>, Params>> = Vec::new();
+    let mut x_props: HashMap<Box<CaselessStr>, Vec<Prop<Value<String>, Params>>> = HashMap::new();
+
+    parse_props!(input, parsed, {
+        match parsed {
+            ParsedProp::Known(KnownProp { name: prop_name, value }) => {
+                match (prop_name, value) {
+                    (StaticProp::Action, PropValue::AlarmAction(p)) => {
+                        once!(action, StaticProp::Action, ComponentKind::Alarm, p);
+                    }
+                    (StaticProp::Trigger, PropValue::Trigger(p)) => {
+                        once!(trigger, StaticProp::Trigger, ComponentKind::Alarm, p);
+                    }
+                    (StaticProp::Duration, PropValue::Duration(p)) => {
+                        once!(duration, StaticProp::Duration, ComponentKind::Alarm, p);
+                    }
+                    (StaticProp::Repeat, PropValue::Integer(p)) => {
+                        once!(repeat, StaticProp::Repeat, ComponentKind::Alarm, p);
+                    }
+                    (StaticProp::Uid, PropValue::Uid(p)) => {
+                        once!(uid, StaticProp::Uid, ComponentKind::Alarm, p);
+                    }
+                    (StaticProp::Acknowledged, PropValue::DateTimeUtc(p)) => {
+                        once!(acknowledged, StaticProp::Acknowledged, ComponentKind::Alarm, p);
+                    }
+                    (StaticProp::Description, PropValue::Text(p)) => {
+                        once!(description, StaticProp::Description, ComponentKind::Alarm, p);
+                    }
+                    (StaticProp::Summary, PropValue::Text(p)) => {
+                        once!(summary, StaticProp::Summary, ComponentKind::Alarm, p);
+                    }
+                    (StaticProp::Attach, PropValue::Attachment(p)) => { attach.push(p); }
+                    (StaticProp::Attendee, PropValue::Uri(p)) => { attendee.push(p); }
+                    (StaticProp::RelatedTo, PropValue::Uid(p)) => { related_to.push(p); }
+                    _ => { /* ignore - property parser guarantees correct variant */ }
+                }
+            }
+            ParsedProp::Unknown(UnknownProp { name: uname, params, value, .. }) => {
+                let name_string: String = I::try_into_string(&uname)?;
+                handle_unknown!(x_props, name_string, params, value);
+            }
+        }
+        Ok(())
+    });
+
+    terminated(end(Caseless("VALARM")), crlf).parse_next(input)?;
+
+    // Check mandatory: trigger
+    let trigger = trigger.ok_or_else(|| {
+        E::from_external_error(input, CalendarParseError::MissingProp {
+            prop: PropName::Known(StaticProp::Trigger),
+            component: ComponentKind::Alarm,
+        })
+    })?;
+
+    // Check mandatory: action
+    let action = action.ok_or_else(|| {
+        E::from_external_error(input, CalendarParseError::MissingProp {
+            prop: PropName::Known(StaticProp::Action),
+            component: ComponentKind::Alarm,
+        })
+    })?;
+
+    // Dispatch based on action
+    match action.value {
+        Token::Known(AlarmAction::Audio) => {
+            // Audio: at most one attachment
+            if attach.len() > 1 {
+                return Err(E::from_external_error(
+                    input,
+                    CalendarParseError::TooManyAttachmentsOnAudioAlarm,
+                ));
+            }
+            let mut a = AudioAlarm::new(trigger);
+            if let Some(att) = attach.into_iter().next() { a.set_attach(att); }
+            if let Some(v) = uid { a.set_uid(v); }
+            if let Some(v) = duration { a.set_duration(v); }
+            if let Some(v) = repeat { a.set_repeat(v); }
+            if let Some(v) = acknowledged { a.set_acknowledged(v); }
+            for (k, v) in x_props { a.insert_x_property(k, v); }
+            Ok(Alarm::Audio(a))
+        }
+        Token::Known(AlarmAction::Display) => {
+            let description = description.ok_or_else(|| {
+                E::from_external_error(input, CalendarParseError::MissingProp {
+                    prop: PropName::Known(StaticProp::Description),
+                    component: ComponentKind::DisplayAlarm,
+                })
+            })?;
+            let mut a = DisplayAlarm::new(trigger, description);
+            if let Some(v) = uid { a.set_uid(v); }
+            if let Some(v) = duration { a.set_duration(v); }
+            if let Some(v) = repeat { a.set_repeat(v); }
+            if let Some(v) = acknowledged { a.set_acknowledged(v); }
+            for (k, v) in x_props { a.insert_x_property(k, v); }
+            Ok(Alarm::Display(a))
+        }
+        Token::Known(AlarmAction::Email) => {
+            let description = description.ok_or_else(|| {
+                E::from_external_error(input, CalendarParseError::MissingProp {
+                    prop: PropName::Known(StaticProp::Description),
+                    component: ComponentKind::EmailAlarm,
+                })
+            })?;
+            let summary = summary.ok_or_else(|| {
+                E::from_external_error(input, CalendarParseError::MissingProp {
+                    prop: PropName::Known(StaticProp::Summary),
+                    component: ComponentKind::EmailAlarm,
+                })
+            })?;
+            let mut a = EmailAlarm::new(trigger, description, summary);
+            if let Some(v) = uid { a.set_uid(v); }
+            if let Some(v) = duration { a.set_duration(v); }
+            if let Some(v) = repeat { a.set_repeat(v); }
+            if let Some(v) = acknowledged { a.set_acknowledged(v); }
+            if !attendee.is_empty() { a.set_attendee(attendee); }
+            if !attach.is_empty() { a.set_attach(attach); }
+            for (k, v) in x_props { a.insert_x_property(k, v); }
+            Ok(Alarm::Email(a))
+        }
+        Token::Known(_) | Token::Unknown(_) => {
+            // Other/unknown action
+            let action_str = match action.value {
+                Token::Unknown(s) => s,
+                _ => String::new(),
+            };
+            let action_prop = Prop { value: action_str, params: action.params };
+            let mut a = OtherAlarm::new(trigger, action_prop);
+            if let Some(v) = description { a.set_description(v); }
+            if let Some(v) = summary { a.set_summary(v); }
+            if let Some(v) = uid { a.set_uid(v); }
+            if let Some(v) = duration { a.set_duration(v); }
+            if let Some(v) = repeat { a.set_repeat(v); }
+            if let Some(v) = acknowledged { a.set_acknowledged(v); }
+            if !attendee.is_empty() { a.set_attendee(attendee); }
+            if !attach.is_empty() { a.set_attach(attach); }
+            for (k, v) in x_props { a.insert_x_property(k, v); }
+            Ok(Alarm::Other(a))
+        }
+    }
 }
 
-/// Parses a [`Resource`].
+// ============================================================================
+// Participant parser (RFC 9073 §7.1)
+// ============================================================================
+
+fn participant<I, E>(input: &mut I) -> Result<Participant, E>
+where
+    I: InputStream,
+    I::Token: AsChar + Clone,
+    I::Slice: AsBStr + Clone + PartialEq + Eq + SliceLen + Stream + AsRef<[u8]> + Hash,
+    <<I as Stream>::Slice as Stream>::Token: AsChar,
+    E: ParserError<I> + FromExternalError<I, CalendarParseError<I::Slice>>,
+{
+    terminated(begin(Caseless("PARTICIPANT")), crlf).parse_next(input)?;
+
+    let mut uid: Option<Prop<Box<Uid>, Params>> = None;
+    let mut participant_type: Option<Prop<Token<ParticipantType, String>, Params>> = None;
+    let mut calendar_address: Option<Prop<Box<Uri>, Params>> = None;
+    let mut created: Option<Prop<DateTime<Utc>, Params>> = None;
+    let mut description: Option<Prop<String, Params>> = None;
+    let mut dtstamp: Option<Prop<DateTime<Utc>, Params>> = None;
+    let mut geo: Option<Prop<Geo, Params>> = None;
+    let mut last_modified: Option<Prop<DateTime<Utc>, Params>> = None;
+    let mut priority: Option<Prop<Priority, Params>> = None;
+    let mut sequence: Option<Prop<Integer, Params>> = None;
+    let mut status: Option<Prop<Status, Params>> = None;
+    let mut summary: Option<Prop<String, Params>> = None;
+    let mut url: Option<Prop<Box<Uri>, Params>> = None;
+    // Multi-valued
+    let mut attach: Vec<Prop<Attachment, Params>> = Vec::new();
+    let mut categories: Vec<Prop<Vec<String>, Params>> = Vec::new();
+    let mut comment: Vec<Prop<String, Params>> = Vec::new();
+    let mut contact: Vec<Prop<String, Params>> = Vec::new();
+    let mut location_prop: Vec<Prop<String, Params>> = Vec::new();
+    let mut request_status: Vec<Prop<RequestStatus, Params>> = Vec::new();
+    let mut related_to: Vec<Prop<Box<Uid>, Params>> = Vec::new();
+    let mut resources: Vec<Prop<Vec<String>, Params>> = Vec::new();
+    let mut styled_description: Vec<Prop<StyledDescriptionValue, Params>> = Vec::new();
+    let mut structured_data: Vec<StructuredDataProp> = Vec::new();
+    let mut x_props: HashMap<Box<CaselessStr>, Vec<Prop<Value<String>, Params>>> = HashMap::new();
+
+
+    parse_props!(input, parsed, {
+        match parsed {
+            ParsedProp::Known(KnownProp { name: prop_name, value }) => {
+                match (prop_name, value) {
+                    (StaticProp::Uid, PropValue::Uid(p)) => {
+                        once!(uid, StaticProp::Uid, ComponentKind::Unknown, p);
+                    }
+                    (StaticProp::ParticipantType, PropValue::ParticipantType(p)) => {
+                        once!(participant_type, StaticProp::ParticipantType, ComponentKind::Unknown, p);
+                    }
+                    (StaticProp::CalendarAddress, PropValue::Uri(p)) => {
+                        once!(calendar_address, StaticProp::CalendarAddress, ComponentKind::Unknown, p);
+                    }
+                    (StaticProp::Created, PropValue::DateTimeUtc(p)) => {
+                        once!(created, StaticProp::Created, ComponentKind::Unknown, p);
+                    }
+                    (StaticProp::Description, PropValue::Text(p)) => {
+                        once!(description, StaticProp::Description, ComponentKind::Unknown, p);
+                    }
+                    (StaticProp::DtStamp, PropValue::DateTimeUtc(p)) => {
+                        once!(dtstamp, StaticProp::DtStamp, ComponentKind::Unknown, p);
+                    }
+                    (StaticProp::Geo, PropValue::Geo(p)) => {
+                        once!(geo, StaticProp::Geo, ComponentKind::Unknown, p);
+                    }
+                    (StaticProp::LastModified, PropValue::DateTimeUtc(p)) => {
+                        once!(last_modified, StaticProp::LastModified, ComponentKind::Unknown, p);
+                    }
+                    (StaticProp::Priority, PropValue::Priority(p)) => {
+                        once!(priority, StaticProp::Priority, ComponentKind::Unknown, p);
+                    }
+                    (StaticProp::Sequence, PropValue::Integer(p)) => {
+                        once!(sequence, StaticProp::Sequence, ComponentKind::Unknown, p);
+                    }
+                    (StaticProp::Status, PropValue::Status(p)) => {
+                        once!(status, StaticProp::Status, ComponentKind::Unknown, p);
+                    }
+                    (StaticProp::Summary, PropValue::Text(p)) => {
+                        once!(summary, StaticProp::Summary, ComponentKind::Unknown, p);
+                    }
+                    (StaticProp::Url, PropValue::Uri(p)) => {
+                        once!(url, StaticProp::Url, ComponentKind::Unknown, p);
+                    }
+                    // Multi-valued
+                    (StaticProp::Attach, PropValue::Attachment(p)) => { attach.push(p); }
+                    (StaticProp::Categories, PropValue::TextSeq(p)) => { categories.push(p); }
+                    (StaticProp::Comment, PropValue::Text(p)) => { comment.push(p); }
+                    (StaticProp::Contact, PropValue::Text(p)) => { contact.push(p); }
+                    (StaticProp::Location, PropValue::Text(p)) => { location_prop.push(p); }
+                    (StaticProp::RequestStatus, PropValue::RequestStatus(p)) => { request_status.push(p); }
+                    (StaticProp::RelatedTo, PropValue::Uid(p)) => { related_to.push(p); }
+                    (StaticProp::Resources, PropValue::TextSeq(p)) => { resources.push(p); }
+                    (StaticProp::StyledDescription, PropValue::StyledDescription(p)) => { styled_description.push(p); }
+                    (StaticProp::StructuredData, PropValue::StructuredData(p)) => { structured_data.push(p); }
+                    _ => { /* ignore - property parser guarantees correct variant */ }
+                }
+            }
+            ParsedProp::Unknown(UnknownProp { name: uname, params, value, .. }) => {
+                let name_string: String = I::try_into_string(&uname)?;
+                handle_unknown!(x_props, name_string, params, value);
+            }
+        }
+        Ok(())
+    });
+
+    // Parse subcomponents
+    let locations: Vec<LocationComponent> = repeat(0.., preceded(peek(begin(Caseless("VLOCATION"))), location)).parse_next(input)?;
+    let resource_components: Vec<ResourceComponent> = repeat(0.., preceded(peek(begin(Caseless("VRESOURCE"))), resource)).parse_next(input)?;
+
+    terminated(end(Caseless("PARTICIPANT")), crlf).parse_next(input)?;
+
+    let uid = uid.ok_or_else(|| {
+        E::from_external_error(input, CalendarParseError::MissingProp {
+            prop: PropName::Known(StaticProp::Uid),
+            component: ComponentKind::Unknown,
+        })
+    })?;
+    let participant_type = participant_type.ok_or_else(|| {
+        E::from_external_error(input, CalendarParseError::MissingProp {
+            prop: PropName::Known(StaticProp::ParticipantType),
+            component: ComponentKind::Unknown,
+        })
+    })?;
+
+    let mut p = Participant::new(uid, participant_type, locations, resource_components);
+    if let Some(v) = calendar_address { p.set_calendar_address(v); }
+    if let Some(v) = created { p.set_created(v); }
+    if let Some(v) = description { p.set_description(v); }
+    if let Some(v) = dtstamp { p.set_dtstamp(v); }
+    if let Some(v) = geo { p.set_geo(v); }
+    if let Some(v) = last_modified { p.set_last_modified(v); }
+    if let Some(v) = priority { p.set_priority(v); }
+    if let Some(v) = sequence { p.set_sequence(v); }
+    if let Some(v) = status { p.set_status(v); }
+    if let Some(v) = summary { p.set_summary(v); }
+    if let Some(v) = url { p.set_url(v); }
+    if !attach.is_empty() { p.set_attach(attach); }
+    if !categories.is_empty() { p.set_categories(categories); }
+    if !comment.is_empty() { p.set_comment(comment); }
+    if !contact.is_empty() { p.set_contact(contact); }
+    if !location_prop.is_empty() { p.set_location_prop(location_prop); }
+    if !request_status.is_empty() { p.set_request_status(request_status); }
+    if !related_to.is_empty() { p.set_related_to(related_to); }
+    if !resources.is_empty() { p.set_resources(resources); }
+    if !styled_description.is_empty() { p.set_styled_description(styled_description); }
+    if !structured_data.is_empty() { p.set_structured_data(structured_data); }
+    for (k, v) in x_props {
+        p.insert_x_property(k, v);
+    }
+
+    Ok(p)
+}
+
+// ============================================================================
+// Location parser (RFC 9073 §7.2)
+// ============================================================================
+
+fn location<I, E>(input: &mut I) -> Result<LocationComponent, E>
+where
+    I: InputStream,
+    I::Token: AsChar + Clone,
+    I::Slice: AsBStr + Clone + PartialEq + Eq + SliceLen + Stream + AsRef<[u8]> + Hash,
+    <<I as Stream>::Slice as Stream>::Token: AsChar,
+    E: ParserError<I> + FromExternalError<I, CalendarParseError<I::Slice>>,
+{
+    terminated(begin(Caseless("VLOCATION")), crlf).parse_next(input)?;
+
+    let mut uid: Option<Prop<Box<Uid>, Params>> = None;
+    let mut description: Option<Prop<String, Params>> = None;
+    let mut geo: Option<Prop<Geo, Params>> = None;
+    let mut name: Option<Prop<String, Params>> = None;
+    let mut location_type: Option<Prop<String, Params>> = None;
+    let mut url: Option<Prop<Box<Uri>, Params>> = None;
+    let mut structured_data: Vec<StructuredDataProp> = Vec::new();
+    let mut x_props: HashMap<Box<CaselessStr>, Vec<Prop<Value<String>, Params>>> = HashMap::new();
+
+
+    parse_props!(input, parsed, {
+        match parsed {
+            ParsedProp::Known(KnownProp { name: prop_name, value }) => {
+                match (prop_name, value) {
+                    (StaticProp::Uid, PropValue::Uid(p)) => {
+                        once!(uid, StaticProp::Uid, ComponentKind::Unknown, p);
+                    }
+                    (StaticProp::Description, PropValue::Text(p)) => {
+                        once!(description, StaticProp::Description, ComponentKind::Unknown, p);
+                    }
+                    (StaticProp::Geo, PropValue::Geo(p)) => {
+                        once!(geo, StaticProp::Geo, ComponentKind::Unknown, p);
+                    }
+                    (StaticProp::Name, PropValue::Text(p)) => {
+                        once!(name, StaticProp::Name, ComponentKind::Unknown, p);
+                    }
+                    (StaticProp::LocationType, PropValue::TextSeq(p)) => {
+                        // LocationType is parsed as TextSeq but model stores as String
+                        // Join back into a single comma-separated string
+                        let joined = p.value.join(",");
+                        once!(location_type, StaticProp::LocationType, ComponentKind::Unknown, Prop { value: joined, params: p.params });
+                    }
+                    (StaticProp::Url, PropValue::Uri(p)) => {
+                        once!(url, StaticProp::Url, ComponentKind::Unknown, p);
+                    }
+                    (StaticProp::StructuredData, PropValue::StructuredData(p)) => {
+                        structured_data.push(p);
+                    }
+                    _ => { /* ignore - property parser guarantees correct variant */ }
+                }
+            }
+            ParsedProp::Unknown(UnknownProp { name: uname, params, value, .. }) => {
+                let name_string: String = I::try_into_string(&uname)?;
+                handle_unknown!(x_props, name_string, params, value);
+            }
+        }
+        Ok(())
+    });
+
+    terminated(end(Caseless("VLOCATION")), crlf).parse_next(input)?;
+
+    let uid = uid.ok_or_else(|| {
+        E::from_external_error(input, CalendarParseError::MissingProp {
+            prop: PropName::Known(StaticProp::Uid),
+            component: ComponentKind::Unknown,
+        })
+    })?;
+
+    let mut loc = LocationComponent::new(uid);
+    if let Some(v) = description { loc.set_description(v); }
+    if let Some(v) = geo { loc.set_geo(v); }
+    if let Some(v) = name { loc.set_name(v); }
+    if let Some(v) = location_type { loc.set_location_type(v); }
+    if let Some(v) = url { loc.set_url(v); }
+    if !structured_data.is_empty() { loc.set_structured_data(structured_data); }
+    for (k, v) in x_props {
+        loc.insert_x_property(k, v);
+    }
+
+    Ok(loc)
+}
+
+// ============================================================================
+// Resource parser (RFC 9073 §7.3)
+// ============================================================================
+
+/// Parses a [`ResourceComponent`].
 fn resource<I, E>(input: &mut I) -> Result<ResourceComponent, E>
 where
-    I: StreamIsPartial
-        + Stream
-        + Compare<Caseless<&'static str>>
-        + Compare<Caseless<I::Slice>>
-        + Compare<char>,
+    I: InputStream,
     I::Token: AsChar + Clone,
     I::Slice: AsBStr + Clone + PartialEq + Eq + SliceLen + Stream + AsRef<[u8]> + Hash,
     <<I as Stream>::Slice as Stream>::Token: AsChar,
     E: ParserError<I> + FromExternalError<I, CalendarParseError<I::Slice>>,
 {
-    // PROPERTIES (RFC 9073)
-    // -------------------
-    // 1. MANDATORY
-    //   - UID
-    // 2. OPTIONAL
-    //   - DESCRIPTION
-    //   - GEO
-    //   - NAME
-    //   - RESOURCE-TYPE
-    // 3. ANY MULTIPLICITY
-    //   - STRUCTURED-DATA
+    terminated(begin(Caseless("VRESOURCE")), crlf).parse_next(input)?;
 
-    todo!()
+    let mut uid: Option<Prop<Box<Uid>, Params>> = None;
+    let mut description: Option<Prop<String, Params>> = None;
+    let mut geo: Option<Prop<Geo, Params>> = None;
+    let mut name: Option<Prop<String, Params>> = None;
+    let mut resource_type: Option<Prop<Token<ResourceType, String>, Params>> = None;
+    let mut structured_data: Vec<StructuredDataProp> = Vec::new();
+    let mut x_props: HashMap<Box<CaselessStr>, Vec<Prop<Value<String>, Params>>> = HashMap::new();
+
+
+    parse_props!(input, parsed, {
+        match parsed {
+            ParsedProp::Known(KnownProp { name: prop_name, value }) => {
+                match (prop_name, value) {
+                    (StaticProp::Uid, PropValue::Uid(p)) => {
+                        once!(uid, StaticProp::Uid, ComponentKind::Unknown, p);
+                    }
+                    (StaticProp::Description, PropValue::Text(p)) => {
+                        once!(description, StaticProp::Description, ComponentKind::Unknown, p);
+                    }
+                    (StaticProp::Geo, PropValue::Geo(p)) => {
+                        once!(geo, StaticProp::Geo, ComponentKind::Unknown, p);
+                    }
+                    (StaticProp::Name, PropValue::Text(p)) => {
+                        once!(name, StaticProp::Name, ComponentKind::Unknown, p);
+                    }
+                    (StaticProp::ResourceType, PropValue::ResourceType(p)) => {
+                        once!(resource_type, StaticProp::ResourceType, ComponentKind::Unknown, p);
+                    }
+                    (StaticProp::StructuredData, PropValue::StructuredData(p)) => {
+                        structured_data.push(p);
+                    }
+                    _ => { /* ignore - property parser guarantees correct variant */ }
+                }
+            }
+            ParsedProp::Unknown(UnknownProp { name: uname, params, value, .. }) => {
+                let name_string: String = I::try_into_string(&uname)?;
+                handle_unknown!(x_props, name_string, params, value);
+            }
+        }
+        Ok(())
+    });
+
+    terminated(end(Caseless("VRESOURCE")), crlf).parse_next(input)?;
+
+    let uid = uid.ok_or_else(|| {
+        E::from_external_error(input, CalendarParseError::MissingProp {
+            prop: PropName::Known(StaticProp::Uid),
+            component: ComponentKind::Unknown,
+        })
+    })?;
+
+    let mut res = ResourceComponent::new(uid);
+    if let Some(v) = description { res.set_description(v); }
+    if let Some(v) = geo { res.set_geo(v); }
+    if let Some(v) = name { res.set_name(v); }
+    if let Some(v) = resource_type { res.set_resource_type(v); }
+    if !structured_data.is_empty() { res.set_structured_data(structured_data); }
+    for (k, v) in x_props {
+        res.insert_x_property(k, v);
+    }
+
+    Ok(res)
 }
 
-/// A version of [`other`] that handles the BEGIN and END lines.
+// ============================================================================
+// OtherComponent parser
+// ============================================================================
+
+/// Parses an arbitrary component with BEGIN and END lines.
 fn other_with_name<I, E>(input: &mut I) -> Result<OtherComponent, E>
 where
-    I: StreamIsPartial
-        + Stream
-        + Compare<Caseless<&'static str>>
-        + Compare<Caseless<I::Slice>>
-        + Compare<char>,
+    I: InputStream,
     I::Token: AsChar + Clone,
     I::Slice: AsBStr + Clone + PartialEq + Eq + SliceLen + Stream + AsRef<[u8]> + Hash,
     <<I as Stream>::Slice as Stream>::Token: AsChar,
     E: ParserError<I> + FromExternalError<I, CalendarParseError<I::Slice>>,
 {
-    // let name = peek(begin(alt((
-    //     x_name.map(UnknownName::x),
-    //     iana_token.map(UnknownName::iana),
-    // ))))
-    // .parse_next(input)?;
-    //
-    // other(name).parse_next(input)
+    fn is_name_char<T: AsChar>(c: T) -> bool {
+        let c = c.as_char();
+        c.is_ascii_alphanumeric() || c == '-'
+    }
 
-    todo!()
+    // Parse BEGIN:<name>
+    let name_slice = terminated(
+        begin(winnow::token::take_while(1.., is_name_char)),
+        crlf,
+    )
+    .parse_next(input)?;
+
+    let name_string = I::try_into_string(&name_slice)
+        .map_err(|e| E::from_external_error(input, e))?;
+
+    // Skip all properties (just consume them)
+    loop {
+        let checkpoint = input.checkpoint();
+        if alt((begin(empty::<I, E>), end(empty::<I, E>))).parse_next(input).is_ok() {
+            input.reset(&checkpoint);
+            break;
+        }
+        input.reset(&checkpoint);
+
+        // Consume the property line (we don't need to interpret it)
+        let _: ParsedProp<I::Slice> = terminated(property, crlf).parse_next(input)?;
+    }
+
+    // Parse nested subcomponents recursively
+    let subcomponents: Vec<OtherComponent> = repeat(0.., other_with_name).parse_next(input)?;
+
+    // Parse END:<name>
+    let end_name_slice = terminated(
+        end(winnow::token::take_while(1.., is_name_char)),
+        crlf,
+    )
+    .parse_next(input)?;
+
+    let end_name_string = I::try_into_string(&end_name_slice)
+        .map_err(|e| E::from_external_error(input, e))?;
+
+    // Verify BEGIN and END names match (case-insensitive)
+    if !name_string.eq_ignore_ascii_case(&end_name_string) {
+        return Err(E::from_external_error(
+            input,
+            CalendarParseError::MissingProp {
+                prop: PropName::Known(StaticProp::Uid),
+                component: ComponentKind::Unknown,
+            },
+        ));
+    }
+
+    Ok(OtherComponent {
+        name: name_string.into_boxed_str(),
+        subcomponents,
+    })
 }
+
+// ============================================================================
+// Helpers
+// ============================================================================
 
 /// Parses the `BEGIN:<name>` sequence at the start of a component.
 pub fn begin<I, O, E>(name: impl Parser<I, O, E>) -> impl Parser<I, O, E>
@@ -1068,797 +1810,439 @@ where
     ('\r', '\n').take().parse_next(input)
 }
 
-// #[cfg(test)]
-// mod tests {
-//     use crate::{
-//         date,
-//         model::{
-//             primitive::{
-//                 AudioAction, CalAddress, ClassValue, DateTime, DisplayAction, Duration,
-//                 DurationKind, DurationTime, EmailAction, Local, Period, Sign, TzId, Uid, Uri, Utc,
-//             },
-//             property::{EventTerminationRef, TriggerProp, TriggerPropRef},
-//         },
-//         parser::{config::DefaultConfig, escaped::AsEscaped},
-//         time, utc_offset,
-//     };
-//
-//     use super::*;
-//
-//     macro_rules! concat_crlf {
-//         ($($l:literal),* $(,)?) => {
-//             concat! (
-//                 $(
-//                     $l, "\r\n",
-//                 )*
-//             )
-//         };
-//     }
-//
-//     #[test]
-//     fn rfc_5545_example_event_1() {
-//         let input = concat_crlf!(
-//             "BEGIN:VEVENT",
-//             "UID:19970901T130000Z-123401@example.com",
-//             "DTSTAMP:19970901T130000Z",
-//             "DTSTART:19970903T163000Z",
-//             "DTEND:19970903T190000Z",
-//             "SUMMARY:Annual Employee Review",
-//             "CLASS:PRIVATE",
-//             "CATEGORIES:BUSINESS,HUMAN RESOURCES",
-//             "END:VEVENT",
-//         );
-//
-//         let (tail, event) = event::<_, ()>.parse_peek(input).unwrap();
-//         assert!(tail.is_empty());
-//         assert!(event.alarms().is_empty());
-//
-//         assert_eq!(
-//             event.uid(),
-//             &Prop::from_value(Uid("19970901T130000Z-123401@example.com"))
-//         );
-//
-//         assert_eq!(
-//             event.timestamp(),
-//             &Prop::from_value(DateTime {
-//                 date: date!(1997;9;1),
-//                 time: time!(13;00;00, Utc)
-//             }),
-//         );
-//
-//         assert_eq!(
-//             event.start(),
-//             Some(&Prop::from_value(
-//                 DateTime {
-//                     date: date!(1997;9;3),
-//                     time: time!(16;30;00, Utc)
-//                 }
-//                 .into()
-//             )),
-//         );
-//
-//         assert_eq!(
-//             event.termination(),
-//             Some(EventTerminationRef::End(&Prop::from_value(
-//                 DateTime {
-//                     date: date!(1997;9;3),
-//                     time: time!(19;00;00, Utc),
-//                 }
-//                 .into()
-//             )))
-//         );
-//
-//         assert_eq!(
-//             event.summary(),
-//             Some(&Prop::from_value(Text("Annual Employee Review")))
-//         );
-//
-//         assert_eq!(event.class(), Some(&Prop::from_value(ClassValue::Private)));
-//
-//         assert_eq!(
-//             event.categories(),
-//             Some(
-//                 [Prop::from_value(
-//                     [Text("BUSINESS"), Text("HUMAN RESOURCES")].into()
-//                 )]
-//                 .as_slice()
-//             )
-//         );
-//     }
-//
-//     #[test]
-//     fn rfc_5545_example_todo_1() {
-//         let input = concat_crlf!(
-//             "BEGIN:VTODO",
-//             "UID:20070313T123432Z-456553@example.com",
-//             "DTSTAMP:20070313T123432Z",
-//             "DUE;VALUE=DATE:20070501",
-//             "SUMMARY:Submit Quebec Income Tax Return for 2006",
-//             "CLASS:CONFIDENTIAL",
-//             "CATEGORIES:FAMILY,FINANCE",
-//             "STATUS:NEEDS-ACTION",
-//             "END:VTODO",
-//         );
-//
-//         let (tail, todo) = todo::<_, ()>.parse_peek(input).unwrap();
-//         assert!(tail.is_empty());
-//         assert!(todo.alarms().is_empty());
-//
-//         assert_eq!(
-//             todo.uid(),
-//             &Prop::from_value(Uid("20070313T123432Z-456553@example.com"))
-//         );
-//
-//         assert_eq!(
-//             todo.timestamp(),
-//             &Prop::from_value(DateTime {
-//                 date: date!(2007;3;13),
-//                 time: time!(12;34;32, Utc)
-//             })
-//         );
-//
-//         assert_eq!(
-//             todo.summary(),
-//             Some(&Prop::from_value(Text(
-//                 "Submit Quebec Income Tax Return for 2006"
-//             )))
-//         );
-//
-//         assert_eq!(
-//             todo.class(),
-//             Some(&Prop::from_value(ClassValue::Confidential))
-//         );
-//
-//         assert_eq!(
-//             todo.categories(),
-//             Some([Prop::from_value([Text("FAMILY"), Text("FINANCE")].into())].as_slice())
-//         );
-//
-//         assert_eq!(
-//             todo.status(),
-//             Some(&Prop::from_value(TodoStatus::NeedsAction))
-//         );
-//     }
-//
-//     #[test]
-//     fn rfc_5545_example_journal() {
-//         let input = concat_crlf!(
-//             "BEGIN:VJOURNAL",
-//             "UID:19970901T130000Z-123405@example.com",
-//             "DTSTAMP:19970901T130000Z",
-//             "DTSTART;VALUE=DATE:19970317",
-//             "SUMMARY:Staff meeting minutes",
-//             "DESCRIPTION:1. Staff meeting: Participants include Joe\\,",
-//             "  Lisa\\, and Bob. Aurora project plans were reviewed.",
-//             "  There is currently no budget reserves for this project.",
-//             "  Lisa will escalate to management. Next meeting on Tuesday.\\n",
-//             " 2. Telephone Conference: ABC Corp. sales representative",
-//             "  called to discuss new printer. Promised to get us a demo by",
-//             "  Friday.\\n3. Henry Miller (Handsoff Insurance): Car was",
-//             "  totaled by tree. Is looking into a loaner car. 555-2323",
-//             "  (tel).",
-//             "END:VJOURNAL",
-//         );
-//
-//         let (tail, journal) = journal::<_, ()>.parse_peek(input.as_escaped()).unwrap();
-//         assert!(tail.is_empty());
-//
-//         assert_eq!(
-//             journal.uid(),
-//             &Prop::from_value(Uid("19970901T130000Z-123405@example.com".as_escaped()))
-//         );
-//
-//         assert_eq!(
-//             journal.timestamp(),
-//             &Prop::from_value(DateTime {
-//                 date: date!(1997;9;1),
-//                 time: time!(13;00;00, Utc)
-//             })
-//         );
-//
-//         assert_eq!(
-//             journal.start(),
-//             Some(&Prop::from_value(date!(1997;3;17).into()))
-//         );
-//
-//         assert!(journal.summary().is_some());
-//         assert!(journal.descriptions().is_some());
-//     }
-//
-//     #[test]
-//     fn rfc_5545_example_free_busy_1() {
-//         let input = concat_crlf!(
-//             "BEGIN:VFREEBUSY",
-//             "UID:19970901T082949Z-FA43EF@example.com",
-//             "ORGANIZER:mailto:jane_doe@example.com",
-//             "ATTENDEE:mailto:john_public@example.com",
-//             "DTSTART:19971015T050000Z",
-//             "DTEND:19971016T050000Z",
-//             "DTSTAMP:19970901T083000Z",
-//             "END:VFREEBUSY",
-//         );
-//
-//         let (tail, fb) = free_busy::<_, ()>.parse_peek(input).unwrap();
-//         assert!(tail.is_empty());
-//
-//         assert_eq!(
-//             fb.uid(),
-//             &Prop::from_value(Uid("19970901T082949Z-FA43EF@example.com"))
-//         );
-//
-//         assert_eq!(
-//             fb.organizer(),
-//             Some(&Prop::from_value(CalAddress("mailto:jane_doe@example.com")))
-//         );
-//
-//         assert_eq!(
-//             fb.attendees(),
-//             Some(
-//                 [Prop::from_value(CalAddress(
-//                     "mailto:john_public@example.com"
-//                 ))]
-//                 .as_slice()
-//             )
-//         );
-//
-//         assert_eq!(
-//             fb.start(),
-//             Some(&Prop::from_value(
-//                 DateTime {
-//                     date: date!(1997;10;15),
-//                     time: time!(5;00;00, Utc)
-//                 }
-//                 .into()
-//             ))
-//         );
-//
-//         assert_eq!(
-//             fb.end(),
-//             Some(&Prop::from_value(
-//                 DateTime {
-//                     date: date!(1997;10;16),
-//                     time: time!(5;00;00, Utc)
-//                 }
-//                 .into()
-//             ))
-//         );
-//
-//         assert_eq!(
-//             fb.timestamp(),
-//             &Prop::from_value(DateTime {
-//                 date: date!(1997;9;1),
-//                 time: time!(8;30;00, Utc)
-//             })
-//         );
-//
-//         assert!(fb.contact().is_none());
-//         assert!(fb.url().is_none());
-//         assert!(fb.comments().is_none());
-//         assert!(fb.request_statuses().is_none());
-//     }
-//
-//     #[test]
-//     fn rfc_5545_example_free_busy_2() {
-//         let input = concat_crlf!(
-//             "BEGIN:VFREEBUSY",
-//             "UID:19970901T095957Z-76A912@example.com",
-//             "ORGANIZER:mailto:jane_doe@example.com",
-//             "ATTENDEE:mailto:john_public@example.com",
-//             "DTSTAMP:19970901T100000Z",
-//             "FREEBUSY:19971015T050000Z/PT8H30M,",
-//             " 19971015T160000Z/PT5H30M,19971015T223000Z/PT6H30M",
-//             "URL:http://example.com/pub/busy/jpublic-01.ifb",
-//             "COMMENT:This iCalendar file contains busy time information for",
-//             " the next three months.",
-//             "END:VFREEBUSY",
-//         );
-//
-//         let (tail, fb) = free_busy::<_, ()>.parse_peek(input.as_escaped()).unwrap();
-//         assert!(tail.is_empty());
-//
-//         assert_eq!(
-//             fb.uid(),
-//             &Prop::from_value(Uid("19970901T095957Z-76A912@example.com".as_escaped()))
-//         );
-//
-//         assert_eq!(
-//             fb.organizer(),
-//             Some(&Prop::from_value(CalAddress(
-//                 "mailto:jane_doe@example.com".as_escaped()
-//             )))
-//         );
-//
-//         assert_eq!(
-//             fb.attendees(),
-//             Some(
-//                 [Prop::from_value(CalAddress(
-//                     "mailto:john_public@example.com".as_escaped()
-//                 ))]
-//                 .as_slice()
-//             )
-//         );
-//
-//         assert_eq!(
-//             fb.timestamp(),
-//             &Prop::from_value(DateTime {
-//                 date: date!(1997;9;1),
-//                 time: time!(10;00;00, Utc)
-//             })
-//         );
-//
-//         assert_eq!(
-//             fb.free_busy_periods(),
-//             Some(
-//                 [Prop::from_value(vec![
-//                     Period::Start {
-//                         start: DateTime {
-//                             date: date!(1997;10;15),
-//                             time: time!(5;00;00, Utc)
-//                         },
-//                         duration: Duration {
-//                             sign: None,
-//                             kind: DurationKind::Time {
-//                                 time: DurationTime::HM {
-//                                     hours: 8,
-//                                     minutes: 30
-//                                 }
-//                             }
-//                         }
-//                     },
-//                     Period::Start {
-//                         start: DateTime {
-//                             date: date!(1997;10;15),
-//                             time: time!(16;00;00, Utc)
-//                         },
-//                         duration: Duration {
-//                             sign: None,
-//                             kind: DurationKind::Time {
-//                                 time: DurationTime::HM {
-//                                     hours: 5,
-//                                     minutes: 30
-//                                 }
-//                             }
-//                         }
-//                     },
-//                     Period::Start {
-//                         start: DateTime {
-//                             date: date!(1997;10;15),
-//                             time: time!(22;30;00, Utc)
-//                         },
-//                         duration: Duration {
-//                             sign: None,
-//                             kind: DurationKind::Time {
-//                                 time: DurationTime::HM {
-//                                     hours: 6,
-//                                     minutes: 30
-//                                 }
-//                             }
-//                         }
-//                     },
-//                 ])]
-//                 .as_slice()
-//             )
-//         );
-//
-//         assert_eq!(
-//             fb.url(),
-//             Some(&Prop::from_value(Uri(
-//                 "http://example.com/pub/busy/jpublic-01.ifb".as_escaped()
-//             )))
-//         );
-//
-//         assert_eq!(
-//             fb.comments(),
-//             Some([Prop::from_value(Text("This iCalendar file contains busy time information for\r\n the next three months.".as_escaped()))].as_slice())
-//         );
-//
-//         assert!(fb.start().is_none());
-//         assert!(fb.end().is_none());
-//         assert!(fb.contact().is_none());
-//         assert!(fb.request_statuses().is_none());
-//     }
-//
-//     #[test]
-//     fn timezone_parser() {
-//         // this input is an abbreviated section of the example given in RFC 5545
-//         let input = concat_crlf!(
-//             "BEGIN:VTIMEZONE",
-//             "TZID:America/New_York",
-//             "LAST-MODIFIED:20050809T020000Z",
-//             "BEGIN:DAYLIGHT",
-//             "DTSTART:19670430T020000",
-//             "RRULE:FREQ=YEARLY;BYMONTH=4;BYDAY=-1SU;UNTIL=19730429T070000Z",
-//             "TZOFFSETFROM:-0500",
-//             "TZOFFSETTO:-0400",
-//             "TZNAME:EDT",
-//             "END:DAYLIGHT",
-//             "BEGIN:STANDARD",
-//             "DTSTART:19671029T020000",
-//             "RRULE:FREQ=YEARLY;BYMONTH=10;BYDAY=-1SU;UNTIL=20061029T060000Z",
-//             "TZOFFSETFROM:-0400",
-//             "TZOFFSETTO:-0500",
-//             "TZNAME:EST",
-//             "END:STANDARD",
-//             "END:VTIMEZONE",
-//         );
-//
-//         let (tail, tz) = timezone::<_, ()>.parse_peek(input).unwrap();
-//         assert!(tail.is_empty());
-//
-//         dbg![&tz];
-//
-//         // properties
-//
-//         let tz_id = tz.id();
-//         let last_modified = tz.last_modified().unwrap();
-//         let tz_url = tz.url();
-//
-//         assert!(tz_url.is_none());
-//
-//         assert_eq!(tz_id.value, TzId("America/New_York"));
-//
-//         assert_eq!(
-//             last_modified.value,
-//             DateTime {
-//                 date: date!(2005;8;9),
-//                 time: time!(2;00;00, Utc)
-//             }
-//         );
-//
-//         // subcomponents
-//         let rules = tz.rules();
-//
-//         assert_eq!(rules.len(), 2);
-//
-//         let daylight = &rules[0];
-//         assert_eq!(daylight.kind(), TzRuleKind::Daylight);
-//         assert_eq!(
-//             daylight.start(),
-//             &Prop::from_value(
-//                 DateTime {
-//                     date: date!(1967;4;30),
-//                     time: time!(2;00;00, Local)
-//                 }
-//                 .into()
-//             ),
-//         );
-//
-//         assert!(daylight.rrule().is_some());
-//
-//         assert_eq!(daylight.offset_to(), &Prop::from_value(utc_offset!(-4;00)));
-//         assert_eq!(
-//             daylight.offset_from(),
-//             &Prop::from_value(utc_offset!(-5;00))
-//         );
-//
-//         assert_eq!(
-//             daylight.names(),
-//             Some([Prop::from_value(Text("EDT"))].as_slice())
-//         );
-//
-//         let standard = &rules[1];
-//         assert_eq!(standard.kind(), TzRuleKind::Standard);
-//
-//         assert_eq!(
-//             standard.start(),
-//             &Prop::from_value(
-//                 DateTime {
-//                     date: date!(1967;10;29),
-//                     time: time!(2;00;00, Local)
-//                 }
-//                 .into()
-//             ),
-//         );
-//
-//         assert!(standard.rrule().is_some());
-//
-//         assert_eq!(standard.offset_to(), &Prop::from_value(utc_offset!(-5;00)));
-//         assert_eq!(
-//             standard.offset_from(),
-//             &Prop::from_value(utc_offset!(-4;00))
-//         );
-//
-//         assert_eq!(
-//             standard.names(),
-//             Some([Prop::from_value(Text("EST"))].as_slice())
-//         );
-//     }
-//
-//     #[test]
-//     fn rfc_5545_example_audio_alarm() {
-//         let input = concat_crlf!(
-//             "BEGIN:VALARM",
-//             "TRIGGER;VALUE=DATE-TIME:19970317T133000Z",
-//             "REPEAT:4",
-//             "DURATION:PT15M",
-//             "ACTION:AUDIO",
-//             "ATTACH;FMTTYPE=audio/basic:ftp://example.com/pub/",
-//             " sounds/bell-01.aud",
-//             "END:VALARM",
-//         );
-//
-//         let (tail, alarm) = alarm::<_, ()>.parse_peek(input.as_escaped()).unwrap();
-//         assert!(tail.is_empty());
-//
-//         let Alarm::Audio(alarm) = alarm else { panic!() };
-//         assert_eq!(alarm.action(), &Prop::from_value(AudioAction));
-//
-//         assert_eq!(
-//             alarm.trigger(),
-//             TriggerPropRef::Absolute(&Prop::from_value(DateTime {
-//                 date: date!(1997;3;17),
-//                 time: time!(13;30;00, Utc)
-//             }))
-//         );
-//
-//         // assert_eq!(
-//         //     alarm.attachment(),
-//         //     Some(&Prop {
-//         //         derived: false,
-//         //         value: AttachValue::Uri(Uri(
-//         //             "ftp://example.com/pub/\r\n sounds/bell-01.aud".as_escaped()
-//         //         )),
-//         //         params: AttachParams {
-//         //             format_type: Some(FormatType {
-//         //                 source: "audio/basic".as_escaped(),
-//         //                 separator_index: 5
-//         //             }),
-//         //         },
-//         //         unknown_params: Default::default(),
-//         //     })
-//         // );
-//
-//         let (duration, repeat) = alarm.duration_and_repeat().unwrap();
-//         assert_eq!(repeat, &Prop::from_value(4));
-//         assert_eq!(
-//             duration,
-//             &Prop::from_value(Duration {
-//                 sign: None,
-//                 kind: DurationKind::Time {
-//                     time: DurationTime::M { minutes: 15 },
-//                 },
-//             })
-//         );
-//     }
-//
-//     #[test]
-//     fn rfc_5545_example_display_alarm() {
-//         let input = concat_crlf!(
-//             "BEGIN:VALARM",
-//             "TRIGGER:-PT30M",
-//             "REPEAT:2",
-//             "DURATION:PT15M",
-//             "PRIORITY:3",
-//             "ACTION:DISPLAY",
-//             "DESCRIPTION:Breakfast meeting with executive\\n",
-//             " team at 8:30 AM EST.",
-//             "END:VALARM",
-//         );
-//
-//         let (tail, alarm) = alarm::<_, ()>.parse_peek(input.as_escaped()).unwrap();
-//         assert!(tail.is_empty());
-//
-//         let Alarm::Display(alarm) = alarm else {
-//             panic!()
-//         };
-//
-//         assert_eq!(alarm.action(), &Prop::from_value(DisplayAction));
-//
-//         assert_eq!(
-//             alarm.trigger(),
-//             TriggerPropRef::Relative(&Prop::from_value(Duration {
-//                 sign: Some(Sign::Negative),
-//                 kind: DurationKind::Time {
-//                     time: DurationTime::M { minutes: 30 },
-//                 },
-//             }))
-//         );
-//
-//         assert_eq!(
-//             alarm.description(),
-//             &Prop::from_value(Text(
-//                 "Breakfast meeting with executive\\n\r\n team at 8:30 AM EST.".as_escaped()
-//             ))
-//         );
-//
-//         let (duration, repeat) = alarm.duration_and_repeat().unwrap();
-//         assert_eq!(repeat, &Prop::from_value(2));
-//         assert_eq!(
-//             duration,
-//             &Prop::from_value(Duration {
-//                 sign: None,
-//                 kind: DurationKind::Time {
-//                     time: DurationTime::M { minutes: 15 },
-//                 },
-//             })
-//         );
-//     }
-//
-//     #[test]
-//     fn rfc_5545_example_email_alarm() {
-//         let input = concat_crlf!(
-//             "BEGIN:VALARM",
-//             "TRIGGER;RELATED=END:-P2D",
-//             "ACTION:EMAIL",
-//             "ATTENDEE:mailto:john_doe@example.com",
-//             "SUMMARY:*** REMINDER: SEND AGENDA FOR WEEKLY STAFF MEETING ***",
-//             "DESCRIPTION:A draft agenda needs to be sent out to the attendees",
-//             " to the weekly managers meeting (MGR-LIST). Attached is a",
-//             " pointer the document template for the agenda file.",
-//             "ATTACH;FMTTYPE=application/msword:http://example.com/",
-//             " templates/agenda.doc",
-//             "END:VALARM",
-//         );
-//
-//         let (tail, alarm) = alarm::<_, ()>.parse_peek(input.as_escaped()).unwrap();
-//         assert!(tail.is_empty());
-//
-//         let Alarm::Email(alarm) = alarm else { panic!() };
-//
-//         assert_eq!(alarm.action(), &Prop::from_value(EmailAction));
-//
-//         // assert_eq!(
-//         //     alarm.trigger(),
-//         //     TriggerPropRef::Relative(&Prop {
-//         //         derived: false,
-//         //         value: Duration {
-//         //             sign: Some(Sign::Negative),
-//         //             kind: DurationKind::Date {
-//         //                 days: 2,
-//         //                 time: None,
-//         //             },
-//         //         },
-//         //         params: TriggerParams {
-//         //             trigger_relation: Some(TriggerRelation::End)
-//         //         },
-//         //         unknown_params: Default::default(),
-//         //     })
-//         // );
-//
-//         assert_eq!(
-//             alarm.attendees(),
-//             Some(
-//                 [Prop::from_value(CalAddress(
-//                     "mailto:john_doe@example.com".as_escaped()
-//                 ))]
-//                 .as_slice()
-//             ),
-//         );
-//
-//         assert_eq!(
-//             alarm.summary(),
-//             &Prop::from_value(Text(
-//                 "*** REMINDER: SEND AGENDA FOR WEEKLY STAFF MEETING ***".as_escaped()
-//             ))
-//         );
-//
-//         assert_eq!(
-//             alarm.description(),
-//             &Prop::from_value(Text("A draft agenda needs to be sent out to the attendees\r\n to the weekly managers meeting (MGR-LIST). Attached is a\r\n pointer the document template for the agenda file.".as_escaped())),
-//         );
-//
-//         // assert_eq!(
-//         //     alarm.attachments(),
-//         //     Some(
-//         //         [Prop {
-//         //             derived: false,
-//         //             value: AttachValue::Uri(Uri(
-//         //                 "http://example.com/\r\n templates/agenda.doc".as_escaped()
-//         //             )),
-//         //             params: AttachParams {
-//         //                 format_type: Some(FormatType {
-//         //                     source: "application/msword".as_escaped(),
-//         //                     separator_index: 11
-//         //                 })
-//         //             },
-//         //             unknown_params: Default::default(),
-//         //         }]
-//         //         .as_slice()
-//         //     ),
-//         // );
-//
-//         assert!(alarm.duration_and_repeat().is_none());
-//     }
-//
-//     #[test]
-//     fn raw_component_parser() {
-//         let mut input = concat_crlf!(
-//             "BEGIN:VALARM",
-//             "TRIGGER;RELATED=END:-P2D",
-//             "ACTION:EMAIL",
-//             "ATTENDEE:mailto:john_doe@example.com",
-//             "SUMMARY:*** REMINDER: SEND AGENDA FOR WEEKLY STAFF MEETING ***",
-//             "DESCRIPTION:A draft agenda needs to be sent out to the attendees",
-//             " to the weekly managers meeting (MGR-LIST). Attached is a",
-//             " pointer the document template for the agenda file.",
-//             "ATTACH;FMTTYPE=application/msword:http://example.com/",
-//             " templates/agenda.doc",
-//             "END:VALARM",
-//         )
-//         .as_escaped();
-//
-//         let mut config = DefaultConfig;
-//         let comp = raw_component::<_, _, _, ()>(&mut input, &mut config, |_, _| Ok(())).unwrap();
-//         dbg![&comp];
-//
-//         assert_eq!(comp.name, ComponentName::Alarm);
-//         assert_eq!(comp.props.len(), 6);
-//         assert!(
-//             comp.props
-//                 .get_known(StaticProp::Trigger)
-//                 .is_some_and(|value| value.is::<TriggerProp<_>>())
-//         );
-//         assert_eq!(
-//             comp.props.get_known(StaticProp::Action),
-//             Some(&Prop::from_value(AlarmAction::Email).into())
-//         );
-//         assert_eq!(
-//             comp.props.get_known(StaticProp::Attendee),
-//             Some(&Prop::from_value(CalAddress("mailto:john_doe@example.com".as_escaped())).into())
-//         );
-//     }
-//
-//     #[test]
-//     fn comp_kind_parser() {
-//         assert_eq!(
-//             component_name::<_, ()>.parse_peek("VEVENT"),
-//             Ok(("", ComponentName::Event))
-//         );
-//
-//         assert_eq!(
-//             component_name::<_, ()>.parse_peek("vtodo"),
-//             Ok(("", ComponentName::Todo))
-//         );
-//
-//         assert_eq!(
-//             component_name::<_, ()>.parse_peek("VJournal"),
-//             Ok(("", ComponentName::Journal))
-//         );
-//
-//         assert_eq!(
-//             component_name::<_, ()>.parse_peek("vFreeBusy"),
-//             Ok(("", ComponentName::FreeBusy))
-//         );
-//
-//         assert_eq!(
-//             component_name::<_, ()>.parse_peek("vtimezone"),
-//             Ok(("", ComponentName::TimeZone))
-//         );
-//
-//         assert_eq!(
-//             component_name::<_, ()>.parse_peek("vtimezane"),
-//             Ok(("", ComponentName::iana("vtimezane")))
-//         );
-//
-//         assert_eq!(
-//             component_name::<_, ()>.parse_peek("x-something"),
-//             Ok(("", ComponentName::x("x-something")))
-//         );
-//     }
-//
-//     #[test]
-//     fn begin_parser() {
-//         assert_eq!(
-//             begin::<_, _, ()>(Caseless("vtodo").take()).parse_peek("BEGIN:VTODO"),
-//             Ok(("", "VTODO"))
-//         );
-//
-//         assert_eq!(
-//             begin::<_, _, ()>(Caseless("VEVENT").take()).parse_peek("begin:vevent"),
-//             Ok(("", "vevent"))
-//         );
-//     }
-//
-//     #[test]
-//     fn end_parser() {
-//         assert_eq!(
-//             end::<_, _, ()>(Caseless("valarm").take()).parse_peek("END:VALARM"),
-//             Ok(("", "VALARM"))
-//         );
-//
-//         assert_eq!(
-//             end::<_, _, ()>(Caseless("VFREEBUSY").take()).parse_peek("end:vfreebusy"),
-//             Ok(("", "vfreebusy"))
-//         );
-//     }
-// }
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{date, time, utc_offset};
+    use crate::model::primitive::{
+        ClassValue, DateTimeOrDate, Sign, TimeFormat, Token, TriggerValue, Version,
+    };
+    use crate::parser::escaped::AsEscaped;
+    use calendar_types::duration::Duration;
+
+    macro_rules! concat_crlf {
+        ($($l:literal),* $(,)?) => {
+            concat!(
+                $($l, "\r\n",)*
+            )
+        };
+    }
+
+    // ======================================================================
+    // 1. begin parser
+    // ======================================================================
+
+    #[test]
+    fn begin_parser() {
+        let input = "BEGIN:VTODO\r\n";
+        let result: Result<(&str, &str), ()> =
+            begin(Caseless("VTODO").take()).parse_peek(input);
+        assert!(result.is_ok());
+        let (remaining, matched) = result.unwrap();
+        assert_eq!(matched, "VTODO");
+        assert_eq!(remaining, "\r\n");
+    }
+
+    // ======================================================================
+    // 2. end parser
+    // ======================================================================
+
+    #[test]
+    fn end_parser() {
+        let input = "END:VALARM\r\n";
+        let result: Result<(&str, &str), ()> =
+            end(Caseless("VALARM").take()).parse_peek(input);
+        assert!(result.is_ok());
+        let (remaining, matched) = result.unwrap();
+        assert_eq!(matched, "VALARM");
+        assert_eq!(remaining, "\r\n");
+    }
+
+    // ======================================================================
+    // 3. parse_minimal_event
+    // ======================================================================
+
+    #[test]
+    fn parse_minimal_event() {
+        let input = concat_crlf!(
+            "BEGIN:VEVENT",
+            "DTSTAMP:19970901T130000Z",
+            "UID:uid1@example.com",
+            "END:VEVENT",
+        );
+
+        let result = calendar_component::<_, ()>
+            .parse_peek(input.as_escaped());
+        assert!(result.is_ok(), "parse failed: {:?}", result.err());
+        let (remaining, comp) = result.unwrap();
+        assert!(remaining.is_empty(), "remaining input: {:?}", std::str::from_utf8(remaining.0));
+
+        match comp {
+            CalendarComponent::Event(ev) => {
+                assert_eq!(
+                    ev.dtstamp().value,
+                    DateTime {
+                        date: date!(1997;9;1),
+                        time: time!(13;0;0),
+                        marker: Utc,
+                    }
+                );
+                assert_eq!(ev.uid().value.as_str(), "uid1@example.com");
+                assert!(ev.dtstart().is_none());
+                assert!(ev.summary().is_none());
+            }
+            other => panic!("expected Event, got {:?}", other),
+        }
+    }
+
+    // ======================================================================
+    // 4. parse_event_with_properties
+    // ======================================================================
+
+    #[test]
+    fn parse_event_with_properties() {
+        let input = concat_crlf!(
+            "BEGIN:VEVENT",
+            "DTSTAMP:19970901T130000Z",
+            "UID:uid2@example.com",
+            "DTSTART:19970903T163000Z",
+            "DTEND:19970903T190000Z",
+            "SUMMARY:Annual Employee Review",
+            "CLASS:PRIVATE",
+            "END:VEVENT",
+        );
+
+        let result = calendar_component::<_, ()>
+            .parse_peek(input.as_escaped());
+        assert!(result.is_ok(), "parse failed: {:?}", result.err());
+        let (_, comp) = result.unwrap();
+
+        match comp {
+            CalendarComponent::Event(ev) => {
+                // Check uid
+                assert_eq!(ev.uid().value.as_str(), "uid2@example.com");
+
+                // Check dtstart
+                let dtstart = ev.dtstart().expect("dtstart should be present");
+                assert_eq!(
+                    dtstart.value,
+                    DateTimeOrDate::DateTime(DateTime {
+                        date: date!(1997;9;3),
+                        time: time!(16;30;0),
+                        marker: TimeFormat::Utc,
+                    })
+                );
+
+                // Check dtend
+                let dtend = ev.dtend().expect("dtend should be present");
+                assert_eq!(
+                    dtend.value,
+                    DateTimeOrDate::DateTime(DateTime {
+                        date: date!(1997;9;3),
+                        time: time!(19;0;0),
+                        marker: TimeFormat::Utc,
+                    })
+                );
+
+                // Check summary
+                let summary = ev.summary().expect("summary should be present");
+                assert_eq!(summary.value, "Annual Employee Review");
+
+                // Check class
+                let class = ev.class().expect("class should be present");
+                assert_eq!(class.value, Token::Known(ClassValue::Private));
+            }
+            other => panic!("expected Event, got {:?}", other),
+        }
+    }
+
+    // ======================================================================
+    // 5. parse_minimal_todo
+    // ======================================================================
+
+    #[test]
+    fn parse_minimal_todo() {
+        let input = concat_crlf!(
+            "BEGIN:VTODO",
+            "DTSTAMP:19980130T134500Z",
+            "UID:todo1@example.com",
+            "END:VTODO",
+        );
+
+        let result = calendar_component::<_, ()>
+            .parse_peek(input.as_escaped());
+        assert!(result.is_ok(), "parse failed: {:?}", result.err());
+        let (remaining, comp) = result.unwrap();
+        assert!(remaining.is_empty());
+
+        match comp {
+            CalendarComponent::Todo(td) => {
+                assert_eq!(
+                    td.dtstamp().value,
+                    DateTime {
+                        date: date!(1998;1;30),
+                        time: time!(13;45;0),
+                        marker: Utc,
+                    }
+                );
+                assert_eq!(td.uid().value.as_str(), "todo1@example.com");
+            }
+            other => panic!("expected Todo, got {:?}", other),
+        }
+    }
+
+    // ======================================================================
+    // 6. parse_minimal_journal
+    // ======================================================================
+
+    #[test]
+    fn parse_minimal_journal() {
+        let input = concat_crlf!(
+            "BEGIN:VJOURNAL",
+            "DTSTAMP:19970901T130000Z",
+            "UID:journal1@example.com",
+            "END:VJOURNAL",
+        );
+
+        let result = calendar_component::<_, ()>
+            .parse_peek(input.as_escaped());
+        assert!(result.is_ok(), "parse failed: {:?}", result.err());
+        let (remaining, comp) = result.unwrap();
+        assert!(remaining.is_empty());
+
+        match comp {
+            CalendarComponent::Journal(jn) => {
+                assert_eq!(
+                    jn.dtstamp().value,
+                    DateTime {
+                        date: date!(1997;9;1),
+                        time: time!(13;0;0),
+                        marker: Utc,
+                    }
+                );
+                assert_eq!(jn.uid().value.as_str(), "journal1@example.com");
+            }
+            other => panic!("expected Journal, got {:?}", other),
+        }
+    }
+
+    // ======================================================================
+    // 7. parse_minimal_freebusy
+    // ======================================================================
+
+    #[test]
+    fn parse_minimal_freebusy() {
+        let input = concat_crlf!(
+            "BEGIN:VFREEBUSY",
+            "DTSTAMP:19970901T120000Z",
+            "UID:fb1@example.com",
+            "END:VFREEBUSY",
+        );
+
+        let result = calendar_component::<_, ()>
+            .parse_peek(input.as_escaped());
+        assert!(result.is_ok(), "parse failed: {:?}", result.err());
+        let (remaining, comp) = result.unwrap();
+        assert!(remaining.is_empty());
+
+        match comp {
+            CalendarComponent::FreeBusy(fb) => {
+                assert_eq!(fb.uid().value.as_str(), "fb1@example.com");
+                assert_eq!(
+                    fb.dtstamp().value,
+                    DateTime {
+                        date: date!(1997;9;1),
+                        time: time!(12;0;0),
+                        marker: Utc,
+                    }
+                );
+            }
+            other => panic!("expected FreeBusy, got {:?}", other),
+        }
+    }
+
+    // ======================================================================
+    // 8. parse_timezone
+    // ======================================================================
+
+    #[test]
+    fn parse_timezone() {
+        let input = concat_crlf!(
+            "BEGIN:VTIMEZONE",
+            "TZID:America/New_York",
+            "BEGIN:STANDARD",
+            "DTSTART:19971026T020000",
+            "TZOFFSETFROM:-0400",
+            "TZOFFSETTO:-0500",
+            "TZNAME:EST",
+            "END:STANDARD",
+            "BEGIN:DAYLIGHT",
+            "DTSTART:19980301T020000",
+            "TZOFFSETFROM:-0500",
+            "TZOFFSETTO:-0400",
+            "TZNAME:EDT",
+            "END:DAYLIGHT",
+            "END:VTIMEZONE",
+        );
+
+        let result = calendar_component::<_, ()>
+            .parse_peek(input.as_escaped());
+        assert!(result.is_ok(), "parse failed: {:?}", result.err());
+        let (remaining, comp) = result.unwrap();
+        assert!(remaining.is_empty());
+
+        match comp {
+            CalendarComponent::TimeZone(tz) => {
+                assert_eq!(tz.tz_id().value.as_str(), "America/New_York");
+                assert_eq!(tz.rules().len(), 2);
+
+                // First rule: STANDARD
+                let standard = &tz.rules()[0];
+                assert_eq!(standard.kind(), &TzRuleKind::Standard);
+                assert_eq!(
+                    standard.tz_offset_from().value,
+                    utc_offset!(-4;0)
+                );
+                assert_eq!(
+                    standard.tz_offset_to().value,
+                    utc_offset!(-5;0)
+                );
+                let tz_names = standard.tz_name().expect("tz_name should be present");
+                assert_eq!(tz_names[0].value, "EST");
+
+                // Second rule: DAYLIGHT
+                let daylight = &tz.rules()[1];
+                assert_eq!(daylight.kind(), &TzRuleKind::Daylight);
+                assert_eq!(
+                    daylight.tz_offset_from().value,
+                    utc_offset!(-5;0)
+                );
+                assert_eq!(
+                    daylight.tz_offset_to().value,
+                    utc_offset!(-4;0)
+                );
+                let tz_names = daylight.tz_name().expect("tz_name should be present");
+                assert_eq!(tz_names[0].value, "EDT");
+            }
+            other => panic!("expected TimeZone, got {:?}", other),
+        }
+    }
+
+    // ======================================================================
+    // 9. parse_display_alarm
+    // ======================================================================
+
+    #[test]
+    fn parse_display_alarm() {
+        // An alarm as a subcomponent of an event
+        let input = concat_crlf!(
+            "BEGIN:VEVENT",
+            "DTSTAMP:19970901T130000Z",
+            "UID:alarm-test@example.com",
+            "BEGIN:VALARM",
+            "ACTION:DISPLAY",
+            "DESCRIPTION:Breakfast meeting",
+            "TRIGGER:-PT15M",
+            "END:VALARM",
+            "END:VEVENT",
+        );
+
+        let result = calendar_component::<_, ()>
+            .parse_peek(input.as_escaped());
+        assert!(result.is_ok(), "parse failed: {:?}", result.err());
+        let (_, comp) = result.unwrap();
+
+        match comp {
+            CalendarComponent::Event(ev) => {
+                assert_eq!(ev.alarms().len(), 1);
+                match &ev.alarms()[0] {
+                    Alarm::Display(da) => {
+                        assert_eq!(da.description().value, "Breakfast meeting");
+                        // TRIGGER:-PT15M is a negative duration of 15 minutes
+                        match &da.trigger().value {
+                            TriggerValue::Duration(sd) => {
+                                assert_eq!(sd.sign, Sign::Neg);
+                                match sd.duration {
+                                    Duration::Exact(exact) => {
+                                        assert_eq!(exact.minutes, 15);
+                                        assert_eq!(exact.hours, 0);
+                                        assert_eq!(exact.seconds, 0);
+                                    }
+                                    other => panic!("expected Exact duration, got {:?}", other),
+                                }
+                            }
+                            other => panic!("expected Duration trigger, got {:?}", other),
+                        }
+                    }
+                    other => panic!("expected Display alarm, got {:?}", other),
+                }
+            }
+            other => panic!("expected Event, got {:?}", other),
+        }
+    }
+
+    // ======================================================================
+    // 10. parse_full_calendar
+    // ======================================================================
+
+    #[test]
+    fn parse_full_calendar() {
+        let input = concat_crlf!(
+            "BEGIN:VCALENDAR",
+            "PRODID:-//Test//Test//EN",
+            "VERSION:2.0",
+            "BEGIN:VEVENT",
+            "DTSTAMP:19970901T130000Z",
+            "UID:cal-event1@example.com",
+            "SUMMARY:Bastille Day Party",
+            "END:VEVENT",
+            "END:VCALENDAR",
+        );
+
+        let result = calendar::<_, ()>
+            .parse_peek(input.as_escaped());
+        assert!(result.is_ok(), "parse failed: {:?}", result.err());
+        let (remaining, cal) = result.unwrap();
+        assert!(remaining.is_empty());
+
+        assert_eq!(cal.prod_id().value, "-//Test//Test//EN");
+        assert_eq!(cal.version().value, Version::V2_0);
+        assert_eq!(cal.components().len(), 1);
+
+        match &cal.components()[0] {
+            CalendarComponent::Event(ev) => {
+                assert_eq!(ev.uid().value.as_str(), "cal-event1@example.com");
+                let summary = ev.summary().expect("summary should be present");
+                assert_eq!(summary.value, "Bastille Day Party");
+            }
+            other => panic!("expected Event component, got {:?}", other),
+        }
+    }
+
+    // ======================================================================
+    // 11. parse_other_component
+    // ======================================================================
+
+    #[test]
+    fn parse_other_component() {
+        let input = concat_crlf!(
+            "BEGIN:X-CUSTOM",
+            "X-FOO:bar",
+            "END:X-CUSTOM",
+        );
+
+        let result = calendar_component::<_, ()>
+            .parse_peek(input.as_escaped());
+        assert!(result.is_ok(), "parse failed: {:?}", result.err());
+        let (remaining, comp) = result.unwrap();
+        assert!(remaining.is_empty());
+
+        match comp {
+            CalendarComponent::Other(other) => {
+                assert_eq!(&*other.name, "X-CUSTOM");
+                assert!(other.subcomponents.is_empty());
+            }
+            other => panic!("expected Other component, got {:?}", other),
+        }
+    }
+}
