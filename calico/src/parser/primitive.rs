@@ -160,6 +160,25 @@ where
     text.map(TzId::from_text_buf).parse_next(input)
 }
 
+/// Parses a [`TzId`] in a parameter context (e.g. `TZID=Europe/Zurich`).
+///
+/// Unlike [`tz_id`], this uses the `param-value` grammar which stops at `:`,
+/// `;`, and `,` — characters that are significant delimiters inside a content
+/// line but are accepted by the `text` grammar used for property values.
+pub fn tz_id_param<I, E>(input: &mut I) -> Result<Box<TzId>, E>
+where
+    I: InputStream,
+    <I as Stream>::Token: AsChar + Clone,
+    E: ParserError<I> + FromExternalError<I, CalendarParseError<I::Slice>>,
+{
+    param_value
+        .map(|pv| {
+            // TzId has a trivial invariant, so this never fails
+            TzId::new(pv.as_str()).unwrap().into()
+        })
+        .parse_next(input)
+}
+
 /// Parses a [`TimeTransparency`].
 pub fn time_transparency<I, E>(input: &mut I) -> Result<TimeTransparency, E>
 where

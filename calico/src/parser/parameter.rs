@@ -34,8 +34,8 @@ use crate::{
         primitive::{
             alarm_trigger_relationship, ascii_lower, bool_caseless, comma_seq1, feature_type,
             format_type, free_busy_type, inline_encoding, language, param_value,
-            participation_role, participation_status, positive_integer, relationship_type, tz_id,
-            uri, value_type,
+            participation_role, participation_status, positive_integer, relationship_type,
+            tz_id_param, uri, value_type,
         },
     },
 };
@@ -112,7 +112,7 @@ where
             StaticParam::Role => participation_role.map(KnownParam::Role).parse_next(input),
             StaticParam::Rsvp => bool_caseless.map(KnownParam::Rsvp).parse_next(input),
             StaticParam::SentBy => quoted_uri.map(KnownParam::SentBy).parse_next(input),
-            StaticParam::TzId => tz_id.map(KnownParam::TzId).parse_next(input),
+            StaticParam::TzId => tz_id_param.map(KnownParam::TzId).parse_next(input),
             StaticParam::Value => value_type.map(KnownParam::Value).parse_next(input),
 
             // RFC 7986 PARAMETERS

@@ -181,15 +181,6 @@ where
     terminated(end(Caseless("VCALENDAR")), crlf).parse_next(input)?;
 
     // Check mandatory fields
-    let prod_id = prod_id.ok_or_else(|| {
-        E::from_external_error(
-            input,
-            CalendarParseError::MissingProp {
-                prop: PropName::Known(StaticProp::ProdId),
-                component: ComponentKind::Calendar,
-            },
-        )
-    })?;
     let version = version.ok_or_else(|| {
         E::from_external_error(
             input,
@@ -200,7 +191,8 @@ where
         )
     })?;
 
-    let mut cal = Calendar::new(prod_id, version, components);
+    let mut cal = Calendar::new(version, components);
+    if let Some(v) = prod_id { cal.set_prod_id(v); }
     if let Some(v) = cal_scale { cal.set_cal_scale(v); }
     if let Some(v) = method { cal.set_method(v); }
     if let Some(v) = uid { cal.set_uid(v); }
@@ -2205,7 +2197,7 @@ mod tests {
         let (remaining, cal) = result.unwrap();
         assert!(remaining.is_empty());
 
-        assert_eq!(cal.prod_id().value, "-//Test//Test//EN");
+        assert_eq!(cal.prod_id().unwrap().value, "-//Test//Test//EN");
         assert_eq!(cal.version().value, Version::V2_0);
         assert_eq!(cal.components().len(), 1);
 
