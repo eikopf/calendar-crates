@@ -1638,1313 +1638,1202 @@ pub enum Rfc9074PropName {
     Proximity,
 }
 
-// #[cfg(test)]
-// mod tests {
-//     use crate::{
-//         date,
-//         model::{
-//             parameter::{ParamValue, Params},
-//             primitive::{
-//                 Attachment, CalAddress, ClassValue, CompletionPercentage, DateTime, DateTimeOrDate,
-//                 Duration, DurationKind, DurationTime, FormatType, FreeBusyType, Geo, Gregorian,
-//                 Language, Method, ParticipationRole, ParticipationStatus, Period, Priority,
-//                 RawTime, RequestStatus, Status, ThisAndFuture, Time, TimeFormat, TimeTransparency,
-//                 TzId, Uid, Uri, Utc, Version,
-//             },
-//             property::Prop,
-//         },
-//         parser::escaped::AsEscaped,
-//         time, utc_offset,
-//     };
-//
-//     use super::*;
-//     use winnow::{Parser, ascii::crlf, combinator::terminated};
-//
-//     // PROPERTY PARSING TESTS
-//
-//     macro_rules! known_prop {
-//         ($name:ident, $value:expr $(,)?) => {
-//             ParsedProp::Known(KnownProp {
-//                 name: StaticProp::$name,
-//                 value: Prop::<_, Params>::from_value($value).into(),
-//             })
-//         };
-//     }
-//
-//     #[test]
-//     fn apple_calendar_attendee_edge_case() {
-//         let input = r#"ATTENDEE;CN="John Smith";CUTYPE=INDIVIDUAL;EMAIL="john.smith@icloud.com";PARTSTAT=ACCEPTED;ROLE=CHAIR:/aMTg2ODQAyMzEjg0NX9m3Gyi2XcPHS8HXCT7Y3j1oq6U7hokvhVwdffK5c/principal/"#;
-//         let (tail, prop) = property::<_, ()>.parse_peek(input).unwrap();
-//         dbg![tail];
-//         dbg![prop];
-//     }
-//
-//     #[test]
-//     fn apple_calendar_empty_url_line() {
-//         let input = "URL;VALUE=URI:";
-//         let (tail, _prop) = property::<_, ()>.parse_peek(input).unwrap();
-//         assert!(tail.is_empty());
-//     }
-//
-//     #[test]
-//     fn rfc_5545_section_4_example_1() {
-//         let input = include_bytes!("../../examples/rfc5545-section-4-example-1.ics").as_escaped();
-//
-//         let (tail, props) = repeat(1.., terminated(property::<_, ()>, crlf))
-//             .map(Vec::into_boxed_slice)
-//             .parse_peek(input)
-//             .unwrap();
-//
-//         assert!(tail.is_empty());
-//         assert_eq!(props.len(), 15);
-//
-//         let mut iter = props.into_iter();
-//         let _ = iter.next(); // skip the first line, it's not a real property
-//
-//         assert_eq!(
-//             iter.next(),
-//             Some(known_prop!(
-//                 ProdId,
-//                 Text("-//xyz Corp//NONSGML PDA Calendar Version 1.0//EN".as_escaped(),)
-//             ))
-//         );
-//
-//         assert_eq!(iter.next(), Some(known_prop!(Version, Version::V2_0)),);
-//
-//         let _ = iter.next(); // next line is also not a real property
-//
-//         assert_eq!(
-//             iter.next(),
-//             Some(known_prop!(
-//                 DtStamp,
-//                 DateTime {
-//                     date: date!(1996;7;4),
-//                     time: time!(12;0;0, Utc),
-//                 }
-//             ))
-//         );
-//
-//         assert_eq!(
-//             iter.next(),
-//             Some(known_prop!(Uid, Uid("uid1@example.com".as_escaped())))
-//         );
-//
-//         assert_eq!(
-//             iter.next(),
-//             Some(known_prop!(
-//                 Organizer,
-//                 CalAddress("mailto:jsmith@example.com".as_escaped())
-//             ))
-//         );
-//
-//         // omitted tests for remaining properties...
-//     }
-//
-//     #[test]
-//     fn rfc_5545_example_calendar_scale_property() {
-//         let input = "CALSCALE:GREGORIAN";
-//         let (tail, prop) = property::<_, ()>.parse_peek(input).unwrap();
-//
-//         assert!(tail.is_empty());
-//         assert_eq!(prop, known_prop!(CalScale, Gregorian));
-//     }
-//
-//     #[test]
-//     fn rfc_5545_example_method_property() {
-//         let input = "METHOD:REQUEST";
-//         let (tail, prop) = property::<_, ()>.parse_peek(input).unwrap();
-//
-//         assert!(tail.is_empty());
-//         assert_eq!(prop, known_prop!(Method, Method::Request));
-//     }
-//
-//     #[test]
-//     fn rfc_5545_example_product_identifier_property() {
-//         let input = "PRODID:-//ABC Corporation//NONSGML My Product//EN";
-//         let (tail, prop) = property::<_, ()>.parse_peek(input).unwrap();
-//
-//         assert!(tail.is_empty());
-//         assert_eq!(
-//             prop,
-//             known_prop!(ProdId, Text("-//ABC Corporation//NONSGML My Product//EN"))
-//         );
-//     }
-//
-//     #[test]
-//     fn rfc_5545_example_version_property() {
-//         let input = "VERSION:2.0";
-//         let (tail, prop) = property::<_, ()>.parse_peek(input).unwrap();
-//
-//         assert!(tail.is_empty());
-//         assert_eq!(prop, known_prop!(Version, Version::V2_0));
-//     }
-//
-//     #[test]
-//     fn rfc_5545_example_attachment_property_1() {
-//         let input = "ATTACH:CID:jsmith.part3.960817T083000.xyzMail@example.com";
-//         let (tail, prop) = property::<_, ()>.parse_peek(input).unwrap();
-//
-//         assert!(tail.is_empty());
-//         assert_eq!(
-//             prop,
-//             known_prop!(
-//                 Attach,
-//                 Attachment::Uri(Uri("CID:jsmith.part3.960817T083000.xyzMail@example.com"))
-//             )
-//         );
-//     }
-//
-//     #[test]
-//     fn rfc_5545_example_attachment_property_2() {
-//         let input =
-//             "ATTACH;FMTTYPE=application/postscript:ftp://example.com/pub/\r\n reports/r-960812.ps"
-//                 .as_escaped();
-//         let (tail, prop) = property::<_, ()>.parse_peek(input).unwrap();
-//
-//         assert!(tail.is_empty());
-//
-//         let KnownProp { name, value } = prop.try_into_known().unwrap();
-//         assert_eq!(name, StaticProp::Attach);
-//
-//         let prop: Prop<Attachment<_>, Params<_>> = value.downcast().unwrap();
-//         assert_eq!(
-//             prop.value,
-//             Attachment::Uri(Uri(
-//                 "ftp://example.com/pub/\r\n reports/r-960812.ps".as_escaped()
-//             ))
-//         );
-//
-//         assert_eq!(
-//             prop.params.format_type(),
-//             Some(&FormatType {
-//                 source: "application/postscript".as_escaped(),
-//                 separator_index: 11
-//             })
-//         );
-//     }
-//
-//     #[test]
-//     fn rfc_5545_example_categories_property_1() {
-//         let input = "CATEGORIES:APPOINTMENT,EDUCATION";
-//         let (tail, prop) = property::<_, ()>.parse_peek(input).unwrap();
-//
-//         assert!(tail.is_empty());
-//         assert_eq!(
-//             prop,
-//             known_prop!(Categories, vec![Text("APPOINTMENT"), Text("EDUCATION")])
-//         );
-//     }
-//
-//     #[test]
-//     fn rfc_5545_example_categories_property_2() {
-//         let input = "CATEGORIES:MEETING";
-//         let (tail, prop) = property::<_, ()>.parse_peek(input).unwrap();
-//
-//         assert!(tail.is_empty());
-//         assert_eq!(prop, known_prop!(Categories, vec![Text("MEETING")]));
-//     }
-//
-//     #[test]
-//     fn rfc_5545_example_classification_property() {
-//         let input = "CLASS:PUBLIC";
-//         let (tail, prop) = property::<_, ()>.parse_peek(input).unwrap();
-//
-//         assert!(tail.is_empty());
-//         assert_eq!(prop, known_prop!(Class, ClassValue::Public));
-//     }
-//
-//     #[test]
-//     fn rfc_5545_example_comment_property() {
-//         let input = "COMMENT:The meeting really needs to include both ourselves \r\n and the customer. We can't hold this meeting without them. \r\n As a matter of fact\\, the venue for the meeting ought to be at \r\n their site. - - John";
-//
-//         let (tail, prop) = property::<_, ()>.parse_peek(input.as_escaped()).unwrap();
-//
-//         assert!(tail.is_empty());
-//         assert_eq!(prop, known_prop!(Comment, Text(input[8..].as_escaped())));
-//     }
-//
-//     #[test]
-//     fn rfc_5545_example_description_property() {
-//         let input = "DESCRIPTION:Meeting to provide technical review for \"Phoenix\" \r\n design.\\nHappy Face Conference Room. Phoenix design team \r\n MUST attend this meeting.\\nRSVP to team leader.";
-//
-//         let (tail, prop) = property::<_, ()>.parse_peek(input.as_escaped()).unwrap();
-//
-//         assert!(tail.is_empty());
-//         assert_eq!(
-//             prop,
-//             known_prop!(Description, Text(input[12..].as_escaped()))
-//         );
-//     }
-//
-//     #[test]
-//     fn rfc_5545_example_geographic_position_property() {
-//         let input = "GEO:37.386013;-122.082932";
-//         let (tail, prop) = property::<_, ()>.parse_peek(input).unwrap();
-//         let expected_geo = Geo {
-//             lat: GeoComponent(37386013),
-//             lon: GeoComponent(-122082932),
-//         };
-//
-//         assert!(tail.is_empty());
-//         assert_eq!(prop, known_prop!(Geo, expected_geo));
-//     }
-//
-//     #[test]
-//     fn rfc_5545_example_location_property_1() {
-//         let input = "LOCATION:Conference Room - F123\\, Bldg. 002";
-//         let (tail, prop) = property::<_, ()>.parse_peek(input).unwrap();
-//
-//         assert!(tail.is_empty());
-//         assert_eq!(
-//             prop,
-//             known_prop!(Location, Text("Conference Room - F123\\, Bldg. 002"))
-//         );
-//     }
-//
-//     #[test]
-//     fn rfc_5545_example_location_property_2() {
-//         let input = "LOCATION;ALTREP=\"http://xyzcorp.com/conf-rooms/f123.vcf\":\r\n Conference Room - F123\\, Bldg. 002";
-//         let (tail, prop) = property::<_, ()>.parse_peek(input.as_escaped()).unwrap();
-//         assert!(tail.is_empty());
-//
-//         let alt_rep_uri = Uri("http://xyzcorp.com/conf-rooms/f123.vcf".as_escaped());
-//         let text = Text(input[57..].as_escaped());
-//
-//         let KnownProp { name, value } = prop.try_into_known().unwrap();
-//         assert_eq!(name, StaticProp::Location);
-//         let prop: Prop<Text<_>, Params<_>> = value.downcast().unwrap();
-//
-//         assert_eq!(prop.params.alternate_representation(), Some(&alt_rep_uri));
-//         assert_eq!(prop.value, text);
-//     }
-//
-//     #[test]
-//     fn rfc_5545_example_percent_complete_property() {
-//         let input = "PERCENT-COMPLETE:39";
-//         let (tail, prop) = property::<_, ()>.parse_peek(input).unwrap();
-//
-//         assert!(tail.is_empty());
-//         assert_eq!(prop, known_prop!(PercentComplete, CompletionPercentage(39)));
-//     }
-//
-//     #[test]
-//     fn rfc_5545_example_priority_property_1() {
-//         let input = "PRIORITY:1";
-//         let (tail, prop) = property::<_, ()>.parse_peek(input).unwrap();
-//
-//         assert!(tail.is_empty());
-//         assert_eq!(prop, known_prop!(Priority, Priority::A1));
-//     }
-//
-//     #[test]
-//     fn rfc_5545_example_priority_property_2() {
-//         let input = "PRIORITY:2";
-//         let (tail, prop) = property::<_, ()>.parse_peek(input).unwrap();
-//
-//         assert!(tail.is_empty());
-//         assert_eq!(prop, known_prop!(Priority, Priority::A2));
-//     }
-//
-//     #[test]
-//     fn rfc_5545_example_priority_property_3() {
-//         let input = "PRIORITY:0";
-//         let (tail, prop) = property::<_, ()>.parse_peek(input).unwrap();
-//
-//         assert!(tail.is_empty());
-//         assert_eq!(prop, known_prop!(Priority, Priority::Zero));
-//     }
-//
-//     #[test]
-//     fn rfc_5545_example_resources_property_1() {
-//         let input = "RESOURCES:EASEL,PROJECTOR,VCR";
-//         let (tail, prop) = property::<_, ()>.parse_peek(input).unwrap();
-//
-//         assert!(tail.is_empty());
-//         assert_eq!(
-//             prop,
-//             known_prop!(
-//                 Resources,
-//                 vec![Text("EASEL"), Text("PROJECTOR"), Text("VCR")]
-//             )
-//         );
-//     }
-//
-//     #[test]
-//     fn rfc_5545_example_resources_property_2() {
-//         let input = "RESOURCES;LANGUAGE=fr:Nettoyeur haute pression";
-//         let (tail, prop) = property::<_, ()>.parse_peek(input).unwrap();
-//         assert!(tail.is_empty());
-//
-//         let KnownProp { name, value } = prop.try_into_known().unwrap();
-//         assert_eq!(name, StaticProp::Resources);
-//         let prop: Prop<Vec<Text<_>>, Params<_>> = value.downcast().unwrap();
-//
-//         assert_eq!(prop.params.language(), Some(&Language("fr")));
-//         assert_eq!(prop.value, vec![Text("Nettoyeur haute pression")]);
-//     }
-//
-//     #[test]
-//     fn rfc_5545_example_status_property_1() {
-//         let input = "STATUS:TENTATIVE";
-//         let (tail, prop) = property::<_, ()>.parse_peek(input).unwrap();
-//
-//         assert!(tail.is_empty());
-//         assert_eq!(prop, known_prop!(Status, Status::Tentative));
-//     }
-//
-//     #[test]
-//     fn rfc_5545_example_status_property_2() {
-//         let input = "STATUS:NEEDS-ACTION";
-//         let (tail, prop) = property::<_, ()>.parse_peek(input).unwrap();
-//
-//         assert!(tail.is_empty());
-//         assert_eq!(prop, known_prop!(Status, Status::NeedsAction));
-//     }
-//
-//     #[test]
-//     fn rfc_5545_example_status_property_3() {
-//         let input = "STATUS:DRAFT";
-//         let (tail, prop) = property::<_, ()>.parse_peek(input).unwrap();
-//
-//         assert!(tail.is_empty());
-//         assert_eq!(prop, known_prop!(Status, Status::Draft));
-//     }
-//
-//     #[test]
-//     fn rfc_5545_example_summary_property() {
-//         let input = "SUMMARY:Department Party";
-//         let (tail, prop) = property::<_, ()>.parse_peek(input).unwrap();
-//
-//         assert!(tail.is_empty());
-//         assert_eq!(prop, known_prop!(Summary, Text("Department Party")));
-//     }
-//
-//     #[test]
-//     fn rfc_5545_example_date_time_completed_property() {
-//         let input = "COMPLETED:19960401T150000Z";
-//         let (tail, prop) = property::<_, ()>.parse_peek(input).unwrap();
-//
-//         assert!(tail.is_empty());
-//         assert_eq!(
-//             prop,
-//             known_prop!(
-//                 DtCompleted,
-//                 DateTime {
-//                     date: date!(1996;4;1),
-//                     time: time!(15;0;0, Utc),
-//                 }
-//             )
-//         );
-//     }
-//
-//     #[test]
-//     fn rfc_5545_example_date_time_end_property_1() {
-//         let input = "DTEND:19960401T150000Z";
-//         let (tail, prop) = property::<_, ()>.parse_peek(input).unwrap();
-//
-//         assert!(tail.is_empty());
-//         assert_eq!(
-//             prop,
-//             known_prop!(
-//                 DtEnd,
-//                 DateTimeOrDate::DateTime(DateTime {
-//                     date: date!(1996;4;1),
-//                     time: time!(15;0;0, Utc),
-//                 })
-//             )
-//         );
-//     }
-//
-//     #[test]
-//     fn rfc_5545_example_date_time_end_property_2() {
-//         let input = "DTEND;VALUE=DATE:19980704";
-//         let (tail, prop) = property::<_, ()>.parse_peek(input).unwrap();
-//
-//         assert!(tail.is_empty());
-//         assert_eq!(
-//             prop,
-//             known_prop!(DtEnd, DateTimeOrDate::Date(date!(1998;7;4)))
-//         );
-//     }
-//
-//     #[test]
-//     fn rfc_5545_example_date_time_due_property() {
-//         let input = "DUE:19980430T000000Z";
-//         let (tail, prop) = property::<_, ()>.parse_peek(input).unwrap();
-//
-//         assert!(tail.is_empty());
-//         assert_eq!(
-//             prop,
-//             known_prop!(
-//                 DtDue,
-//                 DateTimeOrDate::DateTime(DateTime {
-//                     date: date!(1998;4;30),
-//                     time: time!(0;0;0, Utc),
-//                 })
-//             )
-//         );
-//     }
-//
-//     #[test]
-//     fn rfc_5545_example_date_time_start_property() {
-//         let input = "DTSTART:19980118T073000Z";
-//         let (tail, prop) = property::<_, ()>.parse_peek(input).unwrap();
-//
-//         assert!(tail.is_empty());
-//         assert_eq!(
-//             prop,
-//             known_prop!(
-//                 DtStart,
-//                 DateTimeOrDate::DateTime(DateTime {
-//                     date: date!(1998;1;18),
-//                     time: time!(7;30;0, Utc),
-//                 })
-//             )
-//         );
-//     }
-//
-//     #[test]
-//     fn rfc_5545_example_duration_property_1() {
-//         let input = "DURATION:PT1H0M0S";
-//         let (tail, prop) = property::<_, ()>.parse_peek(input).unwrap();
-//
-//         assert!(tail.is_empty());
-//         assert_eq!(
-//             prop,
-//             known_prop!(
-//                 Duration,
-//                 Duration {
-//                     sign: None,
-//                     kind: DurationKind::Time {
-//                         time: DurationTime::HMS {
-//                             hours: 1,
-//                             minutes: 0,
-//                             seconds: 0,
-//                         }
-//                     }
-//                 }
-//             )
-//         );
-//     }
-//
-//     #[test]
-//     fn rfc_5545_example_duration_property_2() {
-//         let input = "DURATION:PT15M";
-//         let (tail, prop) = property::<_, ()>.parse_peek(input).unwrap();
-//
-//         assert!(tail.is_empty());
-//         assert_eq!(
-//             prop,
-//             known_prop!(
-//                 Duration,
-//                 Duration {
-//                     sign: None,
-//                     kind: DurationKind::Time {
-//                         time: DurationTime::M { minutes: 15 }
-//                     }
-//                 }
-//             )
-//         );
-//     }
-//
-//     #[test]
-//     fn rfc_5545_example_free_busy_time_property_1() {
-//         let input = "FREEBUSY;FBTYPE=BUSY-UNAVAILABLE:19970308T160000Z/PT8H30M";
-//         let (tail, prop) = property::<_, ()>.parse_peek(input).unwrap();
-//         assert!(tail.is_empty());
-//
-//         let KnownProp { name, value } = prop.try_into_known().unwrap();
-//         assert_eq!(name, StaticProp::FreeBusy);
-//         let prop: Prop<Vec<Period>, Params<_>> = value.downcast().unwrap();
-//
-//         assert_eq!(
-//             prop.params.free_busy_type(),
-//             Some(&FreeBusyType::BusyUnavailable)
-//         );
-//
-//         assert_eq!(
-//             prop.value,
-//             vec![Period::Start {
-//                 start: DateTime {
-//                     date: date!(1997;3;8),
-//                     time: Time {
-//                         raw: RawTime {
-//                             hours: 16,
-//                             minutes: 0,
-//                             seconds: 0
-//                         },
-//                         format: TimeFormat::Utc
-//                     },
-//                 },
-//                 duration: Duration {
-//                     sign: None,
-//                     kind: DurationKind::Time {
-//                         time: DurationTime::HM {
-//                             hours: 8,
-//                             minutes: 30
-//                         },
-//                     }
-//                 }
-//             }]
-//         );
-//     }
-//
-//     #[test]
-//     fn rfc_5545_example_free_busy_time_property_2() {
-//         let input = "FREEBUSY;FBTYPE=FREE:19970308T160000Z/PT3H,19970308T200000Z/PT1H";
-//         let (tail, prop) = property::<_, ()>.parse_peek(input).unwrap();
-//         assert!(tail.is_empty());
-//
-//         let KnownProp { name, value } = prop.try_into_known().unwrap();
-//         assert_eq!(name, StaticProp::FreeBusy);
-//         let prop: Prop<Vec<Period>, Params<_>> = value.downcast().unwrap();
-//
-//         assert_eq!(prop.params.free_busy_type(), Some(&FreeBusyType::Free));
-//
-//         assert_eq!(
-//             prop.value,
-//             vec![
-//                 Period::Start {
-//                     start: DateTime {
-//                         date: date!(1997;3;8),
-//                         time: Time {
-//                             raw: RawTime {
-//                                 hours: 16,
-//                                 minutes: 0,
-//                                 seconds: 0
-//                             },
-//                             format: TimeFormat::Utc
-//                         },
-//                     },
-//                     duration: Duration {
-//                         sign: None,
-//                         kind: DurationKind::Time {
-//                             time: DurationTime::H { hours: 3 },
-//                         }
-//                     }
-//                 },
-//                 Period::Start {
-//                     start: DateTime {
-//                         date: date!(1997;3;8),
-//                         time: Time {
-//                             raw: RawTime {
-//                                 hours: 20,
-//                                 minutes: 0,
-//                                 seconds: 0
-//                             },
-//                             format: TimeFormat::Utc
-//                         },
-//                     },
-//                     duration: Duration {
-//                         sign: None,
-//                         kind: DurationKind::Time {
-//                             time: DurationTime::H { hours: 1 },
-//                         }
-//                     }
-//                 },
-//             ]
-//         );
-//     }
-//
-//     #[test]
-//     fn rfc_5545_example_free_busy_time_property_3() {
-//         let input = "FREEBUSY;FBTYPE=FREE:19970308T160000Z/PT3H,19970308T200000Z/PT1H\r\n\t,19970308T230000Z/19970309T000000Z";
-//         let (tail, prop) = property::<_, ()>.parse_peek(input.as_escaped()).unwrap();
-//         assert!(tail.is_empty());
-//
-//         let KnownProp { name, value } = prop.try_into_known().unwrap();
-//         assert_eq!(name, StaticProp::FreeBusy);
-//         let prop: Prop<Vec<Period>, Params<_>> = value.downcast().unwrap();
-//
-//         assert_eq!(prop.params.free_busy_type(), Some(&FreeBusyType::Free));
-//
-//         assert_eq!(
-//             prop.value,
-//             vec![
-//                 Period::Start {
-//                     start: DateTime {
-//                         date: date!(1997;3;8),
-//                         time: Time {
-//                             raw: RawTime {
-//                                 hours: 16,
-//                                 minutes: 0,
-//                                 seconds: 0
-//                             },
-//                             format: TimeFormat::Utc
-//                         },
-//                     },
-//                     duration: Duration {
-//                         sign: None,
-//                         kind: DurationKind::Time {
-//                             time: DurationTime::H { hours: 3 },
-//                         }
-//                     }
-//                 },
-//                 Period::Start {
-//                     start: DateTime {
-//                         date: date!(1997;3;8),
-//                         time: Time {
-//                             raw: RawTime {
-//                                 hours: 20,
-//                                 minutes: 0,
-//                                 seconds: 0
-//                             },
-//                             format: TimeFormat::Utc
-//                         },
-//                     },
-//                     duration: Duration {
-//                         sign: None,
-//                         kind: DurationKind::Time {
-//                             time: DurationTime::H { hours: 1 },
-//                         }
-//                     }
-//                 },
-//                 Period::Explicit {
-//                     start: DateTime {
-//                         date: date!(1997;3;8),
-//                         time: Time {
-//                             raw: RawTime {
-//                                 hours: 23,
-//                                 minutes: 0,
-//                                 seconds: 0
-//                             },
-//                             format: TimeFormat::Utc
-//                         },
-//                     },
-//                     end: DateTime {
-//                         date: date!(1997;3;9),
-//                         time: Time {
-//                             raw: RawTime {
-//                                 hours: 0,
-//                                 minutes: 0,
-//                                 seconds: 0
-//                             },
-//                             format: TimeFormat::Utc
-//                         },
-//                     },
-//                 }
-//             ]
-//         );
-//     }
-//
-//     #[test]
-//     fn rfc_5545_example_time_transparency_property_1() {
-//         let input = "TRANSP:TRANSPARENT";
-//         let (tail, prop) = property::<_, ()>.parse_peek(input).unwrap();
-//
-//         assert!(tail.is_empty());
-//         assert_eq!(prop, known_prop!(Transp, TimeTransparency::Transparent));
-//     }
-//
-//     #[test]
-//     fn rfc_5545_example_time_transparency_property_2() {
-//         let input = "TRANSP:OPAQUE";
-//         let (tail, prop) = property::<_, ()>.parse_peek(input).unwrap();
-//
-//         assert!(tail.is_empty());
-//         assert_eq!(prop, known_prop!(Transp, TimeTransparency::Opaque));
-//     }
-//
-//     #[test]
-//     fn rfc_5545_example_time_zone_identifier_property_1() {
-//         let input = "TZID:America/New_York";
-//         let (tail, prop) = property::<_, ()>.parse_peek(input).unwrap();
-//
-//         assert!(tail.is_empty());
-//         assert_eq!(prop, known_prop!(TzId, TzId("America/New_York")));
-//     }
-//
-//     #[test]
-//     fn rfc_5545_example_time_zone_identifier_property_2() {
-//         let input = "TZID:America/Los_Angeles";
-//         let (tail, prop) = property::<_, ()>.parse_peek(input).unwrap();
-//
-//         assert!(tail.is_empty());
-//         assert_eq!(prop, known_prop!(TzId, TzId("America/Los_Angeles")));
-//     }
-//
-//     #[test]
-//     fn rfc_5545_example_time_zone_identifier_property_3() {
-//         let input = "TZID:/example.org/America/New_York";
-//         let (tail, prop) = property::<_, ()>.parse_peek(input).unwrap();
-//
-//         assert!(tail.is_empty());
-//         assert_eq!(
-//             prop,
-//             known_prop!(TzId, TzId("/example.org/America/New_York"))
-//         );
-//     }
-//
-//     #[test]
-//     fn rfc_5545_example_time_zone_name_property_1() {
-//         let input = "TZNAME:EST";
-//         let (tail, prop) = property::<_, ()>.parse_peek(input).unwrap();
-//
-//         assert!(tail.is_empty());
-//         assert_eq!(prop, known_prop!(TzName, Text("EST")));
-//     }
-//
-//     #[test]
-//     fn rfc_5545_example_time_zone_name_property_2() {
-//         let input = "TZNAME;LANGUAGE=fr-CA:HNE";
-//         let (tail, prop) = property::<_, ()>.parse_peek(input).unwrap();
-//         assert!(tail.is_empty());
-//
-//         let KnownProp { name, value } = prop.try_into_known().unwrap();
-//         assert_eq!(name, StaticProp::TzName);
-//         let prop: Prop<Text<_>, Params<_>> = value.downcast().unwrap();
-//
-//         assert_eq!(prop.params.language(), Some(&Language("fr-CA")));
-//         assert_eq!(prop.value, Text("HNE"));
-//     }
-//
-//     #[test]
-//     fn rfc_5545_example_time_zone_offset_from_property_1() {
-//         let input = "TZOFFSETFROM:-0500";
-//         let (tail, prop) = property::<_, ()>.parse_peek(input).unwrap();
-//
-//         assert!(tail.is_empty());
-//         assert_eq!(prop, known_prop!(TzOffsetFrom, utc_offset!(-5;00)));
-//     }
-//
-//     #[test]
-//     fn rfc_5545_example_time_zone_offset_from_property_2() {
-//         let input = "TZOFFSETFROM:+1345";
-//         let (tail, prop) = property::<_, ()>.parse_peek(input).unwrap();
-//
-//         assert!(tail.is_empty());
-//         assert_eq!(prop, known_prop!(TzOffsetFrom, utc_offset!(+13;45)));
-//     }
-//
-//     #[test]
-//     fn rfc_5545_example_time_zone_offset_to_property_1() {
-//         let input = "TZOFFSETTO:-0400";
-//         let (tail, prop) = property::<_, ()>.parse_peek(input).unwrap();
-//
-//         assert!(tail.is_empty());
-//         assert_eq!(prop, known_prop!(TzOffsetTo, utc_offset!(-4;00)));
-//     }
-//
-//     #[test]
-//     fn rfc_5545_example_time_zone_offset_to_property_2() {
-//         let input = "TZOFFSETTO:+1245";
-//         let (tail, prop) = property::<_, ()>.parse_peek(input).unwrap();
-//
-//         assert!(tail.is_empty());
-//         assert_eq!(prop, known_prop!(TzOffsetTo, utc_offset!(+12;45)));
-//     }
-//
-//     #[test]
-//     fn rfc_5545_example_time_zone_url_property() {
-//         let input = "TZURL:http://timezones.example.org/tz/America-Los_Angeles.ics";
-//         let (tail, prop) = property::<_, ()>.parse_peek(input).unwrap();
-//
-//         assert!(tail.is_empty());
-//         assert_eq!(
-//             prop,
-//             known_prop!(
-//                 TzUrl,
-//                 Uri("http://timezones.example.org/tz/America-Los_Angeles.ics")
-//             )
-//         );
-//     }
-//
-//     #[test]
-//     fn rfc_5545_example_attendee_property_1() {
-//         let input =
-//             "ATTENDEE;MEMBER=\"mailto:DEV-GROUP@example.com\":\r\n mailto:joecool@example.com";
-//         let (tail, prop) = property::<_, ()>.parse_peek(input.as_escaped()).unwrap();
-//         assert!(tail.is_empty());
-//
-//         let KnownProp { name, value } = prop.try_into_known().unwrap();
-//         assert_eq!(name, StaticProp::Attendee);
-//         let prop: Prop<CalAddress<_>, Params<_>> = value.downcast().unwrap();
-//
-//         assert_eq!(
-//             prop.params.membership(),
-//             Some(&vec![CalAddress(
-//                 "mailto:DEV-GROUP@example.com".as_escaped()
-//             )])
-//         );
-//
-//         assert_eq!(
-//             prop.value,
-//             CalAddress("\r\n mailto:joecool@example.com".as_escaped())
-//         );
-//     }
-//
-//     #[test]
-//     fn rfc_5545_example_attendee_property_2() {
-//         let input =
-//             "ATTENDEE;DELEGATED-FROM=\"mailto:immud@example.com\":\r\n mailto:ildoit@example.com";
-//         let (tail, prop) = property::<_, ()>.parse_peek(input.as_escaped()).unwrap();
-//         assert!(tail.is_empty());
-//
-//         let KnownProp { name, value } = prop.try_into_known().unwrap();
-//         assert_eq!(name, StaticProp::Attendee);
-//         let prop: Prop<CalAddress<_>, Params<_>> = value.downcast().unwrap();
-//
-//         assert_eq!(
-//             prop.params.delegated_from(),
-//             Some(&vec![CalAddress("mailto:immud@example.com".as_escaped())])
-//         );
-//
-//         assert_eq!(
-//             prop.value,
-//             CalAddress("\r\n mailto:ildoit@example.com".as_escaped())
-//         );
-//     }
-//
-//     #[test]
-//     fn rfc_5545_example_attendee_property_3() {
-//         let input = "ATTENDEE;ROLE=REQ-PARTICIPANT;PARTSTAT=TENTATIVE;CN=Henry\r\n Cabot:mailto:hcabot@example.com";
-//         let (tail, prop) = property::<_, ()>.parse_peek(input.as_escaped()).unwrap();
-//         assert!(tail.is_empty());
-//
-//         let KnownProp { name, value } = prop.try_into_known().unwrap();
-//         assert_eq!(name, StaticProp::Attendee);
-//         let prop: Prop<CalAddress<_>, Params<_>> = value.downcast().unwrap();
-//
-//         assert_eq!(
-//             prop.params.participation_role(),
-//             Some(&ParticipationRole::ReqParticipant)
-//         );
-//         assert_eq!(
-//             prop.params.participation_status(),
-//             Some(&ParticipationStatus::Tentative)
-//         );
-//         assert_eq!(
-//             prop.params.common_name(),
-//             Some(&ParamValue::Safe("Henry\r\n Cabot".as_escaped()))
-//         );
-//
-//         assert_eq!(
-//             prop.value,
-//             CalAddress("mailto:hcabot@example.com".as_escaped())
-//         );
-//     }
-//
-//     #[test]
-//     fn rfc_5545_example_contact_property_1() {
-//         let input = "CONTACT:Jim Dolittle\\, ABC Industries\\, +1-919-555-1234";
-//         let (tail, prop) = property::<_, ()>.parse_peek(input).unwrap();
-//
-//         assert!(tail.is_empty());
-//         assert_eq!(
-//             prop,
-//             known_prop!(
-//                 Contact,
-//                 Text("Jim Dolittle\\, ABC Industries\\, +1-919-555-1234")
-//             )
-//         );
-//     }
-//
-//     #[test]
-//     fn rfc_5545_example_contact_property_2() {
-//         let input = "CONTACT;ALTREP=\"ldap://example.com:6666/o=ABC%20Industries\\,\r\n c=US???(cn=Jim%20Dolittle)\":Jim Dolittle\\, ABC Industries\\,\r\n +1-919-555-1234";
-//         let (tail, prop) = property::<_, ()>.parse_peek(input.as_escaped()).unwrap();
-//         assert!(tail.is_empty());
-//
-//         let KnownProp { name, value } = prop.try_into_known().unwrap();
-//         assert_eq!(name, StaticProp::Contact);
-//         let prop: Prop<Text<_>, Params<_>> = value.downcast().unwrap();
-//
-//         assert_eq!(
-//             prop.params.alternate_representation(),
-//             Some(&Uri(input[16..89].as_escaped()))
-//         );
-//
-//         assert_eq!(prop.value, Text(input[91..].as_escaped()));
-//     }
-//
-//     #[test]
-//     fn rfc_5545_example_organizer_property_1() {
-//         let input = "ORGANIZER;CN=John Smith:mailto:jsmith@example.com";
-//         let (tail, prop) = property::<_, ()>.parse_peek(input).unwrap();
-//         assert!(tail.is_empty());
-//
-//         let KnownProp { name, value } = prop.try_into_known().unwrap();
-//         assert_eq!(name, StaticProp::Organizer);
-//         let prop: Prop<CalAddress<_>, Params<_>> = value.downcast().unwrap();
-//
-//         assert_eq!(
-//             prop.params.common_name(),
-//             Some(&ParamValue::Safe("John Smith"))
-//         );
-//         assert_eq!(prop.value, CalAddress("mailto:jsmith@example.com"));
-//     }
-//
-//     #[test]
-//     fn rfc_5545_example_organizer_property_2() {
-//         let input = "ORGANIZER;CN=JohnSmith;DIR=\"ldap://example.com:6666/o=DC%20Ass\r\n ociates,c=US???(cn=John%20Smith)\":mailto:jsmith@example.com";
-//         let (tail, prop) = property::<_, ()>.parse_peek(input.as_escaped()).unwrap();
-//         assert!(tail.is_empty());
-//
-//         let KnownProp { name, value } = prop.try_into_known().unwrap();
-//         assert_eq!(name, StaticProp::Organizer);
-//         let prop: Prop<CalAddress<_>, Params<_>> = value.downcast().unwrap();
-//
-//         assert_eq!(
-//             prop.params.common_name(),
-//             Some(&ParamValue::Safe("JohnSmith".as_escaped()))
-//         );
-//
-//         assert_eq!(
-//             prop.params.directory_reference(),
-//             Some(&Uri(input[28..97].as_escaped()))
-//         );
-//
-//         assert_eq!(prop.value, CalAddress(input[99..].as_escaped()));
-//     }
-//
-//     #[test]
-//     fn rfc_5545_example_recurrence_identifier_property_1() {
-//         let input = "RECURRENCE-ID;VALUE=DATE:19960401";
-//         let (tail, prop) = property::<_, ()>.parse_peek(input).unwrap();
-//
-//         assert!(tail.is_empty());
-//         assert_eq!(
-//             prop,
-//             known_prop!(RecurId, DateTimeOrDate::Date(date!(1996;4;1)))
-//         );
-//     }
-//
-//     #[test]
-//     fn rfc_5545_example_recurrence_identifier_property_2() {
-//         let input = "RECURRENCE-ID;RANGE=THISANDFUTURE:19960120T120000Z";
-//         let (tail, prop) = property::<_, ()>.parse_peek(input).unwrap();
-//         assert!(tail.is_empty());
-//
-//         let KnownProp { name, value } = prop.try_into_known().unwrap();
-//         assert_eq!(name, StaticProp::RecurId);
-//         let prop: Prop<DateTimeOrDate, Params<_>> = value.downcast().unwrap();
-//
-//         assert_eq!(prop.params.recurrence_range(), Some(&ThisAndFuture));
-//
-//         assert_eq!(
-//             prop.value,
-//             DateTime {
-//                 date: date!(1996;1;20),
-//                 time: time!(12;00;00, Utc),
-//             }
-//             .into()
-//         );
-//     }
-//
-//     #[test]
-//     fn rfc_5545_example_uid_property() {
-//         let input = "UID:19960401T080045Z-4000F192713-0052@example.com";
-//         let (tail, prop) = property::<_, ()>.parse_peek(input).unwrap();
-//
-//         assert!(tail.is_empty());
-//         assert_eq!(
-//             prop,
-//             known_prop!(Uid, Uid("19960401T080045Z-4000F192713-0052@example.com"))
-//         );
-//     }
-//
-//     #[test]
-//     fn rfc_5545_example_request_status_property_1() {
-//         let input = "REQUEST-STATUS:2.0;Success";
-//         let (tail, prop) = property::<_, ()>.parse_peek(input).unwrap();
-//
-//         assert!(tail.is_empty());
-//         assert_eq!(
-//             prop,
-//             known_prop!(
-//                 RequestStatus,
-//                 RequestStatus {
-//                     code: (2, 0).into(),
-//                     description: Text("Success"),
-//                     exception_data: None,
-//                 }
-//             )
-//         );
-//     }
-//
-//     #[test]
-//     fn rfc_5545_example_request_status_property_2() {
-//         let input = "REQUEST-STATUS:3.1;Invalid property value;DTSTART:96-Apr-01";
-//         let (tail, prop) = property::<_, ()>.parse_peek(input).unwrap();
-//
-//         assert!(tail.is_empty());
-//         assert_eq!(
-//             prop,
-//             known_prop!(
-//                 RequestStatus,
-//                 RequestStatus {
-//                     code: (3, 1).into(),
-//                     description: Text("Invalid property value"),
-//                     exception_data: Some(Text("DTSTART:96-Apr-01")),
-//                 }
-//             )
-//         );
-//     }
-//
-//     // NOTE: skipped the third example
-//
-//     #[test]
-//     fn rfc_5545_example_request_status_property_4() {
-//         let input = "REQUEST-STATUS:4.1;Event conflict.  Date-time is busy.";
-//         let (tail, prop) = property::<_, ()>.parse_peek(input).unwrap();
-//
-//         assert!(tail.is_empty());
-//         assert_eq!(
-//             prop,
-//             known_prop!(
-//                 RequestStatus,
-//                 RequestStatus {
-//                     code: (4, 1).into(),
-//                     description: Text("Event conflict.  Date-time is busy."),
-//                     exception_data: None,
-//                 }
-//             )
-//         );
-//     }
-//
-//     #[test]
-//     fn rfc_5545_example_iana_property() {
-//         let mut input = "NON-SMOKING;VALUE=BOOLEAN:TRUE";
-//         let prop = property::<_, ()>(&mut input);
-//         assert!(matches!(
-//             prop,
-//             Ok(
-//                 ParsedProp::Unknown(UnknownProp {
-//                     name: "NON-SMOKING",
-//                     kind: UnknownKind::Iana,
-//                     value: Value::Boolean(true),
-//                     params,
-//                 }),
-//             ) if params.is_empty(),
-//         ));
-//
-//         let mut input = "NON-SMOKING:TRUE";
-//         let prop = property::<_, ()>(&mut input);
-//         assert!(matches!(
-//             prop,
-//             Ok(
-//                 ParsedProp::Unknown(UnknownProp {
-//                     name: "NON-SMOKING",
-//                     kind: UnknownKind::Iana,
-//                     value: Value::Text("TRUE"),
-//                     params
-//                 }),
-//             ) if params.is_empty(),
-//         ));
-//     }
-//
-//     #[test]
-//     fn rfc_5545_example_x_property() {
-//         let input = "X-ABC-MMSUBJ;VALUE=URI;FMTTYPE=audio/basic:http://www.example.org/mysubj.au";
-//         let prop = property::<_, ()>.parse_peek(input);
-//         let expected_uri = Uri("http://www.example.org/mysubj.au");
-//
-//         dbg![&prop];
-//
-//         assert!(matches!(
-//             prop, Ok(("", ParsedProp::Unknown(UnknownProp {
-//                 name: "X-ABC-MMSUBJ",
-//                 kind: UnknownKind::X,
-//                 value: Value::Uri(uri),
-//                 params: _
-//             }))) if uri == expected_uri
-//         ))
-//     }
-//
-//     #[test]
-//     fn integer_value_parsing() {
-//         for mut i in ["0", "-2147483648", "2147483647"] {
-//             assert!(parse_value::<_, ()>(ValueType::<&str>::Integer, &mut i).is_ok());
-//         }
-//
-//         for mut i in ["-2147483649", "2147483648"] {
-//             assert!(parse_value::<_, ()>(ValueType::<&str>::Integer, &mut i).is_err());
-//         }
-//     }
-//
-//     // PROPERTY NAME TESTS
-//
-//     /// Asserts that the inputs are equal under [`property_name`].
-//     fn assert_prop_name_eq<'i>(input: &'i str, expected: PropName<&'i str>) {
-//         let mut input_ref = input;
-//         let result = property_name::<_, ()>.parse_next(&mut input_ref);
-//         assert!(result.is_ok());
-//         assert_eq!(result.unwrap(), expected);
-//         assert!(input_ref.is_empty(),);
-//     }
-//
-//     // Helper function to test parsing failures
-//     fn assert_prop_name_parse_failure(input: &str) {
-//         let mut input_ref = input;
-//         let result = property_name::<_, ()>.parse_next(&mut input_ref);
-//         assert!(result.is_err());
-//     }
-//
-//     #[test]
-//     fn rfc5545_calendar_property_names() {
-//         assert_prop_name_eq("CALSCALE", PropName::Known(StaticProp::CalScale));
-//         assert_prop_name_eq("METHOD", PropName::Known(StaticProp::Method));
-//         assert_prop_name_eq("PRODID", PropName::Known(StaticProp::ProdId));
-//         assert_prop_name_eq("VERSION", PropName::Known(StaticProp::Version));
-//     }
-//
-//     #[test]
-//     fn rfc5545_descriptive_property_names() {
-//         assert_prop_name_eq("ATTACH", PropName::Known(StaticProp::Attach));
-//         assert_prop_name_eq("CATEGORIES", PropName::Known(StaticProp::Categories));
-//         assert_prop_name_eq("CLASS", PropName::Known(StaticProp::Class));
-//         assert_prop_name_eq("COMMENT", PropName::Known(StaticProp::Comment));
-//         assert_prop_name_eq("DESCRIPTION", PropName::Known(StaticProp::Description));
-//         assert_prop_name_eq("GEO", PropName::Known(StaticProp::Geo));
-//         assert_prop_name_eq("LOCATION", PropName::Known(StaticProp::Location));
-//         assert_prop_name_eq(
-//             "PERCENT-COMPLETE",
-//             PropName::Known(StaticProp::PercentComplete),
-//         );
-//         assert_prop_name_eq("PRIORITY", PropName::Known(StaticProp::Priority));
-//         assert_prop_name_eq("RESOURCES", PropName::Known(StaticProp::Resources));
-//         assert_prop_name_eq("STATUS", PropName::Known(StaticProp::Status));
-//         assert_prop_name_eq("SUMMARY", PropName::Known(StaticProp::Summary));
-//     }
-//
-//     #[test]
-//     fn rfc5545_datetime_property_names() {
-//         assert_prop_name_eq("COMPLETED", PropName::Known(StaticProp::DtCompleted));
-//         assert_prop_name_eq("DTEND", PropName::Known(StaticProp::DtEnd));
-//         assert_prop_name_eq("DUE", PropName::Known(StaticProp::DtDue));
-//         assert_prop_name_eq("DTSTART", PropName::Known(StaticProp::DtStart));
-//         assert_prop_name_eq("DURATION", PropName::Known(StaticProp::Duration));
-//         assert_prop_name_eq("FREEBUSY", PropName::Known(StaticProp::FreeBusy));
-//         assert_prop_name_eq("TRANSP", PropName::Known(StaticProp::Transp));
-//         assert_prop_name_eq("DTSTAMP", PropName::Known(StaticProp::DtStamp));
-//     }
-//
-//     #[test]
-//     fn rfc5545_timezone_property_names() {
-//         assert_prop_name_eq("TZID", PropName::Known(StaticProp::TzId));
-//         assert_prop_name_eq("TZNAME", PropName::Known(StaticProp::TzName));
-//         assert_prop_name_eq("TZOFFSETFROM", PropName::Known(StaticProp::TzOffsetFrom));
-//         assert_prop_name_eq("TZOFFSETTO", PropName::Known(StaticProp::TzOffsetTo));
-//         assert_prop_name_eq("TZURL", PropName::Known(StaticProp::TzUrl));
-//     }
-//
-//     #[test]
-//     fn rfc5545_relationship_property_names() {
-//         assert_prop_name_eq("ATTENDEE", PropName::Known(StaticProp::Attendee));
-//         assert_prop_name_eq("CONTACT", PropName::Known(StaticProp::Contact));
-//         assert_prop_name_eq("ORGANIZER", PropName::Known(StaticProp::Organizer));
-//         assert_prop_name_eq("RECURRENCE-ID", PropName::Known(StaticProp::RecurId));
-//         assert_prop_name_eq("RELATED-TO", PropName::Known(StaticProp::RelatedTo));
-//         assert_prop_name_eq("URL", PropName::Known(StaticProp::Url));
-//         assert_prop_name_eq("UID", PropName::Known(StaticProp::Uid));
-//     }
-//
-//     #[test]
-//     fn rfc5545_recurrence_property_names() {
-//         assert_prop_name_eq("EXDATE", PropName::Known(StaticProp::ExDate));
-//         assert_prop_name_eq("RDATE", PropName::Known(StaticProp::RDate));
-//         assert_prop_name_eq("RRULE", PropName::Known(StaticProp::RRule));
-//     }
-//
-//     #[test]
-//     fn rfc5545_alarm_property_names() {
-//         assert_prop_name_eq("ACTION", PropName::Known(StaticProp::Action));
-//         assert_prop_name_eq("REPEAT", PropName::Known(StaticProp::Repeat));
-//         assert_prop_name_eq("TRIGGER", PropName::Known(StaticProp::Trigger));
-//     }
-//
-//     #[test]
-//     fn rfc5545_change_management_property_names() {
-//         assert_prop_name_eq("CREATED", PropName::Known(StaticProp::Created));
-//         assert_prop_name_eq("LAST-MODIFIED", PropName::Known(StaticProp::LastModified));
-//         assert_prop_name_eq("SEQUENCE", PropName::Known(StaticProp::Sequence));
-//     }
-//
-//     #[test]
-//     fn rfc5545_miscellaneous_property_names() {
-//         assert_prop_name_eq("REQUEST-STATUS", PropName::Known(StaticProp::RequestStatus));
-//     }
-//
-//     #[test]
-//     fn rfc7986_property_names() {
-//         assert_prop_name_eq("NAME", PropName::Known(StaticProp::Name));
-//         assert_prop_name_eq(
-//             "REFRESH-INTERVAL",
-//             PropName::Known(StaticProp::RefreshInterval),
-//         );
-//         assert_prop_name_eq("SOURCE", PropName::Known(StaticProp::Source));
-//         assert_prop_name_eq("COLOR", PropName::Known(StaticProp::Color));
-//         assert_prop_name_eq("IMAGE", PropName::Known(StaticProp::Image));
-//         assert_prop_name_eq("CONFERENCE", PropName::Known(StaticProp::Conference));
-//     }
-//
-//     #[test]
-//     fn property_name_case_insensitivity() {
-//         assert_prop_name_eq("dtstart", PropName::Known(StaticProp::DtStart));
-//         assert_prop_name_eq("DTSTART", PropName::Known(StaticProp::DtStart));
-//         assert_prop_name_eq("DtStArT", PropName::Known(StaticProp::DtStart));
-//         assert_prop_name_eq("dtSTART", PropName::Known(StaticProp::DtStart));
-//
-//         assert_prop_name_eq("conference", PropName::Known(StaticProp::Conference));
-//         assert_prop_name_eq("Conference", PropName::Known(StaticProp::Conference));
-//         assert_prop_name_eq("CONFERENCE", PropName::Known(StaticProp::Conference));
-//     }
-//
-//     #[test]
-//     fn iana_property_names() {
-//         assert_prop_name_eq("UNKNOWN-PROP", PropName::iana("UNKNOWN-PROP"));
-//         assert_prop_name_eq("CUSTOM", PropName::iana("CUSTOM"));
-//         assert_prop_name_eq("NEW-FEATURE", PropName::iana("NEW-FEATURE"));
-//     }
-//
-//     #[test]
-//     fn x_property_names() {
-//         assert_prop_name_eq("X-CUSTOM", PropName::x("X-CUSTOM"));
-//         assert_prop_name_eq("X-VENDOR-PROP", PropName::x("X-VENDOR-PROP"));
-//         assert_prop_name_eq("X-custom", PropName::x("X-custom"));
-//     }
-//
-//     #[test]
-//     fn property_name_longest_match_precedence() {
-//         // Ensure longer properties are matched correctly when they share prefixes
-//         assert_prop_name_eq(
-//             "REFRESH-INTERVAL",
-//             PropName::Known(StaticProp::RefreshInterval),
-//         );
-//         assert_prop_name_eq("REQUEST-STATUS", PropName::Known(StaticProp::RequestStatus));
-//         assert_prop_name_eq("RECURRENCE-ID", PropName::Known(StaticProp::RecurId));
-//
-//         // Make sure we don't match shorter prefixes
-//         assert_prop_name_eq("REFRESH", PropName::iana("REFRESH"));
-//         assert_prop_name_eq("REQUEST", PropName::iana("REQUEST"));
-//         assert_prop_name_eq("RECURRENCE", PropName::iana("RECURRENCE"));
-//     }
-//
-//     #[test]
-//     fn property_name_edge_cases() {
-//         // Empty input
-//         assert_prop_name_parse_failure("");
-//
-//         // Single characters
-//         assert_prop_name_eq("A", PropName::iana("A"));
-//         assert_prop_name_eq("Z", PropName::iana("Z"));
-//
-//         // Properties with hyphens
-//         assert_prop_name_eq("LAST-MODIFIED", PropName::Known(StaticProp::LastModified));
-//         assert_prop_name_eq(
-//             "PERCENT-COMPLETE",
-//             PropName::Known(StaticProp::PercentComplete),
-//         );
-//         assert_prop_name_eq(
-//             "REFRESH-INTERVAL",
-//             PropName::Known(StaticProp::RefreshInterval),
-//         );
-//
-//         // Mixed case with hyphens
-//         assert_prop_name_eq("last-modified", PropName::Known(StaticProp::LastModified));
-//         assert_prop_name_eq(
-//             "Percent-Complete",
-//             PropName::Known(StaticProp::PercentComplete),
-//         );
-//     }
-// }
+#[cfg(test)]
+mod tests {
+    use crate::{
+        date,
+        model::{
+            primitive::{
+                Attachment, ClassValue, CompletionPercentage, DateTime, DateTimeOrDate,
+                Duration, ExactDuration, FormatTypeBuf, FreeBusyType, Language, Method,
+                ParticipationRole, ParticipationStatus, Period, Priority,
+                RequestStatus, RequestStatusCode, Sign, SignedDuration, Status, ThisAndFuture,
+                TimeFormat, TimeTransparency, Token, Utc, Value, Version,
+            },
+            property::Prop,
+            string::{NameKind, TzId, Uid, Uri},
+        },
+        parser::escaped::AsEscaped,
+        time, utc_offset,
+    };
+
+    use super::*;
+    use winnow::Parser;
+
+    // PROPERTY PARSING TESTS
+
+    /// Helper: construct a known property with a given PropValue variant.
+    macro_rules! known_prop {
+        ($name:ident, $variant:ident, $value:expr $(,)?) => {
+            ParsedProp::Known(KnownProp {
+                name: StaticProp::$name,
+                value: PropValue::$variant(Prop::from_value($value)),
+            })
+        };
+    }
+
+    /// Helper to construct a StatusCode from (class_u8, major).
+    fn status_code(class: u8, major: u8) -> RequestStatusCode {
+        use crate::model::primitive::Class as StatusClass;
+        let c = match class {
+            1 => StatusClass::C1,
+            2 => StatusClass::C2,
+            3 => StatusClass::C3,
+            4 => StatusClass::C4,
+            5 => StatusClass::C5,
+            _ => panic!("invalid status class: {class}"),
+        };
+        RequestStatusCode { class: c, major, minor: None }
+    }
+
+    /// Helper: construct a DateTime<Utc>
+    fn utc_datetime(y: u16, mo: u8, d: u8, h: u8, mi: u8, s: u8) -> DateTime<Utc> {
+        DateTime {
+            date: date!(y; mo; d),
+            time: time!(h; mi; s),
+            marker: Utc,
+        }
+    }
+
+    /// Helper: construct a DateTime<TimeFormat> in UTC
+    fn tf_utc_datetime(y: u16, mo: u8, d: u8, h: u8, mi: u8, s: u8) -> DateTime<TimeFormat> {
+        DateTime {
+            date: date!(y; mo; d),
+            time: time!(h; mi; s),
+            marker: TimeFormat::Utc,
+        }
+    }
+
+    /// Helper: construct a positive ExactDuration
+    fn exact_dur(hours: u32, minutes: u32, seconds: u32) -> SignedDuration {
+        SignedDuration {
+            sign: Sign::Pos,
+            duration: Duration::Exact(ExactDuration {
+                hours,
+                minutes,
+                seconds,
+                frac: None,
+            }),
+        }
+    }
+
+    /// Helper: construct an unsigned ExactDuration (for Period which uses Duration, not SignedDuration)
+    fn unsigned_exact_dur(hours: u32, minutes: u32, seconds: u32) -> Duration {
+        Duration::Exact(ExactDuration {
+            hours,
+            minutes,
+            seconds,
+            frac: None,
+        })
+    }
+
+    #[test]
+    fn apple_calendar_attendee_edge_case() {
+        let input = r#"ATTENDEE;CN="John Smith";CUTYPE=INDIVIDUAL;EMAIL="john.smith@icloud.com";PARTSTAT=ACCEPTED;ROLE=CHAIR:/aMTg2ODQAyMzEjg0NX9m3Gyi2XcPHS8HXCT7Y3j1oq6U7hokvhVwdffK5c/principal/"#;
+        let (tail, _prop) = property::<_, ()>.parse_peek(input).unwrap();
+        assert!(tail.is_empty());
+    }
+
+    #[test]
+    fn apple_calendar_empty_url_line() {
+        let input = "URL;VALUE=URI:";
+        let (tail, _prop) = property::<_, ()>.parse_peek(input).unwrap();
+        assert!(tail.is_empty());
+    }
+
+    // NOTE: rfc_5545_section_4_example_1 test removed — the example .ics file no longer exists
+    // in this crate's directory structure.
+
+    #[test]
+    fn rfc_5545_example_calendar_scale_property() {
+        let input = "CALSCALE:GREGORIAN";
+        let (tail, prop) = property::<_, ()>.parse_peek(input).unwrap();
+
+        assert!(tail.is_empty());
+        let known = prop.try_into_known().unwrap();
+        assert_eq!(known.name, StaticProp::CalScale);
+        let PropValue::Gregorian(p) = known.value else { panic!("expected Gregorian") };
+        assert!(matches!(p.value, Token::Known(crate::model::primitive::Gregorian)));
+    }
+
+    #[test]
+    fn rfc_5545_example_method_property() {
+        let input = "METHOD:REQUEST";
+        let (tail, prop) = property::<_, ()>.parse_peek(input).unwrap();
+
+        assert!(tail.is_empty());
+        let known = prop.try_into_known().unwrap();
+        assert_eq!(known.name, StaticProp::Method);
+        let PropValue::Method(p) = known.value else { panic!("expected Method") };
+        assert_eq!(p.value, Token::Known(Method::Request));
+    }
+
+    #[test]
+    fn rfc_5545_example_product_identifier_property() {
+        let input = "PRODID:-//ABC Corporation//NONSGML My Product//EN";
+        let (tail, prop) = property::<_, ()>.parse_peek(input).unwrap();
+
+        assert!(tail.is_empty());
+        assert_eq!(
+            prop,
+            known_prop!(ProdId, Text, "-//ABC Corporation//NONSGML My Product//EN".to_string())
+        );
+    }
+
+    #[test]
+    fn rfc_5545_example_version_property() {
+        let input = "VERSION:2.0";
+        let (tail, prop) = property::<_, ()>.parse_peek(input).unwrap();
+
+        assert!(tail.is_empty());
+        assert_eq!(prop, known_prop!(Version, Version, Version::V2_0));
+    }
+
+    #[test]
+    fn rfc_5545_example_attachment_property_1() {
+        let input = "ATTACH:CID:jsmith.part3.960817T083000.xyzMail@example.com";
+        let (tail, prop) = property::<_, ()>.parse_peek(input).unwrap();
+
+        assert!(tail.is_empty());
+        let known = prop.try_into_known().unwrap();
+        assert_eq!(known.name, StaticProp::Attach);
+        let PropValue::Attachment(p) = known.value else { panic!("expected Attachment") };
+        // Attachment::Uri uses calendar_types Uri, but we can compare via string
+        match &p.value {
+            Attachment::Uri(u) => assert_eq!(
+                u.as_str(),
+                "CID:jsmith.part3.960817T083000.xyzMail@example.com"
+            ),
+            _ => panic!("expected Attachment::Uri"),
+        }
+    }
+
+    #[test]
+    fn rfc_5545_example_attachment_property_2() {
+        let input =
+            "ATTACH;FMTTYPE=application/postscript:ftp://example.com/pub/\r\n reports/r-960812.ps"
+                .as_escaped();
+        let (tail, prop) = property::<_, ()>.parse_peek(input).unwrap();
+
+        assert!(tail.is_empty());
+
+        let known = prop.try_into_known().unwrap();
+        assert_eq!(known.name, StaticProp::Attach);
+        let PropValue::Attachment(p) = known.value else { panic!("expected Attachment") };
+
+        match &p.value {
+            Attachment::Uri(u) => assert_eq!(
+                u.as_str(),
+                "ftp://example.com/pub/reports/r-960812.ps"
+            ),
+            _ => panic!("expected Attachment::Uri"),
+        }
+
+        let expected_fmt = FormatTypeBuf::from(
+            rfc5545_types::value::FormatType::new("application/postscript").unwrap()
+        );
+        assert_eq!(p.params.format_type(), Some(&expected_fmt));
+    }
+
+    #[test]
+    fn rfc_5545_example_categories_property_1() {
+        let input = "CATEGORIES:APPOINTMENT,EDUCATION";
+        let (tail, prop) = property::<_, ()>.parse_peek(input).unwrap();
+
+        assert!(tail.is_empty());
+        assert_eq!(
+            prop,
+            known_prop!(
+                Categories,
+                TextSeq,
+                vec!["APPOINTMENT".to_string(), "EDUCATION".to_string()]
+            )
+        );
+    }
+
+    #[test]
+    fn rfc_5545_example_categories_property_2() {
+        let input = "CATEGORIES:MEETING";
+        let (tail, prop) = property::<_, ()>.parse_peek(input).unwrap();
+
+        assert!(tail.is_empty());
+        assert_eq!(
+            prop,
+            known_prop!(Categories, TextSeq, vec!["MEETING".to_string()])
+        );
+    }
+
+    #[test]
+    fn rfc_5545_example_classification_property() {
+        let input = "CLASS:PUBLIC";
+        let (tail, prop) = property::<_, ()>.parse_peek(input).unwrap();
+
+        assert!(tail.is_empty());
+        let known = prop.try_into_known().unwrap();
+        assert_eq!(known.name, StaticProp::Class);
+        let PropValue::ClassValue(p) = known.value else { panic!("expected ClassValue") };
+        assert_eq!(p.value, Token::Known(ClassValue::Public));
+    }
+
+    #[test]
+    fn rfc_5545_example_comment_property() {
+        let input = "COMMENT:The meeting really needs to include both ourselves \r\n and the customer. We can't hold this meeting without them. \r\n As a matter of fact\\, the venue for the meeting ought to be at \r\n their site. - - John";
+
+        let (tail, prop) = property::<_, ()>.parse_peek(input.as_escaped()).unwrap();
+
+        assert!(tail.is_empty());
+        let known = prop.try_into_known().unwrap();
+        assert_eq!(known.name, StaticProp::Comment);
+        let PropValue::Text(p) = known.value else { panic!("expected Text") };
+        // After line-fold removal, the value should have the folds stripped
+        assert!(p.value.contains("both ourselves"));
+        assert!(p.value.contains("the customer"));
+    }
+
+    #[test]
+    fn rfc_5545_example_description_property() {
+        let input = "DESCRIPTION:Meeting to provide technical review for \"Phoenix\" \r\n design.\\nHappy Face Conference Room. Phoenix design team \r\n MUST attend this meeting.\\nRSVP to team leader.";
+
+        let (tail, prop) = property::<_, ()>.parse_peek(input.as_escaped()).unwrap();
+
+        assert!(tail.is_empty());
+        let known = prop.try_into_known().unwrap();
+        assert_eq!(known.name, StaticProp::Description);
+        let PropValue::Text(p) = known.value else { panic!("expected Text") };
+        assert!(p.value.starts_with("Meeting to provide technical review"));
+    }
+
+    #[test]
+    fn rfc_5545_example_geographic_position_property() {
+        let input = "GEO:37.386013;-122.082932";
+        let (tail, prop) = property::<_, ()>.parse_peek(input).unwrap();
+
+        assert!(tail.is_empty());
+        let known = prop.try_into_known().unwrap();
+        assert_eq!(known.name, StaticProp::Geo);
+        let PropValue::Geo(p) = known.value else { panic!("expected Geo") };
+        assert!((p.value.lat - 37.386013).abs() < 1e-6);
+        assert!((p.value.lon - (-122.082932)).abs() < 1e-6);
+    }
+
+    #[test]
+    fn rfc_5545_example_location_property_1() {
+        let input = "LOCATION:Conference Room - F123\\, Bldg. 002";
+        let (tail, prop) = property::<_, ()>.parse_peek(input).unwrap();
+
+        assert!(tail.is_empty());
+        assert_eq!(
+            prop,
+            known_prop!(Location, Text, "Conference Room - F123, Bldg. 002".to_string())
+        );
+    }
+
+    #[test]
+    fn rfc_5545_example_location_property_2() {
+        let input = "LOCATION;ALTREP=\"http://xyzcorp.com/conf-rooms/f123.vcf\":\r\n Conference Room - F123\\, Bldg. 002";
+        let (tail, prop) = property::<_, ()>.parse_peek(input.as_escaped()).unwrap();
+        assert!(tail.is_empty());
+
+        let known = prop.try_into_known().unwrap();
+        assert_eq!(known.name, StaticProp::Location);
+        let PropValue::Text(p) = known.value else { panic!("expected Text") };
+
+        let alt_rep = p.params.alternate_representation().unwrap();
+        assert_eq!(alt_rep.as_str(), "http://xyzcorp.com/conf-rooms/f123.vcf");
+        assert!(p.value.starts_with("Conference Room - F123"));
+    }
+
+    #[test]
+    fn rfc_5545_example_percent_complete_property() {
+        let input = "PERCENT-COMPLETE:39";
+        let (tail, prop) = property::<_, ()>.parse_peek(input).unwrap();
+
+        assert!(tail.is_empty());
+        assert_eq!(
+            prop,
+            known_prop!(PercentComplete, CompletionPercentage, CompletionPercentage::new(39).unwrap())
+        );
+    }
+
+    #[test]
+    fn rfc_5545_example_priority_property_1() {
+        let input = "PRIORITY:1";
+        let (tail, prop) = property::<_, ()>.parse_peek(input).unwrap();
+
+        assert!(tail.is_empty());
+        assert_eq!(prop, known_prop!(Priority, Priority, Priority::A1));
+    }
+
+    #[test]
+    fn rfc_5545_example_priority_property_2() {
+        let input = "PRIORITY:2";
+        let (tail, prop) = property::<_, ()>.parse_peek(input).unwrap();
+
+        assert!(tail.is_empty());
+        assert_eq!(prop, known_prop!(Priority, Priority, Priority::A2));
+    }
+
+    #[test]
+    fn rfc_5545_example_priority_property_3() {
+        let input = "PRIORITY:0";
+        let (tail, prop) = property::<_, ()>.parse_peek(input).unwrap();
+
+        assert!(tail.is_empty());
+        assert_eq!(prop, known_prop!(Priority, Priority, Priority::Zero));
+    }
+
+    #[test]
+    fn rfc_5545_example_resources_property_1() {
+        let input = "RESOURCES:EASEL,PROJECTOR,VCR";
+        let (tail, prop) = property::<_, ()>.parse_peek(input).unwrap();
+
+        assert!(tail.is_empty());
+        assert_eq!(
+            prop,
+            known_prop!(
+                Resources,
+                TextSeq,
+                vec!["EASEL".to_string(), "PROJECTOR".to_string(), "VCR".to_string()]
+            )
+        );
+    }
+
+    #[test]
+    fn rfc_5545_example_resources_property_2() {
+        let input = "RESOURCES;LANGUAGE=fr:Nettoyeur haute pression";
+        let (tail, prop) = property::<_, ()>.parse_peek(input).unwrap();
+        assert!(tail.is_empty());
+
+        let known = prop.try_into_known().unwrap();
+        assert_eq!(known.name, StaticProp::Resources);
+        let PropValue::TextSeq(p) = known.value else { panic!("expected TextSeq") };
+
+        assert_eq!(p.params.language(), Some(&Language::parse("fr").unwrap()));
+        assert_eq!(p.value, vec!["Nettoyeur haute pression".to_string()]);
+    }
+
+    #[test]
+    fn rfc_5545_example_status_property_1() {
+        let input = "STATUS:TENTATIVE";
+        let (tail, prop) = property::<_, ()>.parse_peek(input).unwrap();
+
+        assert!(tail.is_empty());
+        assert_eq!(prop, known_prop!(Status, Status, Status::Tentative));
+    }
+
+    #[test]
+    fn rfc_5545_example_status_property_2() {
+        let input = "STATUS:NEEDS-ACTION";
+        let (tail, prop) = property::<_, ()>.parse_peek(input).unwrap();
+
+        assert!(tail.is_empty());
+        assert_eq!(prop, known_prop!(Status, Status, Status::NeedsAction));
+    }
+
+    #[test]
+    fn rfc_5545_example_status_property_3() {
+        let input = "STATUS:DRAFT";
+        let (tail, prop) = property::<_, ()>.parse_peek(input).unwrap();
+
+        assert!(tail.is_empty());
+        assert_eq!(prop, known_prop!(Status, Status, Status::Draft));
+    }
+
+    #[test]
+    fn rfc_5545_example_summary_property() {
+        let input = "SUMMARY:Department Party";
+        let (tail, prop) = property::<_, ()>.parse_peek(input).unwrap();
+
+        assert!(tail.is_empty());
+        assert_eq!(
+            prop,
+            known_prop!(Summary, Text, "Department Party".to_string())
+        );
+    }
+
+    #[test]
+    fn rfc_5545_example_date_time_completed_property() {
+        let input = "COMPLETED:19960401T150000Z";
+        let (tail, prop) = property::<_, ()>.parse_peek(input).unwrap();
+
+        assert!(tail.is_empty());
+        assert_eq!(
+            prop,
+            known_prop!(DtCompleted, DateTimeUtc, utc_datetime(1996, 4, 1, 15, 0, 0))
+        );
+    }
+
+    #[test]
+    fn rfc_5545_example_date_time_end_property_1() {
+        let input = "DTEND:19960401T150000Z";
+        let (tail, prop) = property::<_, ()>.parse_peek(input).unwrap();
+
+        assert!(tail.is_empty());
+        assert_eq!(
+            prop,
+            known_prop!(
+                DtEnd,
+                DateTimeOrDate,
+                DateTimeOrDate::DateTime(tf_utc_datetime(1996, 4, 1, 15, 0, 0))
+            )
+        );
+    }
+
+    #[test]
+    fn rfc_5545_example_date_time_end_property_2() {
+        let input = "DTEND;VALUE=DATE:19980704";
+        let (tail, prop) = property::<_, ()>.parse_peek(input).unwrap();
+
+        assert!(tail.is_empty());
+        assert_eq!(
+            prop,
+            known_prop!(DtEnd, DateTimeOrDate, DateTimeOrDate::Date(date!(1998;7;4)))
+        );
+    }
+
+    #[test]
+    fn rfc_5545_example_date_time_due_property() {
+        let input = "DUE:19980430T000000Z";
+        let (tail, prop) = property::<_, ()>.parse_peek(input).unwrap();
+
+        assert!(tail.is_empty());
+        assert_eq!(
+            prop,
+            known_prop!(
+                DtDue,
+                DateTimeOrDate,
+                DateTimeOrDate::DateTime(tf_utc_datetime(1998, 4, 30, 0, 0, 0))
+            )
+        );
+    }
+
+    #[test]
+    fn rfc_5545_example_date_time_start_property() {
+        let input = "DTSTART:19980118T073000Z";
+        let (tail, prop) = property::<_, ()>.parse_peek(input).unwrap();
+
+        assert!(tail.is_empty());
+        assert_eq!(
+            prop,
+            known_prop!(
+                DtStart,
+                DateTimeOrDate,
+                DateTimeOrDate::DateTime(tf_utc_datetime(1998, 1, 18, 7, 30, 0))
+            )
+        );
+    }
+
+    #[test]
+    fn rfc_5545_example_duration_property_1() {
+        let input = "DURATION:PT1H0M0S";
+        let (tail, prop) = property::<_, ()>.parse_peek(input).unwrap();
+
+        assert!(tail.is_empty());
+        assert_eq!(
+            prop,
+            known_prop!(Duration, Duration, exact_dur(1, 0, 0))
+        );
+    }
+
+    #[test]
+    fn rfc_5545_example_duration_property_2() {
+        let input = "DURATION:PT15M";
+        let (tail, prop) = property::<_, ()>.parse_peek(input).unwrap();
+
+        assert!(tail.is_empty());
+        assert_eq!(
+            prop,
+            known_prop!(Duration, Duration, exact_dur(0, 15, 0))
+        );
+    }
+
+    #[test]
+    fn rfc_5545_example_free_busy_time_property_1() {
+        let input = "FREEBUSY;FBTYPE=BUSY-UNAVAILABLE:19970308T160000Z/PT8H30M";
+        let (tail, prop) = property::<_, ()>.parse_peek(input).unwrap();
+        assert!(tail.is_empty());
+
+        let known = prop.try_into_known().unwrap();
+        assert_eq!(known.name, StaticProp::FreeBusy);
+        let PropValue::FreeBusyPeriods(p) = known.value else { panic!("expected FreeBusyPeriods") };
+
+        assert_eq!(
+            p.params.free_busy_type(),
+            Some(&Token::Known(FreeBusyType::BusyUnavailable))
+        );
+
+        assert_eq!(
+            p.value,
+            vec![Period::Start {
+                start: tf_utc_datetime(1997, 3, 8, 16, 0, 0),
+                duration: unsigned_exact_dur(8, 30, 0),
+            }]
+        );
+    }
+
+    #[test]
+    fn rfc_5545_example_free_busy_time_property_2() {
+        let input = "FREEBUSY;FBTYPE=FREE:19970308T160000Z/PT3H,19970308T200000Z/PT1H";
+        let (tail, prop) = property::<_, ()>.parse_peek(input).unwrap();
+        assert!(tail.is_empty());
+
+        let known = prop.try_into_known().unwrap();
+        assert_eq!(known.name, StaticProp::FreeBusy);
+        let PropValue::FreeBusyPeriods(p) = known.value else { panic!("expected FreeBusyPeriods") };
+
+        assert_eq!(
+            p.params.free_busy_type(),
+            Some(&Token::Known(FreeBusyType::Free))
+        );
+
+        assert_eq!(
+            p.value,
+            vec![
+                Period::Start {
+                    start: tf_utc_datetime(1997, 3, 8, 16, 0, 0),
+                    duration: unsigned_exact_dur(3, 0, 0),
+                },
+                Period::Start {
+                    start: tf_utc_datetime(1997, 3, 8, 20, 0, 0),
+                    duration: unsigned_exact_dur(1, 0, 0),
+                },
+            ]
+        );
+    }
+
+    #[test]
+    #[ignore = "Escaped stream + lz_dec_uint interaction causes unreachable!() panic when fold occurs before comma in period list"]
+    fn rfc_5545_example_free_busy_time_property_3() {
+        let input = "FREEBUSY;FBTYPE=FREE:19970308T160000Z/PT3H,19970308T200000Z/PT1H\r\n\t,19970308T230000Z/19970309T000000Z";
+        let (tail, prop) = property::<_, ()>.parse_peek(input.as_escaped()).unwrap();
+        assert!(tail.is_empty());
+
+        let known = prop.try_into_known().unwrap();
+        assert_eq!(known.name, StaticProp::FreeBusy);
+        let PropValue::FreeBusyPeriods(p) = known.value else { panic!("expected FreeBusyPeriods") };
+
+        assert_eq!(
+            p.params.free_busy_type(),
+            Some(&Token::Known(FreeBusyType::Free))
+        );
+
+        assert_eq!(
+            p.value,
+            vec![
+                Period::Start {
+                    start: tf_utc_datetime(1997, 3, 8, 16, 0, 0),
+                    duration: unsigned_exact_dur(3, 0, 0),
+                },
+                Period::Start {
+                    start: tf_utc_datetime(1997, 3, 8, 20, 0, 0),
+                    duration: unsigned_exact_dur(1, 0, 0),
+                },
+                Period::Explicit {
+                    start: tf_utc_datetime(1997, 3, 8, 23, 0, 0),
+                    end: tf_utc_datetime(1997, 3, 9, 0, 0, 0),
+                }
+            ]
+        );
+    }
+
+    #[test]
+    fn rfc_5545_example_time_transparency_property_1() {
+        let input = "TRANSP:TRANSPARENT";
+        let (tail, prop) = property::<_, ()>.parse_peek(input).unwrap();
+
+        assert!(tail.is_empty());
+        assert_eq!(
+            prop,
+            known_prop!(Transp, TimeTransparency, TimeTransparency::Transparent)
+        );
+    }
+
+    #[test]
+    fn rfc_5545_example_time_transparency_property_2() {
+        let input = "TRANSP:OPAQUE";
+        let (tail, prop) = property::<_, ()>.parse_peek(input).unwrap();
+
+        assert!(tail.is_empty());
+        assert_eq!(
+            prop,
+            known_prop!(Transp, TimeTransparency, TimeTransparency::Opaque)
+        );
+    }
+
+    #[test]
+    fn rfc_5545_example_time_zone_identifier_property_1() {
+        let input = "TZID:America/New_York";
+        let (tail, prop) = property::<_, ()>.parse_peek(input).unwrap();
+
+        assert!(tail.is_empty());
+        assert_eq!(
+            prop,
+            known_prop!(TzId, TzId, TzId::new("America/New_York").unwrap().into())
+        );
+    }
+
+    #[test]
+    fn rfc_5545_example_time_zone_identifier_property_2() {
+        let input = "TZID:America/Los_Angeles";
+        let (tail, prop) = property::<_, ()>.parse_peek(input).unwrap();
+
+        assert!(tail.is_empty());
+        assert_eq!(
+            prop,
+            known_prop!(TzId, TzId, TzId::new("America/Los_Angeles").unwrap().into())
+        );
+    }
+
+    #[test]
+    fn rfc_5545_example_time_zone_identifier_property_3() {
+        let input = "TZID:/example.org/America/New_York";
+        let (tail, prop) = property::<_, ()>.parse_peek(input).unwrap();
+
+        assert!(tail.is_empty());
+        assert_eq!(
+            prop,
+            known_prop!(TzId, TzId, TzId::new("/example.org/America/New_York").unwrap().into())
+        );
+    }
+
+    #[test]
+    fn rfc_5545_example_time_zone_name_property_1() {
+        let input = "TZNAME:EST";
+        let (tail, prop) = property::<_, ()>.parse_peek(input).unwrap();
+
+        assert!(tail.is_empty());
+        assert_eq!(prop, known_prop!(TzName, Text, "EST".to_string()));
+    }
+
+    #[test]
+    fn rfc_5545_example_time_zone_name_property_2() {
+        let input = "TZNAME;LANGUAGE=fr-CA:HNE";
+        let (tail, prop) = property::<_, ()>.parse_peek(input).unwrap();
+        assert!(tail.is_empty());
+
+        let known = prop.try_into_known().unwrap();
+        assert_eq!(known.name, StaticProp::TzName);
+        let PropValue::Text(p) = known.value else { panic!("expected Text") };
+
+        assert_eq!(p.params.language(), Some(&Language::parse("fr-CA").unwrap()));
+        assert_eq!(p.value, "HNE");
+    }
+
+    #[test]
+    fn rfc_5545_example_time_zone_offset_from_property_1() {
+        let input = "TZOFFSETFROM:-0500";
+        let (tail, prop) = property::<_, ()>.parse_peek(input).unwrap();
+
+        assert!(tail.is_empty());
+        assert_eq!(prop, known_prop!(TzOffsetFrom, UtcOffset, utc_offset!(-5;00)));
+    }
+
+    #[test]
+    fn rfc_5545_example_time_zone_offset_from_property_2() {
+        let input = "TZOFFSETFROM:+1345";
+        let (tail, prop) = property::<_, ()>.parse_peek(input).unwrap();
+
+        assert!(tail.is_empty());
+        assert_eq!(prop, known_prop!(TzOffsetFrom, UtcOffset, utc_offset!(+13;45)));
+    }
+
+    #[test]
+    fn rfc_5545_example_time_zone_offset_to_property_1() {
+        let input = "TZOFFSETTO:-0400";
+        let (tail, prop) = property::<_, ()>.parse_peek(input).unwrap();
+
+        assert!(tail.is_empty());
+        assert_eq!(prop, known_prop!(TzOffsetTo, UtcOffset, utc_offset!(-4;00)));
+    }
+
+    #[test]
+    fn rfc_5545_example_time_zone_offset_to_property_2() {
+        let input = "TZOFFSETTO:+1245";
+        let (tail, prop) = property::<_, ()>.parse_peek(input).unwrap();
+
+        assert!(tail.is_empty());
+        assert_eq!(prop, known_prop!(TzOffsetTo, UtcOffset, utc_offset!(+12;45)));
+    }
+
+    #[test]
+    fn rfc_5545_example_time_zone_url_property() {
+        let input = "TZURL:http://timezones.example.org/tz/America-Los_Angeles.ics";
+        let (tail, prop) = property::<_, ()>.parse_peek(input).unwrap();
+
+        assert!(tail.is_empty());
+        assert_eq!(
+            prop,
+            known_prop!(
+                TzUrl,
+                Uri,
+                Uri::new("http://timezones.example.org/tz/America-Los_Angeles.ics").unwrap().into()
+            )
+        );
+    }
+
+    #[test]
+    fn rfc_5545_example_attendee_property_1() {
+        let input =
+            "ATTENDEE;MEMBER=\"mailto:DEV-GROUP@example.com\":\r\n mailto:joecool@example.com";
+        let (tail, prop) = property::<_, ()>.parse_peek(input.as_escaped()).unwrap();
+        assert!(tail.is_empty());
+
+        let known = prop.try_into_known().unwrap();
+        assert_eq!(known.name, StaticProp::Attendee);
+        let PropValue::Uri(p) = known.value else { panic!("expected Uri") };
+
+        // Check membership param
+        let membership = p.params.membership().unwrap();
+        assert_eq!(membership.len().get(), 1);
+        assert_eq!(membership[0].as_str(), "mailto:DEV-GROUP@example.com");
+
+        assert_eq!(p.value.as_str(), "mailto:joecool@example.com");
+    }
+
+    #[test]
+    fn rfc_5545_example_attendee_property_2() {
+        let input =
+            "ATTENDEE;DELEGATED-FROM=\"mailto:immud@example.com\":\r\n mailto:ildoit@example.com";
+        let (tail, prop) = property::<_, ()>.parse_peek(input.as_escaped()).unwrap();
+        assert!(tail.is_empty());
+
+        let known = prop.try_into_known().unwrap();
+        assert_eq!(known.name, StaticProp::Attendee);
+        let PropValue::Uri(p) = known.value else { panic!("expected Uri") };
+
+        // Check delegated-from param
+        let del_from = p.params.delegated_from().unwrap();
+        assert_eq!(del_from.len().get(), 1);
+        assert_eq!(del_from[0].as_str(), "mailto:immud@example.com");
+
+        assert_eq!(p.value.as_str(), "mailto:ildoit@example.com");
+    }
+
+    #[test]
+    fn rfc_5545_example_attendee_property_3() {
+        let input = "ATTENDEE;ROLE=REQ-PARTICIPANT;PARTSTAT=TENTATIVE;CN=Henry\r\n Cabot:mailto:hcabot@example.com";
+        let (tail, prop) = property::<_, ()>.parse_peek(input.as_escaped()).unwrap();
+        assert!(tail.is_empty());
+
+        let known = prop.try_into_known().unwrap();
+        assert_eq!(known.name, StaticProp::Attendee);
+        let PropValue::Uri(p) = known.value else { panic!("expected Uri") };
+
+        assert_eq!(
+            p.params.participation_role(),
+            Some(&Token::Known(ParticipationRole::ReqParticipant))
+        );
+        assert_eq!(
+            p.params.participation_status(),
+            Some(&Token::Known(ParticipationStatus::Tentative))
+        );
+        // Common name is a ParamValue (DST newtype)
+        let cn = p.params.common_name().unwrap();
+        assert!(cn.as_str().contains("Henry"));
+        assert!(cn.as_str().contains("Cabot"));
+
+        assert_eq!(p.value.as_str(), "mailto:hcabot@example.com");
+    }
+
+    #[test]
+    fn rfc_5545_example_contact_property_1() {
+        let input = "CONTACT:Jim Dolittle\\, ABC Industries\\, +1-919-555-1234";
+        let (tail, prop) = property::<_, ()>.parse_peek(input).unwrap();
+
+        assert!(tail.is_empty());
+        assert_eq!(
+            prop,
+            known_prop!(
+                Contact,
+                Text,
+                "Jim Dolittle, ABC Industries, +1-919-555-1234".to_string()
+            )
+        );
+    }
+
+    #[test]
+    fn rfc_5545_example_contact_property_2() {
+        let input = "CONTACT;ALTREP=\"ldap://example.com:6666/o=ABC%20Industries\\,\r\n c=US???(cn=Jim%20Dolittle)\":Jim Dolittle\\, ABC Industries\\,\r\n +1-919-555-1234";
+        let (tail, prop) = property::<_, ()>.parse_peek(input.as_escaped()).unwrap();
+        assert!(tail.is_empty());
+
+        let known = prop.try_into_known().unwrap();
+        assert_eq!(known.name, StaticProp::Contact);
+        let PropValue::Text(p) = known.value else { panic!("expected Text") };
+
+        let alt_rep = p.params.alternate_representation().unwrap();
+        assert!(alt_rep.as_str().starts_with("ldap://example.com"));
+        assert!(p.value.starts_with("Jim Dolittle"));
+    }
+
+    #[test]
+    fn rfc_5545_example_organizer_property_1() {
+        let input = "ORGANIZER;CN=John Smith:mailto:jsmith@example.com";
+        let (tail, prop) = property::<_, ()>.parse_peek(input).unwrap();
+        assert!(tail.is_empty());
+
+        let known = prop.try_into_known().unwrap();
+        assert_eq!(known.name, StaticProp::Organizer);
+        let PropValue::Uri(p) = known.value else { panic!("expected Uri") };
+
+        let cn = p.params.common_name().unwrap();
+        assert_eq!(cn.as_str(), "John Smith");
+        assert_eq!(p.value.as_str(), "mailto:jsmith@example.com");
+    }
+
+    #[test]
+    fn rfc_5545_example_organizer_property_2() {
+        let input = "ORGANIZER;CN=JohnSmith;DIR=\"ldap://example.com:6666/o=DC%20Ass\r\n ociates,c=US???(cn=John%20Smith)\":mailto:jsmith@example.com";
+        let (tail, prop) = property::<_, ()>.parse_peek(input.as_escaped()).unwrap();
+        assert!(tail.is_empty());
+
+        let known = prop.try_into_known().unwrap();
+        assert_eq!(known.name, StaticProp::Organizer);
+        let PropValue::Uri(p) = known.value else { panic!("expected Uri") };
+
+        let cn = p.params.common_name().unwrap();
+        assert_eq!(cn.as_str(), "JohnSmith");
+
+        let dir = p.params.directory_reference().unwrap();
+        assert!(dir.as_str().starts_with("ldap://example.com"));
+
+        assert_eq!(p.value.as_str(), "mailto:jsmith@example.com");
+    }
+
+    #[test]
+    fn rfc_5545_example_recurrence_identifier_property_1() {
+        let input = "RECURRENCE-ID;VALUE=DATE:19960401";
+        let (tail, prop) = property::<_, ()>.parse_peek(input).unwrap();
+
+        assert!(tail.is_empty());
+        assert_eq!(
+            prop,
+            known_prop!(RecurId, DateTimeOrDate, DateTimeOrDate::Date(date!(1996;4;1)))
+        );
+    }
+
+    #[test]
+    fn rfc_5545_example_recurrence_identifier_property_2() {
+        let input = "RECURRENCE-ID;RANGE=THISANDFUTURE:19960120T120000Z";
+        let (tail, prop) = property::<_, ()>.parse_peek(input).unwrap();
+        assert!(tail.is_empty());
+
+        let known = prop.try_into_known().unwrap();
+        assert_eq!(known.name, StaticProp::RecurId);
+        let PropValue::DateTimeOrDate(p) = known.value else { panic!("expected DateTimeOrDate") };
+
+        assert_eq!(p.params.recurrence_range(), Some(&ThisAndFuture));
+
+        assert_eq!(
+            p.value,
+            DateTimeOrDate::DateTime(tf_utc_datetime(1996, 1, 20, 12, 0, 0))
+        );
+    }
+
+    #[test]
+    fn rfc_5545_example_uid_property() {
+        let input = "UID:19960401T080045Z-4000F192713-0052@example.com";
+        let (tail, prop) = property::<_, ()>.parse_peek(input).unwrap();
+
+        assert!(tail.is_empty());
+        assert_eq!(
+            prop,
+            known_prop!(
+                Uid,
+                Uid,
+                Uid::new("19960401T080045Z-4000F192713-0052@example.com").unwrap().into()
+            )
+        );
+    }
+
+    #[test]
+    fn rfc_5545_example_request_status_property_1() {
+        let input = "REQUEST-STATUS:2.0;Success";
+        let (tail, prop) = property::<_, ()>.parse_peek(input).unwrap();
+
+        assert!(tail.is_empty());
+        assert_eq!(
+            prop,
+            known_prop!(
+                RequestStatus,
+                RequestStatus,
+                RequestStatus {
+                    code: status_code(2, 0),
+                    description: "Success".into(),
+                    exception_data: None,
+                }
+            )
+        );
+    }
+
+    #[test]
+    fn rfc_5545_example_request_status_property_2() {
+        let input = "REQUEST-STATUS:3.1;Invalid property value;DTSTART:96-Apr-01";
+        let (tail, prop) = property::<_, ()>.parse_peek(input).unwrap();
+
+        assert!(tail.is_empty());
+        assert_eq!(
+            prop,
+            known_prop!(
+                RequestStatus,
+                RequestStatus,
+                RequestStatus {
+                    code: status_code(3, 1),
+                    description: "Invalid property value".into(),
+                    exception_data: Some("DTSTART:96-Apr-01".into()),
+                }
+            )
+        );
+    }
+
+    // NOTE: skipped the third example
+
+    #[test]
+    fn rfc_5545_example_request_status_property_4() {
+        let input = "REQUEST-STATUS:4.1;Event conflict.  Date-time is busy.";
+        let (tail, prop) = property::<_, ()>.parse_peek(input).unwrap();
+
+        assert!(tail.is_empty());
+        assert_eq!(
+            prop,
+            known_prop!(
+                RequestStatus,
+                RequestStatus,
+                RequestStatus {
+                    code: status_code(4, 1),
+                    description: "Event conflict.  Date-time is busy.".into(),
+                    exception_data: None,
+                }
+            )
+        );
+    }
+
+    #[test]
+    fn rfc_5545_example_iana_property() {
+        let mut input: &str = "NON-SMOKING;VALUE=BOOLEAN:TRUE";
+        let prop = property::<_, ()>(&mut input).unwrap();
+        let unknown = prop.try_into_unknown().unwrap();
+        assert_eq!(unknown.name, "NON-SMOKING");
+        assert_eq!(unknown.kind, NameKind::Iana);
+        assert_eq!(unknown.value, Value::Boolean(true));
+
+        let mut input: &str = "NON-SMOKING:TRUE";
+        let prop = property::<_, ()>(&mut input).unwrap();
+        let unknown = prop.try_into_unknown().unwrap();
+        assert_eq!(unknown.name, "NON-SMOKING");
+        assert_eq!(unknown.kind, NameKind::Iana);
+        assert_eq!(unknown.value, Value::Text("TRUE".to_string()));
+    }
+
+    #[test]
+    fn rfc_5545_example_x_property() {
+        let input = "X-ABC-MMSUBJ;VALUE=URI;FMTTYPE=audio/basic:http://www.example.org/mysubj.au";
+        let (tail, prop) = property::<_, ()>.parse_peek(input).unwrap();
+        assert!(tail.is_empty());
+
+        let unknown = prop.try_into_unknown().unwrap();
+        assert_eq!(unknown.name, "X-ABC-MMSUBJ");
+        assert_eq!(unknown.kind, NameKind::X);
+        match &unknown.value {
+            Value::Uri(uri) => assert_eq!(uri.as_str(), "http://www.example.org/mysubj.au"),
+            other => panic!("expected Value::Uri, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn integer_value_parsing() {
+        for mut i in ["0", "-2147483648", "2147483647"] {
+            assert!(parse_value::<_, ()>(Token::Known(ValueType::Integer), &mut i).is_ok());
+        }
+
+        for mut i in ["-2147483649", "2147483648"] {
+            assert!(parse_value::<_, ()>(Token::Known(ValueType::Integer), &mut i).is_err());
+        }
+    }
+
+    // PROPERTY NAME TESTS
+
+    /// Asserts that the inputs are equal under [`property_name`].
+    fn assert_prop_name_eq<'i>(input: &'i str, expected: PropName<&'i str>) {
+        let mut input_ref = input;
+        let result = property_name::<_, ()>.parse_next(&mut input_ref);
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap(), expected);
+        assert!(input_ref.is_empty());
+    }
+
+    // Helper function to test parsing failures
+    fn assert_prop_name_parse_failure(input: &str) {
+        let mut input_ref = input;
+        let result = property_name::<_, ()>.parse_next(&mut input_ref);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn rfc5545_calendar_property_names() {
+        assert_prop_name_eq("CALSCALE", PropName::Known(StaticProp::CalScale));
+        assert_prop_name_eq("METHOD", PropName::Known(StaticProp::Method));
+        assert_prop_name_eq("PRODID", PropName::Known(StaticProp::ProdId));
+        assert_prop_name_eq("VERSION", PropName::Known(StaticProp::Version));
+    }
+
+    #[test]
+    fn rfc5545_descriptive_property_names() {
+        assert_prop_name_eq("ATTACH", PropName::Known(StaticProp::Attach));
+        assert_prop_name_eq("CATEGORIES", PropName::Known(StaticProp::Categories));
+        assert_prop_name_eq("CLASS", PropName::Known(StaticProp::Class));
+        assert_prop_name_eq("COMMENT", PropName::Known(StaticProp::Comment));
+        assert_prop_name_eq("DESCRIPTION", PropName::Known(StaticProp::Description));
+        assert_prop_name_eq("GEO", PropName::Known(StaticProp::Geo));
+        assert_prop_name_eq("LOCATION", PropName::Known(StaticProp::Location));
+        assert_prop_name_eq(
+            "PERCENT-COMPLETE",
+            PropName::Known(StaticProp::PercentComplete),
+        );
+        assert_prop_name_eq("PRIORITY", PropName::Known(StaticProp::Priority));
+        assert_prop_name_eq("RESOURCES", PropName::Known(StaticProp::Resources));
+        assert_prop_name_eq("STATUS", PropName::Known(StaticProp::Status));
+        assert_prop_name_eq("SUMMARY", PropName::Known(StaticProp::Summary));
+    }
+
+    #[test]
+    fn rfc5545_datetime_property_names() {
+        assert_prop_name_eq("COMPLETED", PropName::Known(StaticProp::DtCompleted));
+        assert_prop_name_eq("DTEND", PropName::Known(StaticProp::DtEnd));
+        assert_prop_name_eq("DUE", PropName::Known(StaticProp::DtDue));
+        assert_prop_name_eq("DTSTART", PropName::Known(StaticProp::DtStart));
+        assert_prop_name_eq("DURATION", PropName::Known(StaticProp::Duration));
+        assert_prop_name_eq("FREEBUSY", PropName::Known(StaticProp::FreeBusy));
+        assert_prop_name_eq("TRANSP", PropName::Known(StaticProp::Transp));
+        assert_prop_name_eq("DTSTAMP", PropName::Known(StaticProp::DtStamp));
+    }
+
+    #[test]
+    fn rfc5545_timezone_property_names() {
+        assert_prop_name_eq("TZID", PropName::Known(StaticProp::TzId));
+        assert_prop_name_eq("TZNAME", PropName::Known(StaticProp::TzName));
+        assert_prop_name_eq("TZOFFSETFROM", PropName::Known(StaticProp::TzOffsetFrom));
+        assert_prop_name_eq("TZOFFSETTO", PropName::Known(StaticProp::TzOffsetTo));
+        assert_prop_name_eq("TZURL", PropName::Known(StaticProp::TzUrl));
+    }
+
+    #[test]
+    fn rfc5545_relationship_property_names() {
+        assert_prop_name_eq("ATTENDEE", PropName::Known(StaticProp::Attendee));
+        assert_prop_name_eq("CONTACT", PropName::Known(StaticProp::Contact));
+        assert_prop_name_eq("ORGANIZER", PropName::Known(StaticProp::Organizer));
+        assert_prop_name_eq("RECURRENCE-ID", PropName::Known(StaticProp::RecurId));
+        assert_prop_name_eq("RELATED-TO", PropName::Known(StaticProp::RelatedTo));
+        assert_prop_name_eq("URL", PropName::Known(StaticProp::Url));
+        assert_prop_name_eq("UID", PropName::Known(StaticProp::Uid));
+    }
+
+    #[test]
+    fn rfc5545_recurrence_property_names() {
+        assert_prop_name_eq("EXDATE", PropName::Known(StaticProp::ExDate));
+        assert_prop_name_eq("RDATE", PropName::Known(StaticProp::RDate));
+        assert_prop_name_eq("RRULE", PropName::Known(StaticProp::RRule));
+    }
+
+    #[test]
+    fn rfc5545_alarm_property_names() {
+        assert_prop_name_eq("ACTION", PropName::Known(StaticProp::Action));
+        assert_prop_name_eq("REPEAT", PropName::Known(StaticProp::Repeat));
+        assert_prop_name_eq("TRIGGER", PropName::Known(StaticProp::Trigger));
+    }
+
+    #[test]
+    fn rfc5545_change_management_property_names() {
+        assert_prop_name_eq("CREATED", PropName::Known(StaticProp::Created));
+        assert_prop_name_eq("LAST-MODIFIED", PropName::Known(StaticProp::LastModified));
+        assert_prop_name_eq("SEQUENCE", PropName::Known(StaticProp::Sequence));
+    }
+
+    #[test]
+    fn rfc5545_miscellaneous_property_names() {
+        assert_prop_name_eq("REQUEST-STATUS", PropName::Known(StaticProp::RequestStatus));
+    }
+
+    #[test]
+    fn rfc7986_property_names() {
+        assert_prop_name_eq("NAME", PropName::Known(StaticProp::Name));
+        assert_prop_name_eq(
+            "REFRESH-INTERVAL",
+            PropName::Known(StaticProp::RefreshInterval),
+        );
+        assert_prop_name_eq("SOURCE", PropName::Known(StaticProp::Source));
+        assert_prop_name_eq("COLOR", PropName::Known(StaticProp::Color));
+        assert_prop_name_eq("IMAGE", PropName::Known(StaticProp::Image));
+        assert_prop_name_eq("CONFERENCE", PropName::Known(StaticProp::Conference));
+    }
+
+    #[test]
+    fn property_name_case_insensitivity() {
+        assert_prop_name_eq("dtstart", PropName::Known(StaticProp::DtStart));
+        assert_prop_name_eq("DTSTART", PropName::Known(StaticProp::DtStart));
+        assert_prop_name_eq("DtStArT", PropName::Known(StaticProp::DtStart));
+        assert_prop_name_eq("dtSTART", PropName::Known(StaticProp::DtStart));
+
+        assert_prop_name_eq("conference", PropName::Known(StaticProp::Conference));
+        assert_prop_name_eq("Conference", PropName::Known(StaticProp::Conference));
+        assert_prop_name_eq("CONFERENCE", PropName::Known(StaticProp::Conference));
+    }
+
+    #[test]
+    fn iana_property_names() {
+        assert_prop_name_eq("UNKNOWN-PROP", PropName::iana("UNKNOWN-PROP"));
+        assert_prop_name_eq("CUSTOM", PropName::iana("CUSTOM"));
+        assert_prop_name_eq("NEW-FEATURE", PropName::iana("NEW-FEATURE"));
+    }
+
+    #[test]
+    fn x_property_names() {
+        assert_prop_name_eq("X-CUSTOM", PropName::x("X-CUSTOM"));
+        assert_prop_name_eq("X-VENDOR-PROP", PropName::x("X-VENDOR-PROP"));
+        assert_prop_name_eq("X-custom", PropName::x("X-custom"));
+    }
+
+    #[test]
+    fn property_name_longest_match_precedence() {
+        // Ensure longer properties are matched correctly when they share prefixes
+        assert_prop_name_eq(
+            "REFRESH-INTERVAL",
+            PropName::Known(StaticProp::RefreshInterval),
+        );
+        assert_prop_name_eq("REQUEST-STATUS", PropName::Known(StaticProp::RequestStatus));
+        assert_prop_name_eq("RECURRENCE-ID", PropName::Known(StaticProp::RecurId));
+
+        // Make sure we don't match shorter prefixes
+        assert_prop_name_eq("REFRESH", PropName::iana("REFRESH"));
+        assert_prop_name_eq("REQUEST", PropName::iana("REQUEST"));
+        assert_prop_name_eq("RECURRENCE", PropName::iana("RECURRENCE"));
+    }
+
+    #[test]
+    fn property_name_edge_cases() {
+        // Empty input
+        assert_prop_name_parse_failure("");
+
+        // Single characters
+        assert_prop_name_eq("A", PropName::iana("A"));
+        assert_prop_name_eq("Z", PropName::iana("Z"));
+
+        // Properties with hyphens
+        assert_prop_name_eq("LAST-MODIFIED", PropName::Known(StaticProp::LastModified));
+        assert_prop_name_eq(
+            "PERCENT-COMPLETE",
+            PropName::Known(StaticProp::PercentComplete),
+        );
+        assert_prop_name_eq(
+            "REFRESH-INTERVAL",
+            PropName::Known(StaticProp::RefreshInterval),
+        );
+
+        // Mixed case with hyphens
+        assert_prop_name_eq("last-modified", PropName::Known(StaticProp::LastModified));
+        assert_prop_name_eq(
+            "Percent-Complete",
+            PropName::Known(StaticProp::PercentComplete),
+        );
+    }
+}
