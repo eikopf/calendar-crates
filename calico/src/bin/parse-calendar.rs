@@ -12,13 +12,15 @@ pub fn main() {
 
     let load_start = Instant::now();
     let input = std::fs::read_to_string(path).unwrap();
+    let input = input.as_escaped();
 
     let parse_start = Instant::now();
-    let (tail, cal) = calendar::<_, ()>.parse_peek(input.as_escaped()).unwrap();
+    let res = calendar::<_, winnow::error::InputError<_>>.parse_peek(input);
+    dbg![res];
 
     let end = Instant::now();
     // dbg![cal.components().len()];
     // dbg![tail.len()];
-    // eprintln!("load time: {:?}", end - load_start);
-    // eprintln!("parse time: {:?}", end - parse_start);
+    eprintln!("load time: {:?}", end - load_start);
+    eprintln!("parse time: {:?}", end - parse_start);
 }
