@@ -19,9 +19,10 @@ use mitsein::vec1::Vec1;
 use winnow::{
     Parser,
     ascii::Caseless,
-    combinator::{delimited, preceded, terminated},
+    combinator::{delimited, opt, preceded, terminated},
     error::{FromExternalError, ParserError},
     stream::{AsBStr, AsChar, Compare, SliceLen, Stream, StreamIsPartial},
+    token::one_of,
 };
 
 use crate::{
@@ -55,8 +56,6 @@ where
     I::Token: AsChar + Clone,
     E: ParserError<I>,
 {
-    use winnow::combinator::opt;
-    use winnow::token::one_of;
     move |input: &mut I| {
         let has_quote = opt(one_of('"')).parse_next(input)?.is_some();
         let value = inner.parse_next(input)?;
@@ -110,9 +109,9 @@ where
             // RFC 5545 PARAMETERS
             StaticParam::AltRep => quoted_uri.map(KnownParam::AltRep).parse_next(input),
             StaticParam::CommonName => param_value.map(KnownParam::CommonName).parse_next(input),
-            StaticParam::CalUserType => {
-                maybe_quoted(calendar_user_type).map(KnownParam::CUType).parse_next(input)
-            }
+            StaticParam::CalUserType => maybe_quoted(calendar_user_type)
+                .map(KnownParam::CUType)
+                .parse_next(input),
             StaticParam::DelFrom => quoted_addresses.map(KnownParam::DelFrom).parse_next(input),
             StaticParam::DelTo => quoted_addresses.map(KnownParam::DelTo).parse_next(input),
             StaticParam::Dir => quoted_uri.map(KnownParam::Dir).parse_next(input),
@@ -150,8 +149,12 @@ where
                 .map(KnownParam::AlarmTrigger)
                 .parse_next(input),
             StaticParam::RelType => relationship_type.map(KnownParam::RelType).parse_next(input),
-            StaticParam::Role => maybe_quoted(participation_role).map(KnownParam::Role).parse_next(input),
-            StaticParam::Rsvp => maybe_quoted(bool_caseless).map(KnownParam::Rsvp).parse_next(input),
+            StaticParam::Role => maybe_quoted(participation_role)
+                .map(KnownParam::Role)
+                .parse_next(input),
+            StaticParam::Rsvp => maybe_quoted(bool_caseless)
+                .map(KnownParam::Rsvp)
+                .parse_next(input),
             StaticParam::SentBy => quoted_uri.map(KnownParam::SentBy).parse_next(input),
             StaticParam::TzId => tz_id_param.map(KnownParam::TzId).parse_next(input),
             StaticParam::Value => value_type.map(KnownParam::Value).parse_next(input),
@@ -293,9 +296,9 @@ mod tests {
                 .parse_peek("tzid=America/New_York")
                 .ok()
                 .and_then(|(_, p)| p.try_into_known().ok()),
-            Some(KnownParam::TzId(TzId::from_text_buf(
-                TextBuf::from(Text::new("America/New_York").unwrap()),
-            ))),
+            Some(KnownParam::TzId(TzId::from_text_buf(TextBuf::from(
+                Text::new("America/New_York").unwrap()
+            ),))),
         );
 
         assert_eq!(
@@ -341,7 +344,10 @@ mod tests {
         // (for compatibility with RFC 2445 ENCODING=QUOTED-PRINTABLE etc.)
         for input in ["ENCODING=base", "ENCODING=bit", "ENCODING=64", "ENCODING=8"] {
             let (_, p) = parameter::<_, ()>.parse_peek(input).unwrap();
-            assert!(p.try_into_known().is_err(), "should fall back to unknown for: {input}");
+            assert!(
+                p.try_into_known().is_err(),
+                "should fall back to unknown for: {input}"
+            );
         }
     }
 
