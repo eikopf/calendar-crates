@@ -15,11 +15,13 @@
 //! more specific grammar for the corresponding value on the right-hand side of
 //! the `=` character.
 
+use std::str::FromStr;
+
 use mitsein::vec1::Vec1;
 use winnow::{
     Parser,
     ascii::Caseless,
-    combinator::{delimited, opt, preceded, terminated},
+    combinator::{delimited, opt, terminated},
     error::{FromExternalError, ParserError},
     stream::{AsBStr, AsChar, Compare, SliceLen, Stream, StreamIsPartial},
     token::one_of,
@@ -33,10 +35,10 @@ use crate::{
     parser::{
         InputStream,
         primitive::{
-            alarm_trigger_relationship, ascii_lower, bool_caseless, comma_seq1, feature_type,
-            format_type, free_busy_type, inline_encoding, language, param_value,
-            participation_role, participation_status, positive_integer, relationship_type,
-            tz_id_param, uri, value_type,
+            alarm_trigger_relationship, bool_caseless, comma_seq1, feature_type, format_type,
+            free_busy_type, inline_encoding, language, param_value, participation_role,
+            participation_status, positive_integer, relationship_type, tz_id_param, uri,
+            value_type,
         },
     },
 };
@@ -181,92 +183,11 @@ where
     I::Token: AsChar + Clone,
     E: ParserError<I> + FromExternalError<I, CalendarParseError<I::Slice>>,
 {
-    fn static_name<I>(input: &mut I) -> Result<StaticParam, ()>
-    where
-        I: StreamIsPartial + Stream + Compare<Caseless<&'static str>> + Compare<char>,
-        I::Token: AsChar + Clone,
-    {
-        macro_rules! tail {
-            ($s:literal, $c:expr) => {
-                Caseless($s).value($c).parse_next(input)
-            };
-        }
+    let name = name.parse_next(input)?;
 
-        match ascii_lower.parse_next(input)? {
-            'a' => tail!("ltrep", StaticParam::AltRep),
-            // CN | CUTYPE
-            'c' => match ascii_lower.parse_next(input)? {
-                'n' => tail!("", StaticParam::CommonName),
-                'u' => tail!("type", StaticParam::CalUserType),
-                _ => Err(()),
-            },
-            // DELEGATED-FROM | DELEGATED-TO | DIR | DISPLAY
-            'd' => match ascii_lower.parse_next(input)? {
-                // DELEGATED-FROM | DELEGATED-TO
-                'e' => match preceded(Caseless("legated-"), ascii_lower).parse_next(input)? {
-                    'f' => tail!("rom", StaticParam::DelFrom),
-                    't' => tail!("o", StaticParam::DelTo),
-                    _ => Err(()),
-                },
-                // DIR | DISPLAY
-                'i' => match ascii_lower.parse_next(input)? {
-                    'r' => tail!("", StaticParam::Dir),
-                    's' => tail!("play", StaticParam::Display),
-                    _ => Err(()),
-                },
-                _ => Err(()),
-            },
-            // ENCODING | EMAIL
-            'e' => match ascii_lower.parse_next(input)? {
-                'm' => tail!("ail", StaticParam::Email),
-                'n' => tail!("coding", StaticParam::Encoding),
-                _ => Err(()),
-            },
-            // FMTTYPE | FBTYPE | FEATURE
-            'f' => match ascii_lower.parse_next(input)? {
-                'b' => tail!("type", StaticParam::FreeBusyType),
-                'e' => tail!("ature", StaticParam::Feature),
-                'm' => tail!("ttype", StaticParam::FormatType),
-                _ => Err(()),
-            },
-            // LABEL | LANGUAGE
-            'l' => match preceded(Caseless("a"), ascii_lower).parse_next(input)? {
-                'b' => tail!("el", StaticParam::Label),
-                'n' => tail!("guage", StaticParam::Language),
-                _ => Err(()),
-            },
-            'm' => tail!("ember", StaticParam::Member),
-            'p' => tail!("artstat", StaticParam::PartStat),
-            // RANGE | RELATED | RELTYPE | ROLE | RSVP
-            'r' => match ascii_lower.parse_next(input)? {
-                'a' => tail!("nge", StaticParam::Range),
-                // RELATED | RELTYPE
-                'e' => match preceded(Caseless("l"), ascii_lower).parse_next(input)? {
-                    'a' => {
-                        tail!("ted", StaticParam::Related)
-                    }
-                    't' => tail!("ype", StaticParam::RelType),
-                    _ => Err(()),
-                },
-                'o' => tail!("le", StaticParam::Role),
-                's' => tail!("vp", StaticParam::Rsvp),
-                _ => Err(()),
-            },
-            's' => tail!("ent-by", StaticParam::SentBy),
-            't' => tail!("zid", StaticParam::TzId),
-            'v' => tail!("alue", StaticParam::Value),
-            _ => Err(()),
-        }
-    }
-
-    let checkpoint = input.checkpoint();
-
-    match static_name.parse_next(input) {
-        Ok(name) => Ok(ParamName::Known(name)),
-        Err(()) => {
-            input.reset(&checkpoint);
-            name.map(ParamName::Unknown).parse_next(input)
-        }
+    match StaticParam::from_str(name.as_str()) {
+        Ok(static_param) => Ok(ParamName::Known(static_param)),
+        Err(_) => Ok(ParamName::Unknown(name)),
     }
 }
 #[cfg(test)]

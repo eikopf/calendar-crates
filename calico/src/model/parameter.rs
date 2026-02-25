@@ -55,6 +55,7 @@
 
 use mitsein::vec1::Vec1;
 use structible::structible;
+use strum::EnumString;
 
 use super::{
     primitive::{
@@ -115,33 +116,85 @@ impl Params {
     /// Inserts a known parameter, overwriting any previous value.
     pub fn insert_known(&mut self, param: KnownParam) {
         match param {
-            KnownParam::AltRep(v) => { self.set_alternate_representation(v); }
-            KnownParam::CommonName(v) => { self.set_common_name(v); }
-            KnownParam::CUType(v) => { self.set_calendar_user_type(v); }
-            KnownParam::DelFrom(v) => { self.set_delegated_from(v); }
-            KnownParam::DelTo(v) => { self.set_delegated_to(v); }
-            KnownParam::Dir(v) => { self.set_directory_reference(v); }
-            KnownParam::Encoding(v) => { self.set_inline_encoding(v); }
-            KnownParam::FormatType(v) => { self.set_format_type(v); }
-            KnownParam::FBType(v) => { self.set_free_busy_type(v); }
-            KnownParam::Language(v) => { self.set_language(v); }
-            KnownParam::Member(v) => { self.set_membership(v); }
-            KnownParam::PartStatus(v) => { self.set_participation_status(v); }
-            KnownParam::RecurrenceIdentifierRange => { self.set_recurrence_range(ThisAndFuture); }
-            KnownParam::AlarmTrigger(v) => { self.set_trigger_relationship(v); }
-            KnownParam::RelType(v) => { self.set_relationship_type(v); }
-            KnownParam::Role(v) => { self.set_participation_role(v); }
-            KnownParam::Rsvp(v) => { self.set_rsvp_expectation(v); }
-            KnownParam::SentBy(v) => { self.set_sent_by(v); }
-            KnownParam::TzId(v) => { self.set_tz_id(v); }
+            KnownParam::AltRep(v) => {
+                self.set_alternate_representation(v);
+            }
+            KnownParam::CommonName(v) => {
+                self.set_common_name(v);
+            }
+            KnownParam::CUType(v) => {
+                self.set_calendar_user_type(v);
+            }
+            KnownParam::DelFrom(v) => {
+                self.set_delegated_from(v);
+            }
+            KnownParam::DelTo(v) => {
+                self.set_delegated_to(v);
+            }
+            KnownParam::Dir(v) => {
+                self.set_directory_reference(v);
+            }
+            KnownParam::Encoding(v) => {
+                self.set_inline_encoding(v);
+            }
+            KnownParam::FormatType(v) => {
+                self.set_format_type(v);
+            }
+            KnownParam::FBType(v) => {
+                self.set_free_busy_type(v);
+            }
+            KnownParam::Language(v) => {
+                self.set_language(v);
+            }
+            KnownParam::Member(v) => {
+                self.set_membership(v);
+            }
+            KnownParam::PartStatus(v) => {
+                self.set_participation_status(v);
+            }
+            KnownParam::RecurrenceIdentifierRange => {
+                self.set_recurrence_range(ThisAndFuture);
+            }
+            KnownParam::AlarmTrigger(v) => {
+                self.set_trigger_relationship(v);
+            }
+            KnownParam::RelType(v) => {
+                self.set_relationship_type(v);
+            }
+            KnownParam::Role(v) => {
+                self.set_participation_role(v);
+            }
+            KnownParam::Rsvp(v) => {
+                self.set_rsvp_expectation(v);
+            }
+            KnownParam::SentBy(v) => {
+                self.set_sent_by(v);
+            }
+            KnownParam::TzId(v) => {
+                self.set_tz_id(v);
+            }
             KnownParam::Value(_) => { /* VALUE is not stored in Params */ }
-            KnownParam::Display(v) => { self.set_display_type(v); }
-            KnownParam::Email(v) => { self.set_email(v); }
-            KnownParam::Feature(v) => { self.set_feature_type(v); }
-            KnownParam::Label(v) => { self.set_label(v); }
-            KnownParam::Order(v) => { self.set_order(v); }
-            KnownParam::Schema(v) => { self.set_schema(v); }
-            KnownParam::Derived(v) => { self.set_derived(v); }
+            KnownParam::Display(v) => {
+                self.set_display_type(v);
+            }
+            KnownParam::Email(v) => {
+                self.set_email(v);
+            }
+            KnownParam::Feature(v) => {
+                self.set_feature_type(v);
+            }
+            KnownParam::Label(v) => {
+                self.set_label(v);
+            }
+            KnownParam::Order(v) => {
+                self.set_order(v);
+            }
+            KnownParam::Schema(v) => {
+                self.set_schema(v);
+            }
+            KnownParam::Derived(v) => {
+                self.set_derived(v);
+            }
         }
     }
 
@@ -248,30 +301,78 @@ impl TryFrom<Params> for StructuredDataParams {
                 let schema = fields.take_schema().unwrap();
                 let mut result = StructuredDataParams::new(format_type, schema);
 
-                if let Some(v) = fields.take_alternate_representation() { result.set_alternate_representation(v); }
-                if let Some(v) = fields.take_common_name() { result.set_common_name(v); }
-                if let Some(v) = fields.take_calendar_user_type() { result.set_calendar_user_type(v); }
-                if let Some(v) = fields.take_delegated_from() { result.set_delegated_from(v); }
-                if let Some(v) = fields.take_delegated_to() { result.set_delegated_to(v); }
-                if let Some(v) = fields.take_directory_reference() { result.set_directory_reference(v); }
-                if let Some(v) = fields.take_inline_encoding() { result.set_inline_encoding(v); }
-                if let Some(v) = fields.take_free_busy_type() { result.set_free_busy_type(v); }
-                if let Some(v) = fields.take_language() { result.set_language(v); }
-                if let Some(v) = fields.take_membership() { result.set_membership(v); }
-                if let Some(v) = fields.take_participation_status() { result.set_participation_status(v); }
-                if let Some(v) = fields.take_recurrence_range() { result.set_recurrence_range(v); }
-                if let Some(v) = fields.take_trigger_relationship() { result.set_trigger_relationship(v); }
-                if let Some(v) = fields.take_relationship_type() { result.set_relationship_type(v); }
-                if let Some(v) = fields.take_participation_role() { result.set_participation_role(v); }
-                if let Some(v) = fields.take_rsvp_expectation() { result.set_rsvp_expectation(v); }
-                if let Some(v) = fields.take_sent_by() { result.set_sent_by(v); }
-                if let Some(v) = fields.take_tz_id() { result.set_tz_id(v); }
-                if let Some(v) = fields.take_display_type() { result.set_display_type(v); }
-                if let Some(v) = fields.take_email() { result.set_email(v); }
-                if let Some(v) = fields.take_feature_type() { result.set_feature_type(v); }
-                if let Some(v) = fields.take_label() { result.set_label(v); }
-                if let Some(v) = fields.take_order() { result.set_order(v); }
-                if let Some(v) = fields.take_derived() { result.set_derived(v); }
+                if let Some(v) = fields.take_alternate_representation() {
+                    result.set_alternate_representation(v);
+                }
+                if let Some(v) = fields.take_common_name() {
+                    result.set_common_name(v);
+                }
+                if let Some(v) = fields.take_calendar_user_type() {
+                    result.set_calendar_user_type(v);
+                }
+                if let Some(v) = fields.take_delegated_from() {
+                    result.set_delegated_from(v);
+                }
+                if let Some(v) = fields.take_delegated_to() {
+                    result.set_delegated_to(v);
+                }
+                if let Some(v) = fields.take_directory_reference() {
+                    result.set_directory_reference(v);
+                }
+                if let Some(v) = fields.take_inline_encoding() {
+                    result.set_inline_encoding(v);
+                }
+                if let Some(v) = fields.take_free_busy_type() {
+                    result.set_free_busy_type(v);
+                }
+                if let Some(v) = fields.take_language() {
+                    result.set_language(v);
+                }
+                if let Some(v) = fields.take_membership() {
+                    result.set_membership(v);
+                }
+                if let Some(v) = fields.take_participation_status() {
+                    result.set_participation_status(v);
+                }
+                if let Some(v) = fields.take_recurrence_range() {
+                    result.set_recurrence_range(v);
+                }
+                if let Some(v) = fields.take_trigger_relationship() {
+                    result.set_trigger_relationship(v);
+                }
+                if let Some(v) = fields.take_relationship_type() {
+                    result.set_relationship_type(v);
+                }
+                if let Some(v) = fields.take_participation_role() {
+                    result.set_participation_role(v);
+                }
+                if let Some(v) = fields.take_rsvp_expectation() {
+                    result.set_rsvp_expectation(v);
+                }
+                if let Some(v) = fields.take_sent_by() {
+                    result.set_sent_by(v);
+                }
+                if let Some(v) = fields.take_tz_id() {
+                    result.set_tz_id(v);
+                }
+                if let Some(v) = fields.take_display_type() {
+                    result.set_display_type(v);
+                }
+                if let Some(v) = fields.take_email() {
+                    result.set_email(v);
+                }
+                if let Some(v) = fields.take_feature_type() {
+                    result.set_feature_type(v);
+                }
+                if let Some(v) = fields.take_label() {
+                    result.set_label(v);
+                }
+                if let Some(v) = fields.take_order() {
+                    result.set_order(v);
+                }
+                if let Some(v) = fields.take_derived() {
+                    result.set_derived(v);
+                }
 
                 Ok(result)
             }
@@ -287,30 +388,78 @@ impl From<StructuredDataParams> for Params {
         result.set_format_type(fields.take_format_type().unwrap());
         result.set_schema(fields.take_schema().unwrap());
 
-        if let Some(v) = fields.take_alternate_representation() { result.set_alternate_representation(v); }
-        if let Some(v) = fields.take_common_name() { result.set_common_name(v); }
-        if let Some(v) = fields.take_calendar_user_type() { result.set_calendar_user_type(v); }
-        if let Some(v) = fields.take_delegated_from() { result.set_delegated_from(v); }
-        if let Some(v) = fields.take_delegated_to() { result.set_delegated_to(v); }
-        if let Some(v) = fields.take_directory_reference() { result.set_directory_reference(v); }
-        if let Some(v) = fields.take_inline_encoding() { result.set_inline_encoding(v); }
-        if let Some(v) = fields.take_free_busy_type() { result.set_free_busy_type(v); }
-        if let Some(v) = fields.take_language() { result.set_language(v); }
-        if let Some(v) = fields.take_membership() { result.set_membership(v); }
-        if let Some(v) = fields.take_participation_status() { result.set_participation_status(v); }
-        if let Some(v) = fields.take_recurrence_range() { result.set_recurrence_range(v); }
-        if let Some(v) = fields.take_trigger_relationship() { result.set_trigger_relationship(v); }
-        if let Some(v) = fields.take_relationship_type() { result.set_relationship_type(v); }
-        if let Some(v) = fields.take_participation_role() { result.set_participation_role(v); }
-        if let Some(v) = fields.take_rsvp_expectation() { result.set_rsvp_expectation(v); }
-        if let Some(v) = fields.take_sent_by() { result.set_sent_by(v); }
-        if let Some(v) = fields.take_tz_id() { result.set_tz_id(v); }
-        if let Some(v) = fields.take_display_type() { result.set_display_type(v); }
-        if let Some(v) = fields.take_email() { result.set_email(v); }
-        if let Some(v) = fields.take_feature_type() { result.set_feature_type(v); }
-        if let Some(v) = fields.take_label() { result.set_label(v); }
-        if let Some(v) = fields.take_order() { result.set_order(v); }
-        if let Some(v) = fields.take_derived() { result.set_derived(v); }
+        if let Some(v) = fields.take_alternate_representation() {
+            result.set_alternate_representation(v);
+        }
+        if let Some(v) = fields.take_common_name() {
+            result.set_common_name(v);
+        }
+        if let Some(v) = fields.take_calendar_user_type() {
+            result.set_calendar_user_type(v);
+        }
+        if let Some(v) = fields.take_delegated_from() {
+            result.set_delegated_from(v);
+        }
+        if let Some(v) = fields.take_delegated_to() {
+            result.set_delegated_to(v);
+        }
+        if let Some(v) = fields.take_directory_reference() {
+            result.set_directory_reference(v);
+        }
+        if let Some(v) = fields.take_inline_encoding() {
+            result.set_inline_encoding(v);
+        }
+        if let Some(v) = fields.take_free_busy_type() {
+            result.set_free_busy_type(v);
+        }
+        if let Some(v) = fields.take_language() {
+            result.set_language(v);
+        }
+        if let Some(v) = fields.take_membership() {
+            result.set_membership(v);
+        }
+        if let Some(v) = fields.take_participation_status() {
+            result.set_participation_status(v);
+        }
+        if let Some(v) = fields.take_recurrence_range() {
+            result.set_recurrence_range(v);
+        }
+        if let Some(v) = fields.take_trigger_relationship() {
+            result.set_trigger_relationship(v);
+        }
+        if let Some(v) = fields.take_relationship_type() {
+            result.set_relationship_type(v);
+        }
+        if let Some(v) = fields.take_participation_role() {
+            result.set_participation_role(v);
+        }
+        if let Some(v) = fields.take_rsvp_expectation() {
+            result.set_rsvp_expectation(v);
+        }
+        if let Some(v) = fields.take_sent_by() {
+            result.set_sent_by(v);
+        }
+        if let Some(v) = fields.take_tz_id() {
+            result.set_tz_id(v);
+        }
+        if let Some(v) = fields.take_display_type() {
+            result.set_display_type(v);
+        }
+        if let Some(v) = fields.take_email() {
+            result.set_email(v);
+        }
+        if let Some(v) = fields.take_feature_type() {
+            result.set_feature_type(v);
+        }
+        if let Some(v) = fields.take_label() {
+            result.set_label(v);
+        }
+        if let Some(v) = fields.take_order() {
+            result.set_order(v);
+        }
+        if let Some(v) = fields.take_derived() {
+            result.set_derived(v);
+        }
 
         result
     }
@@ -434,26 +583,33 @@ pub struct UnknownParamValue {
 }
 
 /// A statically known parameter name.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, EnumString)]
+#[strum(serialize_all = "UPPERCASE", ascii_case_insensitive)]
 pub enum StaticParam {
     // RFC 5545
     /// RFC 5545 §3.2.1 (ALTREP)
     AltRep,
     /// RFC 5545 §3.2.2 (CN)
+    #[strum(serialize = "CN")]
     CommonName,
     /// RFC 5545 §3.2.3 (CUTYPE)
+    #[strum(serialize = "CUTYPE")]
     CalUserType,
     /// RFC 5545 §3.2.4 (DELEGATED-FROM)
+    #[strum(serialize = "DELEGATED-FROM")]
     DelFrom,
     /// RFC 5545 §3.2.5 (DELEGATED-TO)
+    #[strum(serialize = "DELEGATED-TO")]
     DelTo,
     /// RFC 5545 §3.2.6 (DIR)
     Dir,
     /// RFC 5545 §3.2.7 (ENCODING)
     Encoding,
     /// RFC 5545 §3.2.8 (FMTTYPE)
+    #[strum(serialize = "FMTTYPE")]
     FormatType,
     /// RFC 5545 §3.2.9 (FBTYPE)
+    #[strum(serialize = "FBTYPE")]
     FreeBusyType,
     /// RFC 5545 §3.2.10 (LANGUAGE)
     Language,
@@ -472,6 +628,7 @@ pub enum StaticParam {
     /// RFC 5545 §3.2.17 (RSVP)
     Rsvp,
     /// RFC 5545 §3.2.18 (SENT-BY)
+    #[strum(serialize = "SENT-BY")]
     SentBy,
     /// RFC 5545 §3.2.19 (TZID)
     TzId,
