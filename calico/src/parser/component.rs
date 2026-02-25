@@ -118,65 +118,88 @@ where
     // Unknown
     let mut x_props: HashMap<Box<CaselessStr>, Vec<Prop<Value<String>, Params>>> = HashMap::new();
 
-    parse_props!(input, parsed, {
-        match parsed {
-            ParsedProp::Known(KnownProp { name: prop_name, value }) => {
-                match (prop_name, value) {
-                    (StaticProp::ProdId, PropValue::Text(p)) => {
-                        once!(prod_id, StaticProp::ProdId, ComponentKind::Calendar, p);
+    // Parse properties and subcomponents in any order (real-world .ics files
+    // freely interleave them, even though RFC 5545 grammar suggests props-first).
+    let mut components: Vec<CalendarComponent> = Vec::new();
+
+    loop {
+        // Check for END:VCALENDAR — we're done
+        let checkpoint = input.checkpoint();
+        if end(empty::<I, E>).parse_next(input).is_ok() {
+            input.reset(&checkpoint);
+            break;
+        }
+        input.reset(&checkpoint);
+
+        // Try to parse a subcomponent (BEGIN:...)
+        let checkpoint = input.checkpoint();
+        if begin(empty::<I, E>).parse_next(input).is_ok() {
+            input.reset(&checkpoint);
+            components.push(calendar_component(input)?);
+            continue;
+        }
+        input.reset(&checkpoint);
+
+        // Otherwise parse a property
+        let parsed: ParsedProp<I::Slice> = terminated(property, crlf).parse_next(input)?;
+        let result: Result<(), CalendarParseError<I::Slice>> = (|| {
+            match parsed {
+                ParsedProp::Known(KnownProp { name: prop_name, value }) => {
+                    match (prop_name, value) {
+                        (StaticProp::ProdId, PropValue::Text(p)) => {
+                            once!(prod_id, StaticProp::ProdId, ComponentKind::Calendar, p);
+                        }
+                        (StaticProp::Version, PropValue::Version(p)) => {
+                            once!(version, StaticProp::Version, ComponentKind::Calendar, p);
+                        }
+                        (StaticProp::CalScale, PropValue::Gregorian(p)) => {
+                            once!(cal_scale, StaticProp::CalScale, ComponentKind::Calendar, p);
+                        }
+                        (StaticProp::Method, PropValue::Method(p)) => {
+                            once!(method, StaticProp::Method, ComponentKind::Calendar, p);
+                        }
+                        (StaticProp::Uid, PropValue::Uid(p)) => {
+                            once!(uid, StaticProp::Uid, ComponentKind::Calendar, p);
+                        }
+                        (StaticProp::LastModified, PropValue::DateTimeUtc(p)) => {
+                            once!(last_modified, StaticProp::LastModified, ComponentKind::Calendar, p);
+                        }
+                        (StaticProp::Url, PropValue::Uri(p)) => {
+                            once!(url, StaticProp::Url, ComponentKind::Calendar, p);
+                        }
+                        (StaticProp::RefreshInterval, PropValue::Duration(p)) => {
+                            once!(refresh_interval, StaticProp::RefreshInterval, ComponentKind::Calendar, p);
+                        }
+                        (StaticProp::Source, PropValue::Uri(p)) => {
+                            once!(source, StaticProp::Source, ComponentKind::Calendar, p);
+                        }
+                        (StaticProp::Color, PropValue::Color(p)) => {
+                            once!(color, StaticProp::Color, ComponentKind::Calendar, p);
+                        }
+                        (StaticProp::Name, PropValue::Text(p)) => {
+                            name.push(p);
+                        }
+                        (StaticProp::Description, PropValue::Text(p)) => {
+                            description.push(p);
+                        }
+                        (StaticProp::Categories, PropValue::TextSeq(p)) => {
+                            categories.push(p);
+                        }
+                        (StaticProp::Image, PropValue::Attachment(p)) => {
+                            image.push(p);
+                        }
+                        _ => { /* ignore - property parser guarantees correct variant */ }
                     }
-                    (StaticProp::Version, PropValue::Version(p)) => {
-                        once!(version, StaticProp::Version, ComponentKind::Calendar, p);
-                    }
-                    (StaticProp::CalScale, PropValue::Gregorian(p)) => {
-                        once!(cal_scale, StaticProp::CalScale, ComponentKind::Calendar, p);
-                    }
-                    (StaticProp::Method, PropValue::Method(p)) => {
-                        once!(method, StaticProp::Method, ComponentKind::Calendar, p);
-                    }
-                    (StaticProp::Uid, PropValue::Uid(p)) => {
-                        once!(uid, StaticProp::Uid, ComponentKind::Calendar, p);
-                    }
-                    (StaticProp::LastModified, PropValue::DateTimeUtc(p)) => {
-                        once!(last_modified, StaticProp::LastModified, ComponentKind::Calendar, p);
-                    }
-                    (StaticProp::Url, PropValue::Uri(p)) => {
-                        once!(url, StaticProp::Url, ComponentKind::Calendar, p);
-                    }
-                    (StaticProp::RefreshInterval, PropValue::Duration(p)) => {
-                        once!(refresh_interval, StaticProp::RefreshInterval, ComponentKind::Calendar, p);
-                    }
-                    (StaticProp::Source, PropValue::Uri(p)) => {
-                        once!(source, StaticProp::Source, ComponentKind::Calendar, p);
-                    }
-                    (StaticProp::Color, PropValue::Color(p)) => {
-                        once!(color, StaticProp::Color, ComponentKind::Calendar, p);
-                    }
-                    (StaticProp::Name, PropValue::Text(p)) => {
-                        name.push(p);
-                    }
-                    (StaticProp::Description, PropValue::Text(p)) => {
-                        description.push(p);
-                    }
-                    (StaticProp::Categories, PropValue::TextSeq(p)) => {
-                        categories.push(p);
-                    }
-                    (StaticProp::Image, PropValue::Attachment(p)) => {
-                        image.push(p);
-                    }
-                    _ => { /* ignore - property parser guarantees correct variant */ }
+                }
+                ParsedProp::Unknown(UnknownProp { name: uname, params, value, .. }) => {
+                    let name_string: String = I::try_into_string(&uname)?;
+                    handle_unknown!(x_props, name_string, params, value);
                 }
             }
-            ParsedProp::Unknown(UnknownProp { name: uname, params, value, .. }) => {
-                let name_string: String = I::try_into_string(&uname)?;
-                handle_unknown!(x_props, name_string, params, value);
-            }
-        }
-        Ok(())
-    });
-
-    // Parse subcomponents
-    let components: Vec<CalendarComponent> = repeat(0.., calendar_component).parse_next(input)?;
+            Ok(())
+        })();
+        result.map_err(|e| E::from_external_error(input, e))?;
+    }
 
     terminated(end(Caseless("VCALENDAR")), alt((crlf, eof))).parse_next(input)?;
 
