@@ -27,7 +27,7 @@ use winnow::{
 use crate::{
     model::{
         parameter::{KnownParam, Param, ParamName, StaticParam, UnknownParam, UnknownParamValue},
-        string::{Name, Uri},
+        string::{Name, NameKind, Uri},
     },
     parser::{
         InputStream,
@@ -44,6 +44,28 @@ use super::{
     error::CalendarParseError,
     primitive::{calendar_user_type, display_type, name},
 };
+
+/// Wraps a parser so it also accepts values enclosed in double quotes.
+///
+/// Some real-world calendars quote values for known parameters
+/// (e.g. `CUTYPE="INDIVIDUAL"`) which the typed parsers normally reject.
+fn maybe_quoted<I, O, E>(mut inner: impl Parser<I, O, E>) -> impl Parser<I, O, E>
+where
+    I: StreamIsPartial + Stream + Compare<char>,
+    I::Token: AsChar + Clone,
+    E: ParserError<I>,
+{
+    use winnow::combinator::opt;
+    use winnow::token::one_of;
+    move |input: &mut I| {
+        let has_quote = opt(one_of('"')).parse_next(input)?.is_some();
+        let value = inner.parse_next(input)?;
+        if has_quote {
+            '"'.parse_next(input)?;
+        }
+        Ok(value)
+    }
+}
 
 /// Parses a [`Param`].
 pub fn parameter<I, E>(input: &mut I) -> Result<Param, E>
@@ -89,17 +111,36 @@ where
             StaticParam::AltRep => quoted_uri.map(KnownParam::AltRep).parse_next(input),
             StaticParam::CommonName => param_value.map(KnownParam::CommonName).parse_next(input),
             StaticParam::CalUserType => {
-                calendar_user_type.map(KnownParam::CUType).parse_next(input)
+                maybe_quoted(calendar_user_type).map(KnownParam::CUType).parse_next(input)
             }
             StaticParam::DelFrom => quoted_addresses.map(KnownParam::DelFrom).parse_next(input),
             StaticParam::DelTo => quoted_addresses.map(KnownParam::DelTo).parse_next(input),
             StaticParam::Dir => quoted_uri.map(KnownParam::Dir).parse_next(input),
-            StaticParam::Encoding => inline_encoding.map(KnownParam::Encoding).parse_next(input),
+            StaticParam::Encoding => {
+                // Try standard encodings (8BIT, BASE64). Fall back to unknown
+                // for deprecated values like QUOTED-PRINTABLE from RFC 2445.
+                let checkpoint = input.checkpoint();
+                match inline_encoding.map(KnownParam::Encoding).parse_next(input) {
+                    ok @ Ok(_) => ok,
+                    Err(_) => {
+                        input.reset(&checkpoint);
+                        let values = comma_seq1(param_value).parse_next(input)?;
+                        let boxed_name: Box<Name> = Name::new("ENCODING").unwrap().into();
+                        return Ok(Param::Unknown(UnknownParam {
+                            name: boxed_name,
+                            value: UnknownParamValue {
+                                kind: NameKind::Iana,
+                                values,
+                            },
+                        }));
+                    }
+                }
+            }
             StaticParam::FormatType => format_type.map(KnownParam::FormatType).parse_next(input),
             StaticParam::FreeBusyType => free_busy_type.map(KnownParam::FBType).parse_next(input),
             StaticParam::Language => language.map(KnownParam::Language).parse_next(input),
             StaticParam::Member => quoted_addresses.map(KnownParam::Member).parse_next(input),
-            StaticParam::PartStat => participation_status
+            StaticParam::PartStat => maybe_quoted(participation_status)
                 .map(KnownParam::PartStatus)
                 .parse_next(input),
             StaticParam::Range => Caseless("THISANDFUTURE")
@@ -109,8 +150,8 @@ where
                 .map(KnownParam::AlarmTrigger)
                 .parse_next(input),
             StaticParam::RelType => relationship_type.map(KnownParam::RelType).parse_next(input),
-            StaticParam::Role => participation_role.map(KnownParam::Role).parse_next(input),
-            StaticParam::Rsvp => bool_caseless.map(KnownParam::Rsvp).parse_next(input),
+            StaticParam::Role => maybe_quoted(participation_role).map(KnownParam::Role).parse_next(input),
+            StaticParam::Rsvp => maybe_quoted(bool_caseless).map(KnownParam::Rsvp).parse_next(input),
             StaticParam::SentBy => quoted_uri.map(KnownParam::SentBy).parse_next(input),
             StaticParam::TzId => tz_id_param.map(KnownParam::TzId).parse_next(input),
             StaticParam::Value => value_type.map(KnownParam::Value).parse_next(input),
@@ -296,8 +337,11 @@ mod tests {
             );
         }
 
+        // Unrecognized encoding values fall back to unknown parameters
+        // (for compatibility with RFC 2445 ENCODING=QUOTED-PRINTABLE etc.)
         for input in ["ENCODING=base", "ENCODING=bit", "ENCODING=64", "ENCODING=8"] {
-            assert!(parameter::<_, ()>.parse_peek(input).is_err());
+            let (_, p) = parameter::<_, ()>.parse_peek(input).unwrap();
+            assert!(p.try_into_known().is_err(), "should fall back to unknown for: {input}");
         }
     }
 

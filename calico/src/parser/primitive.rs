@@ -155,9 +155,12 @@ where
     // tzid value = [ "/" ], text ;
     //
     // but a literal forward slash is perfectly permissible in a text value, so this is equivalent
-    // to just parsing a text value
+    // to just parsing a text value.
+    //
+    // Real-world TZID values (e.g. "Canberra, Melbourne, Sydney") contain
+    // unescaped commas. Use `text_with_commas` so we consume them.
 
-    text.map(TzId::from_text_buf).parse_next(input)
+    text_with_commas.map(TzId::from_text_buf).parse_next(input)
 }
 
 /// Parses a [`TzId`] in a parameter context (e.g. `TZID=Europe/Zurich`).
@@ -664,6 +667,61 @@ where
     }
 }
 
+/// Like [`text`] but allows unescaped commas in the value.
+///
+/// Used for TZID property values where real-world data contains commas
+/// (e.g. "Canberra, Melbourne, Sydney").
+fn text_with_commas<I, E>(input: &mut I) -> Result<TextBuf, E>
+where
+    I: InputStream,
+    I::Token: AsChar + Clone,
+    E: ParserError<I> + FromExternalError<I, CalendarParseError<I::Slice>>,
+{
+    fn safe_text_with_commas<I, E>(input: &mut I) -> Result<I::Str, E>
+    where
+        I: InputStream,
+        I::Token: AsChar + Clone,
+        E: ParserError<I> + FromExternalError<I, CalendarParseError<I::Slice>>,
+    {
+        repeat::<_, _, (), _, _>(1.., none_of(('\\', ';', ..' ')))
+            .take()
+            .try_map(|s| I::try_into_str(&s).map_err(Into::into))
+            .parse_next(input)
+    }
+
+    fn text_escape<I, E>(input: &mut I) -> Result<I::Str, E>
+    where
+        I: InputStream,
+        E: ParserError<I>,
+    {
+        preceded(
+            '\\',
+            alt((
+                '\\'.value("\\"),
+                'n'.value("\n"),
+                'N'.value("\n"),
+                ';'.value(";"),
+                ','.value(","),
+            )),
+        )
+        .map(I::str_from_static_str)
+        .parse_next(input)
+    }
+
+    let mut buf = String::new();
+
+    loop {
+        match alt((safe_text_with_commas, text_escape)).parse_next(input) {
+            Ok(str) => buf.push_str(str.as_ref()),
+            Err(()) => {
+                // SAFETY: the parser only produces valid TEXT characters
+                let t = unsafe { TextBuf::from_string_unchecked(buf) };
+                return Ok(t);
+            }
+        }
+    }
+}
+
 /// Parses a [`Period`].
 ///
 /// Since an explicit period may admit both absolute and local (floating) times
@@ -762,11 +820,13 @@ where
                     exact,
                 })
             }),
-            terminated(lz_dec_uint::<I, u32, E>, 'W').map(|weeks| {
+            (terminated(lz_dec_uint::<I, u32, E>, 'W'),
+             opt(terminated(lz_dec_uint::<I, u32, E>, 'D')),
+             opt(dur_time)).map(|(weeks, days, exact)| {
                 Duration::Nominal(NominalDuration {
                     weeks,
-                    days: 0,
-                    exact: None,
+                    days: days.unwrap_or(0),
+                    exact,
                 })
             }),
         )),

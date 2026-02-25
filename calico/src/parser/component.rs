@@ -5,7 +5,7 @@ use std::{collections::HashMap, hash::Hash};
 use winnow::{
     Parser,
     ascii::Caseless,
-    combinator::{alt, empty, peek, preceded, repeat, terminated},
+    combinator::{alt, empty, eof, peek, preceded, repeat, terminated},
     error::{FromExternalError, ParserError},
     stream::{AsBStr, AsChar, Compare, SliceLen, Stream, StreamIsPartial},
 };
@@ -178,7 +178,7 @@ where
     // Parse subcomponents
     let components: Vec<CalendarComponent> = repeat(0.., calendar_component).parse_next(input)?;
 
-    terminated(end(Caseless("VCALENDAR")), crlf).parse_next(input)?;
+    terminated(end(Caseless("VCALENDAR")), alt((crlf, eof))).parse_next(input)?;
 
     // Check mandatory fields
     let version = version.ok_or_else(|| {

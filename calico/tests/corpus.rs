@@ -2,6 +2,8 @@ use std::path::PathBuf;
 
 use calico::parser::{component::calendar, escaped::AsEscaped};
 use winnow::Parser;
+use winnow::combinator::repeat;
+use winnow::token::one_of;
 
 fn fixtures_dir() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures")
@@ -69,21 +71,37 @@ fn parse_corpus() {
             }
         };
 
-        let escaped = input.as_escaped();
-        match calendar::<_, winnow::error::InputError<_>>.parse_peek(escaped) {
-            Ok((remainder, _cal)) => {
-                let rem_len = remainder.len();
-                if rem_len == 0 {
-                    passed += 1;
-                } else {
-                    partial += 1;
-                    partials.push((name, input.len(), rem_len));
+        let mut escaped = input.as_escaped();
+        let mut calendars_parsed = 0u32;
+        let mut file_failed = false;
+        loop {
+            // Skip blank lines between calendar objects
+            let _ = repeat::<_, _, (), _, _>(0.., one_of::<_, _, ()>(('\r', '\n')))
+                .parse_next(&mut escaped);
+
+            if escaped.is_empty() {
+                break;
+            }
+
+            match calendar::<_, winnow::error::InputError<_>>.parse_next(&mut escaped) {
+                Ok(_cal) => {
+                    calendars_parsed += 1;
+                }
+                Err(e) => {
+                    if calendars_parsed > 0 {
+                        partial += 1;
+                        partials.push((name.clone(), input.len(), escaped.len()));
+                    } else {
+                        failed += 1;
+                        failures.push((name.clone(), format!("{e:?}")));
+                    }
+                    file_failed = true;
+                    break;
                 }
             }
-            Err(e) => {
-                failed += 1;
-                failures.push((name, format!("{e:?}")));
-            }
+        }
+        if !file_failed {
+            passed += 1;
         }
     }
 

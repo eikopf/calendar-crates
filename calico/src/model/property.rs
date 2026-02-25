@@ -113,6 +113,9 @@ pub enum StaticProp {
     Uid,
     // RECURRENCE COMPONENT PROPERTIES
     ExDate,
+    /// Deprecated in RFC 5545, replaced by EXDATE. Included for
+    /// backwards compatibility with RFC 2445 data.
+    ExRule,
     RDate,
     RRule,
     // ALARM COMPONENT PROPERTIES

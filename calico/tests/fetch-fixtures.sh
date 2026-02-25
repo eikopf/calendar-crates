@@ -20,15 +20,5 @@ find "$TEMP_DIR/ical4j/src/test/resources/samples/valid" -name '*.ics' \
     -exec cp {} "$FIXTURES_DIR/ical4j/" \;
 echo "    $(ls "$FIXTURES_DIR/ical4j/" | wc -l | tr -d ' ') files (valid only)"
 
-# --- ical.js (Mozilla/kewisch) ---
-echo "  Cloning kewisch/ical.js..."
-git clone --depth 1 --filter=blob:none --sparse \
-    https://github.com/kewisch/ical.js.git "$TEMP_DIR/icaljs" 2>/dev/null
-(cd "$TEMP_DIR/icaljs" && git sparse-checkout set samples 2>/dev/null)
-mkdir -p "$FIXTURES_DIR/ical-js"
-find "$TEMP_DIR/icaljs/samples" -name '*.ics' \
-    -exec cp {} "$FIXTURES_DIR/ical-js/" \;
-echo "    $(ls "$FIXTURES_DIR/ical-js/" | wc -l | tr -d ' ') files"
-
 TOTAL=$(find "$FIXTURES_DIR" -name '*.ics' | wc -l | tr -d ' ')
 echo "Done. $TOTAL total .ics files in $FIXTURES_DIR"

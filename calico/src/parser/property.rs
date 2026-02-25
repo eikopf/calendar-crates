@@ -113,6 +113,7 @@ pub enum PropValue {
     Attachment(Prop<Attachment, Params>),
     // Recurrence
     RRule(Prop<RRule, Params>),
+    ExRule(Prop<RRule, Params>),
     RDateSeq(Prop<RDateSeq, Params>),
     ExDateSeq(ExDateSeq, Params),
     // FreeBusy periods
@@ -688,7 +689,7 @@ where
                 | StaticProp::DtStart
                 | StaticProp::RecurId => {
                     match &value_type {
-                        None | Some(Token::Known(ValueType::DateTime)) => {
+                        Some(Token::Known(ValueType::DateTime)) => {
                             PropValue::DateTimeOrDate(Prop {
                                 value: DateTimeOrDate::DateTime(datetime.parse_next(input)?),
                                 params,
@@ -699,6 +700,14 @@ where
                                 value: DateTimeOrDate::Date(
                                     primitive::date.parse_next(input)?,
                                 ),
+                                params,
+                            })
+                        }
+                        None => {
+                            // No VALUE parameter: try datetime first, fall back to date.
+                            // Real-world calendars often omit VALUE=DATE even for date-only values.
+                            PropValue::DateTimeOrDate(Prop {
+                                value: primitive::datetime_or_date.parse_next(input)?,
                                 params,
                             })
                         }
@@ -771,6 +780,13 @@ where
                 StaticProp::RRule => {
                     check_vt!(Recur);
                     PropValue::RRule(Prop {
+                        value: rrule.parse_next(input)?,
+                        params,
+                    })
+                }
+                StaticProp::ExRule => {
+                    check_vt!(Recur);
+                    PropValue::ExRule(Prop {
                         value: rrule.parse_next(input)?,
                         params,
                     })
@@ -1368,7 +1384,11 @@ where
                     Ok(_) => Err(InvalidNameKind::End),
                     Err(()) => Err(InvalidNameKind::Unknown),
                 },
-                'x' => tail!("date", StaticProp::ExDate),
+                'x' => match ascii_lower::<_, ()>.parse_next(input)? {
+                    'd' => tail!("ate", StaticProp::ExDate),
+                    'r' => tail!("ule", StaticProp::ExRule),
+                    _ => Err(InvalidNameKind::Unknown),
+                },
                 _ => Err(InvalidNameKind::Unknown),
             },
             'f' => tail!("reebusy", StaticProp::FreeBusy),
