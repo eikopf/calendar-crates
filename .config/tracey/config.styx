@@ -1,0 +1,65 @@
+specs (
+  {
+    name calico
+
+    include (
+      spec/calico.md
+      spec/calico/**/*.md
+    )
+
+    impls (
+      {
+        name main
+        include (calico/src/**/*.rs)
+      }
+    )
+  }
+
+  {
+    name jscalendar
+
+    include (
+      spec/jscalendar.md
+      spec/jscalendar/**/*.md
+    )
+
+    impls (
+      {
+        name main
+        include (jscalendar/src/**/*.rs)
+      }
+    )
+  }
+
+  {
+    name rfc5545-types
+
+    include (
+      spec/rfc5545-types.md
+      spec/rfc5545-types/**/*.md
+    )
+
+    impls (
+      {
+        name main
+        include (rfc5545-types/src/**/*.rs)
+      }
+    )
+  }
+
+  {
+    name calendar-types
+
+    include (
+      spec/calendar-types.md
+      spec/calendar-types/**/*.md
+    )
+
+    impls (
+      {
+        name main
+        include (calendar-types/src/**/*.rs)
+      }
+    )
+  }
+)
