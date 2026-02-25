@@ -78,9 +78,9 @@ pub enum CalendarComponent {
 /// A VEVENT component (RFC 5545 §3.6.1).
 #[structible]
 pub struct Event {
-    // Required
-    pub dtstamp: Prop<DateTime<Utc>, Params>,
-    pub uid: Prop<Box<Uid>, Params>,
+    // Required by RFC 5545, but omitted by many producers
+    pub dtstamp: Option<Prop<DateTime<Utc>, Params>>,
+    pub uid: Option<Prop<Box<Uid>, Params>>,
 
     // Optional (at most once)
     pub dtstart: Option<Prop<DateTimeOrDate, Params>>,
@@ -137,9 +137,9 @@ pub struct Event {
 /// A VTODO component (RFC 5545 §3.6.2).
 #[structible]
 pub struct Todo {
-    // Required
-    pub dtstamp: Prop<DateTime<Utc>, Params>,
-    pub uid: Prop<Box<Uid>, Params>,
+    // Required by RFC 5545, but omitted by many producers
+    pub dtstamp: Option<Prop<DateTime<Utc>, Params>>,
+    pub uid: Option<Prop<Box<Uid>, Params>>,
 
     // Optional (at most once)
     pub dtstart: Option<Prop<DateTimeOrDate, Params>>,
@@ -352,7 +352,9 @@ pub struct AudioAlarm {
 pub struct DisplayAlarm {
     // Required
     pub trigger: Prop<TriggerValue, Params>,
-    pub description: Prop<String, Params>,
+
+    // Required by RFC 5545, but omitted by some producers
+    pub description: Option<Prop<String, Params>>,
 
     // Optional (at most once)
     pub uid: Option<Prop<Box<Uid>, Params>>,

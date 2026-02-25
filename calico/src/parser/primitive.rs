@@ -302,7 +302,7 @@ where
         I::Token: AsChar + Clone,
         E: ParserError<I>,
     {
-        one_of(('!', '#'..=';', '=', '?'..='Z', '[', ']', '_', 'a'..='z')).parse_next(input)
+        one_of(('!', '#'..='>', '?'..='Z', '[', ']', '_', 'a'..='z', '~')).parse_next(input)
     }
 
     /// Accepts a subset of textual escapes if ESCAPED is true.
@@ -628,7 +628,7 @@ where
         I::Token: AsChar + Clone,
         E: ParserError<I> + FromExternalError<I, CalendarParseError<I::Slice>>,
     {
-        repeat::<_, _, (), _, _>(1.., none_of(('\\', ';', ',', ..' ')))
+        repeat::<_, _, (), _, _>(1.., none_of(('\\', ';', ',', ..'\t', '\x0A'..' ')))
             .take()
             .try_map(|s| I::try_into_str(&s).map_err(Into::into))
             .parse_next(input)
@@ -647,6 +647,8 @@ where
                 'N'.value("\n"),
                 ';'.value(";"),
                 ','.value(","),
+                '"'.value("\""),
+                ' '.value(" "),
             )),
         )
         .map(I::str_from_static_str)
@@ -683,7 +685,7 @@ where
         I::Token: AsChar + Clone,
         E: ParserError<I> + FromExternalError<I, CalendarParseError<I::Slice>>,
     {
-        repeat::<_, _, (), _, _>(1.., none_of(('\\', ';', ..' ')))
+        repeat::<_, _, (), _, _>(1.., none_of(('\\', ';', ..'\t', '\x0A'..' ')))
             .take()
             .try_map(|s| I::try_into_str(&s).map_err(Into::into))
             .parse_next(input)
@@ -702,6 +704,8 @@ where
                 'N'.value("\n"),
                 ';'.value(";"),
                 ','.value(","),
+                '"'.value("\""),
+                ' '.value(" "),
             )),
         )
         .map(I::str_from_static_str)

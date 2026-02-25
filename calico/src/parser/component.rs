@@ -57,15 +57,9 @@ macro_rules! parse_props {
     };
 }
 
-/// Checks that a once-only property hasn't been set yet.
+/// Sets a once-only property, silently accepting duplicates (last value wins).
 macro_rules! once {
     ($opt:expr, $prop:expr, $component:expr, $val:expr) => {
-        if $opt.is_some() {
-            return Err(CalendarParseError::MoreThanOneProp {
-                prop: PropName::Known($prop),
-                component: $component,
-            });
-        }
         $opt = Some($val);
     };
 }
@@ -481,21 +475,9 @@ where
 
     terminated(end(Caseless("VEVENT")), crlf).parse_next(input)?;
 
-    // Check mandatory fields
-    let dtstamp = dtstamp.ok_or_else(|| {
-        E::from_external_error(input, CalendarParseError::MissingProp {
-            prop: PropName::Known(StaticProp::DtStamp),
-            component: ComponentKind::Event,
-        })
-    })?;
-    let uid = uid.ok_or_else(|| {
-        E::from_external_error(input, CalendarParseError::MissingProp {
-            prop: PropName::Known(StaticProp::Uid),
-            component: ComponentKind::Event,
-        })
-    })?;
-
-    let mut ev = Event::new(dtstamp, uid, alarms, participants, locations, resource_components);
+    let mut ev = Event::new(alarms, participants, locations, resource_components);
+    if let Some(v) = dtstamp { ev.set_dtstamp(v); }
+    if let Some(v) = uid { ev.set_uid(v); }
     if let Some(v) = dtstart { ev.set_dtstart(v); }
     if let Some(v) = class { ev.set_class(v); }
     if let Some(v) = created { ev.set_created(v); }
@@ -723,20 +705,9 @@ where
 
     terminated(end(Caseless("VTODO")), crlf).parse_next(input)?;
 
-    let dtstamp = dtstamp.ok_or_else(|| {
-        E::from_external_error(input, CalendarParseError::MissingProp {
-            prop: PropName::Known(StaticProp::DtStamp),
-            component: ComponentKind::Todo,
-        })
-    })?;
-    let uid = uid.ok_or_else(|| {
-        E::from_external_error(input, CalendarParseError::MissingProp {
-            prop: PropName::Known(StaticProp::Uid),
-            component: ComponentKind::Todo,
-        })
-    })?;
-
-    let mut td = Todo::new(dtstamp, uid, alarms, participants, locations, resource_components);
+    let mut td = Todo::new(alarms, participants, locations, resource_components);
+    if let Some(v) = dtstamp { td.set_dtstamp(v); }
+    if let Some(v) = uid { td.set_uid(v); }
     if let Some(v) = dtstart { td.set_dtstart(v); }
     if let Some(v) = class { td.set_class(v); }
     if let Some(v) = completed { td.set_completed(v); }
@@ -1081,32 +1052,55 @@ where
     let mut tz_url: Option<Prop<Box<Uri>, Params>> = None;
     let mut x_props: HashMap<Box<CaselessStr>, Vec<Prop<Value<String>, Params>>> = HashMap::new();
 
-    parse_props!(input, parsed, {
-        match parsed {
-            ParsedProp::Known(KnownProp { name: prop_name, value }) => {
-                match (prop_name, value) {
-                    (StaticProp::TzId, PropValue::TzId(p)) => {
-                        once!(tz_id, StaticProp::TzId, ComponentKind::TimeZone, p);
+    // Parse properties and STANDARD/DAYLIGHT subcomponents in any order
+    // (real-world .ics files freely interleave them).
+    let mut rules: Vec<TzRule> = Vec::new();
+
+    loop {
+        // Check for END:VTIMEZONE — we're done
+        let checkpoint = input.checkpoint();
+        if end(empty::<I, E>).parse_next(input).is_ok() {
+            input.reset(&checkpoint);
+            break;
+        }
+        input.reset(&checkpoint);
+
+        // Try to parse a STANDARD/DAYLIGHT subcomponent (BEGIN:...)
+        let checkpoint = input.checkpoint();
+        if begin(empty::<I, E>).parse_next(input).is_ok() {
+            input.reset(&checkpoint);
+            rules.push(tz_rule(input)?);
+            continue;
+        }
+        input.reset(&checkpoint);
+
+        // Otherwise parse a property
+        let parsed: ParsedProp<I::Slice> = terminated(property, crlf).parse_next(input)?;
+        let result: Result<(), CalendarParseError<I::Slice>> = (|| {
+            match parsed {
+                ParsedProp::Known(KnownProp { name: prop_name, value }) => {
+                    match (prop_name, value) {
+                        (StaticProp::TzId, PropValue::TzId(p)) => {
+                            once!(tz_id, StaticProp::TzId, ComponentKind::TimeZone, p);
+                        }
+                        (StaticProp::LastModified, PropValue::DateTimeUtc(p)) => {
+                            once!(last_modified, StaticProp::LastModified, ComponentKind::TimeZone, p);
+                        }
+                        (StaticProp::TzUrl, PropValue::Uri(p)) => {
+                            once!(tz_url, StaticProp::TzUrl, ComponentKind::TimeZone, p);
+                        }
+                        _ => { /* ignore - property parser guarantees correct variant */ }
                     }
-                    (StaticProp::LastModified, PropValue::DateTimeUtc(p)) => {
-                        once!(last_modified, StaticProp::LastModified, ComponentKind::TimeZone, p);
-                    }
-                    (StaticProp::TzUrl, PropValue::Uri(p)) => {
-                        once!(tz_url, StaticProp::TzUrl, ComponentKind::TimeZone, p);
-                    }
-                    _ => { /* ignore - property parser guarantees correct variant */ }
+                }
+                ParsedProp::Unknown(UnknownProp { name: uname, params, value, .. }) => {
+                    let name_string: String = I::try_into_string(&uname)?;
+                    handle_unknown!(x_props, name_string, params, value);
                 }
             }
-            ParsedProp::Unknown(UnknownProp { name: uname, params, value, .. }) => {
-                let name_string: String = I::try_into_string(&uname)?;
-                handle_unknown!(x_props, name_string, params, value);
-            }
-        }
-        Ok(())
-    });
-
-    // Parse STANDARD/DAYLIGHT subcomponents (at least one required)
-    let rules: Vec<TzRule> = repeat(1.., tz_rule).parse_next(input)?;
+            Ok(())
+        })();
+        result.map_err(|e| E::from_external_error(input, e))?;
+    }
 
     terminated(end(Caseless("VTIMEZONE")), crlf).parse_next(input)?;
 
@@ -1344,13 +1338,8 @@ where
             Ok(Alarm::Audio(a))
         }
         Token::Known(AlarmAction::Display) => {
-            let description = description.ok_or_else(|| {
-                E::from_external_error(input, CalendarParseError::MissingProp {
-                    prop: PropName::Known(StaticProp::Description),
-                    component: ComponentKind::DisplayAlarm,
-                })
-            })?;
-            let mut a = DisplayAlarm::new(trigger, description);
+            let mut a = DisplayAlarm::new(trigger);
+            if let Some(v) = description { a.set_description(v); }
             if let Some(v) = uid { a.set_uid(v); }
             if let Some(v) = duration { a.set_duration(v); }
             if let Some(v) = repeat { a.set_repeat(v); }
@@ -1895,14 +1884,14 @@ mod tests {
         match comp {
             CalendarComponent::Event(ev) => {
                 assert_eq!(
-                    ev.dtstamp().value,
+                    ev.dtstamp().unwrap().value,
                     DateTime {
                         date: date!(1997;9;1),
                         time: time!(13;0;0),
                         marker: Utc,
                     }
                 );
-                assert_eq!(ev.uid().value.as_str(), "uid1@example.com");
+                assert_eq!(ev.uid().unwrap().value.as_str(), "uid1@example.com");
                 assert!(ev.dtstart().is_none());
                 assert!(ev.summary().is_none());
             }
@@ -1935,7 +1924,7 @@ mod tests {
         match comp {
             CalendarComponent::Event(ev) => {
                 // Check uid
-                assert_eq!(ev.uid().value.as_str(), "uid2@example.com");
+                assert_eq!(ev.uid().unwrap().value.as_str(), "uid2@example.com");
 
                 // Check dtstart
                 let dtstart = ev.dtstart().expect("dtstart should be present");
@@ -1993,14 +1982,14 @@ mod tests {
         match comp {
             CalendarComponent::Todo(td) => {
                 assert_eq!(
-                    td.dtstamp().value,
+                    td.dtstamp().unwrap().value,
                     DateTime {
                         date: date!(1998;1;30),
                         time: time!(13;45;0),
                         marker: Utc,
                     }
                 );
-                assert_eq!(td.uid().value.as_str(), "todo1@example.com");
+                assert_eq!(td.uid().unwrap().value.as_str(), "todo1@example.com");
             }
             other => panic!("expected Todo, got {:?}", other),
         }
@@ -2172,7 +2161,7 @@ mod tests {
                 assert_eq!(ev.alarms().len(), 1);
                 match &ev.alarms()[0] {
                     Alarm::Display(da) => {
-                        assert_eq!(da.description().value, "Breakfast meeting");
+                        assert_eq!(da.description().unwrap().value, "Breakfast meeting");
                         // TRIGGER:-PT15M is a negative duration of 15 minutes
                         match &da.trigger().value {
                             TriggerValue::Duration(sd) => {
@@ -2226,7 +2215,7 @@ mod tests {
 
         match &cal.components()[0] {
             CalendarComponent::Event(ev) => {
-                assert_eq!(ev.uid().value.as_str(), "cal-event1@example.com");
+                assert_eq!(ev.uid().unwrap().value.as_str(), "cal-event1@example.com");
                 let summary = ev.summary().expect("summary should be present");
                 assert_eq!(summary.value, "Bastille Day Party");
             }

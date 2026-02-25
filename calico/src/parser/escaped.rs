@@ -35,12 +35,19 @@ impl AsEscaped for [u8] {
 pub struct Escaped<'a>(pub(crate) &'a [u8]);
 
 impl<'a> Escaped<'a> {
-    pub const fn len(&self) -> usize {
-        self.0.len()
+    pub fn len(&self) -> usize {
+        // If the only remaining bytes are fold sequences with no content
+        // after them, report 0 length (effectively EOF).
+        let (_, tail) = split_fold_prefix(self.0);
+        if tail.is_empty() {
+            0
+        } else {
+            self.0.len()
+        }
     }
 
-    pub const fn is_empty(&self) -> bool {
-        self.0.is_empty()
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
     }
 
     /// Converts `self` into an escaped, possibly owned sequence of bytes.
@@ -138,7 +145,14 @@ impl<'a> Stream for Escaped<'a> {
 
     #[inline(always)]
     fn eof_offset(&self) -> usize {
-        self.0.len()
+        // If the only remaining bytes are fold sequences with no content
+        // after them, report EOF (0) so that `eof` works correctly.
+        let (_, tail) = split_fold_prefix(self.0);
+        if tail.is_empty() {
+            0
+        } else {
+            self.0.len()
+        }
     }
 
     #[inline(always)]
@@ -146,7 +160,11 @@ impl<'a> Stream for Escaped<'a> {
         let (_escapes, tail) = split_fold_prefix(self.0);
 
         match tail {
-            [] => None,
+            [] => {
+                // Consume any trailing fold bytes so eof_offset() reports 0
+                self.0 = tail;
+                None
+            }
             [t, tail @ ..] => {
                 self.0 = tail;
                 Some(*t)
