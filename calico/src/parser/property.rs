@@ -34,7 +34,7 @@ use crate::{
             class_value, color, completion_percentage, datetime, datetime_utc,
             duration, geo_with_config, gregorian, integer, method, participant_type,
             period, priority, proximity_value, request_status, resource_type, status, text,
-            text_seq, time, time_transparency, tz_id, uid, uri, utc_offset, version,
+            text_seq, text_with_commas, time, time_transparency, tz_id, uid, uri, utc_offset, version,
         },
         rrule::rrule,
     },
@@ -85,7 +85,7 @@ pub enum PropValue {
     // Comma-separated text sequence (CATEGORIES, RESOURCES, LOCATION-TYPE)
     TextSeq(Prop<Vec<String>, Params>),
     // Calendar-level
-    Version(Prop<Version, Params>),
+    Version(Prop<Token<Version, String>, Params>),
     Gregorian(Prop<Token<Gregorian, String>, Params>),
     Method(Prop<Token<Method, String>, Params>),
     // Identifiers
@@ -170,7 +170,7 @@ where
         Token::Known(ValueType::Period) => period.map(Value::Period).parse_next(input),
         Token::Known(ValueType::Recur) => rrule.map(Value::Recur).parse_next(input),
         Token::Known(ValueType::Text) => {
-            text.map(|t| Value::Text(t.into_string())).parse_next(input)
+            text_with_commas.map(|t| Value::Text(t.into_string())).parse_next(input)
         }
         Token::Known(ValueType::Time) => {
             time.map(|(t, f)| Value::Time(t, f)).parse_next(input)
@@ -183,9 +183,9 @@ where
         }
         Token::Known(_) => {
             // Unknown known value type variant (non_exhaustive)
-            text.map(|t| Value::Text(t.into_string())).parse_next(input)
+            text_with_commas.map(|t| Value::Text(t.into_string())).parse_next(input)
         }
-        Token::Unknown(name) => text
+        Token::Unknown(name) => text_with_commas
             .map(|value| Value::Other {
                 name: name.clone(),
                 value: value.into_string(),
@@ -623,16 +623,21 @@ where
                 | StaticProp::Name => {
                     check_vt!(Text);
                     PropValue::Text(Prop {
-                        value: text.parse_next(input)?.into_string(),
+                        value: text_with_commas.parse_next(input)?.into_string(),
                         params,
                     })
                 }
                 StaticProp::Version => {
                     check_vt!(Text);
-                    PropValue::Version(Prop {
-                        value: version.parse_next(input)?,
-                        params,
-                    })
+                    let checkpoint = input.checkpoint();
+                    let value = match version::<I, E>.parse_next(input) {
+                        Ok(v) => Token::Known(v),
+                        Err(_) => {
+                            input.reset(&checkpoint);
+                            Token::Unknown(text_with_commas.parse_next(input)?.into_string())
+                        }
+                    };
+                    PropValue::Version(Prop { value, params })
                 }
                 StaticProp::Categories | StaticProp::Resources => {
                     check_vt!(Text);
@@ -1806,7 +1811,7 @@ mod tests {
         let (tail, prop) = property::<_, ()>.parse_peek(input).unwrap();
 
         assert!(tail.is_empty());
-        assert_eq!(prop, known_prop!(Version, Version, Version::V2_0));
+        assert_eq!(prop, known_prop!(Version, Version, Token::Known(Version::V2_0)));
     }
 
     #[test]

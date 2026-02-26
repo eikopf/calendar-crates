@@ -8,7 +8,7 @@ use winnow::{
     Parser,
     ascii::{Caseless, alpha1, digit1},
     combinator::{
-        alt, delimited, empty, fail, not, opt, preceded, repeat, separated, separated_pair,
+        alt, delimited, empty, fail, opt, preceded, repeat, separated, separated_pair,
         terminated, trace,
     },
     error::{FromExternalError, ParserError},
@@ -339,6 +339,7 @@ where
 pub fn binary<I, E>(input: &mut I) -> Result<Vec<u8>, E>
 where
     I: InputStream,
+    I::Token: AsChar + Clone,
     E: ParserError<I> + FromExternalError<I, CalendarParseError<I::Slice>>,
 {
     let mut config = DefaultConfig::default();
@@ -348,14 +349,15 @@ where
 pub fn binary_with_config<I, E>(input: &mut I, _: &mut impl Config) -> Result<Vec<u8>, E>
 where
     I: InputStream,
+    I::Token: AsChar + Clone,
     E: ParserError<I> + FromExternalError<I, CalendarParseError<I::Slice>>,
 {
     const ENGINE: base64::engine::GeneralPurpose = base64::prelude::BASE64_STANDARD;
 
-    // TODO: if Escaped implemented FindSlice<&str> then we could add that bound to InputStream and
-    // use `take_until(0.., "\r\n")` here instead
-
-    let source = repeat::<_, _, (), _, _>(0.., (not(("\r\n", alt(("\t", " ")))), any))
+    // Consume all characters until the end of the logical line. In the Escaped
+    // stream, fold sequences are transparent so the only \r or \n visible marks
+    // the actual line terminator.
+    let source = repeat::<_, _, (), _, _>(0.., none_of(('\r', '\n')))
         .take()
         .parse_next(input)?;
 
@@ -673,7 +675,7 @@ where
 ///
 /// Used for TZID property values where real-world data contains commas
 /// (e.g. "Canberra, Melbourne, Sydney").
-fn text_with_commas<I, E>(input: &mut I) -> Result<TextBuf, E>
+pub fn text_with_commas<I, E>(input: &mut I) -> Result<TextBuf, E>
 where
     I: InputStream,
     I::Token: AsChar + Clone,

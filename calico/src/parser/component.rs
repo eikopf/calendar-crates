@@ -5,7 +5,7 @@ use std::{collections::HashMap, hash::Hash};
 use winnow::{
     Parser,
     ascii::Caseless,
-    combinator::{alt, empty, eof, peek, preceded, repeat, terminated},
+    combinator::{alt, empty, eof, opt, preceded, repeat, terminated},
     error::{FromExternalError, ParserError},
     stream::{AsBStr, AsChar, Compare, SliceLen, Stream, StreamIsPartial},
 };
@@ -44,6 +44,9 @@ use crate::{
 macro_rules! parse_props {
     ($input:ident, $le:expr, $parsed:ident, $body:block) => {
         loop {
+            // Skip blank lines
+            let _: usize = repeat(0.., line_terminator($le)).parse_next($input)?;
+
             let checkpoint = $input.checkpoint();
             if alt((begin(empty::<I, E>), end(empty::<I, E>))).parse_next($input).is_ok() {
                 $input.reset(&checkpoint);
@@ -120,11 +123,14 @@ where
     <<I as Stream>::Slice as Stream>::Token: AsChar,
     E: ParserError<I> + FromExternalError<I, CalendarParseError<I::Slice>>,
 {
+    // Strip UTF-8 BOM if present
+    let _ = opt::<_, _, E, _>('\u{FEFF}').parse_next(input);
+
     terminated(begin(Caseless("VCALENDAR")), line_terminator(le)).parse_next(input)?;
 
     // Once-only properties
     let mut prod_id: Option<Prop<String, Params>> = None;
-    let mut version: Option<Prop<Version, Params>> = None;
+    let mut version: Option<Prop<Token<Version, String>, Params>> = None;
     let mut cal_scale: Option<Prop<Token<Gregorian, String>, Params>> = None;
     let mut method: Option<Prop<Token<Method, String>, Params>> = None;
     // RFC 7986 optional
@@ -147,6 +153,9 @@ where
     let mut components: Vec<CalendarComponent> = Vec::new();
 
     loop {
+        // Skip blank lines
+        let _: usize = repeat(0.., line_terminator(le)).parse_next(input)?;
+
         // Check for END:VCALENDAR — we're done
         let checkpoint = input.checkpoint();
         if end(empty::<I, E>).parse_next(input).is_ok() {
@@ -360,159 +369,215 @@ where
     // Unknown
     let mut x_props: HashMap<Box<CaselessStr>, Vec<Prop<Value<String>, Params>>> = HashMap::new();
 
-    parse_props!(input, le, parsed, {
-        match parsed {
-            ParsedProp::Known(KnownProp { name: prop_name, value }) => {
-                match (prop_name, value) {
-                    (StaticProp::DtStamp, PropValue::DateTimeUtc(p)) => {
-                        once!(dtstamp, StaticProp::DtStamp, ComponentKind::Event, p);
-                    }
-                    (StaticProp::Uid, PropValue::Uid(p)) => {
-                        once!(uid, StaticProp::Uid, ComponentKind::Event, p);
-                    }
-                    (StaticProp::DtStart, PropValue::DateTimeOrDate(p)) => {
-                        once!(dtstart, StaticProp::DtStart, ComponentKind::Event, p);
-                    }
-                    (StaticProp::Class, PropValue::ClassValue(p)) => {
-                        once!(class, StaticProp::Class, ComponentKind::Event, p);
-                    }
-                    (StaticProp::Created, PropValue::DateTimeUtc(p)) => {
-                        once!(created, StaticProp::Created, ComponentKind::Event, p);
-                    }
-                    (StaticProp::Description, PropValue::Text(p)) => {
-                        once!(description, StaticProp::Description, ComponentKind::Event, p);
-                    }
-                    (StaticProp::Geo, PropValue::Geo(p)) => {
-                        once!(geo, StaticProp::Geo, ComponentKind::Event, p);
-                    }
-                    (StaticProp::LastModified, PropValue::DateTimeUtc(p)) => {
-                        once!(last_modified, StaticProp::LastModified, ComponentKind::Event, p);
-                    }
-                    (StaticProp::Location, PropValue::Text(p)) => {
-                        once!(loc_prop, StaticProp::Location, ComponentKind::Event, p);
-                    }
-                    (StaticProp::Organizer, PropValue::Uri(p)) => {
-                        once!(organizer, StaticProp::Organizer, ComponentKind::Event, p);
-                    }
-                    (StaticProp::Priority, PropValue::Priority(p)) => {
-                        once!(priority, StaticProp::Priority, ComponentKind::Event, p);
-                    }
-                    (StaticProp::Sequence, PropValue::Integer(p)) => {
-                        once!(sequence, StaticProp::Sequence, ComponentKind::Event, p);
-                    }
-                    (StaticProp::Status, PropValue::Status(p)) => {
-                        if status.is_some() {
-                            return Err(CalendarParseError::MoreThanOneProp {
-                                prop: PropName::Known(StaticProp::Status),
-                                component: ComponentKind::Event,
-                            });
-                        }
-                        match p.value {
-                            Status::Tentative | Status::Confirmed | Status::Cancelled => {}
-                            s => return Err(CalendarParseError::InvalidEventStatus(s)),
-                        }
-                        status = Some(p);
-                    }
-                    (StaticProp::Summary, PropValue::Text(p)) => {
-                        once!(summary, StaticProp::Summary, ComponentKind::Event, p);
-                    }
-                    (StaticProp::Transp, PropValue::TimeTransparency(p)) => {
-                        once!(transp, StaticProp::Transp, ComponentKind::Event, p);
-                    }
-                    (StaticProp::Url, PropValue::Uri(p)) => {
-                        once!(url, StaticProp::Url, ComponentKind::Event, p);
-                    }
-                    (StaticProp::RecurId, PropValue::DateTimeOrDate(p)) => {
-                        once!(recurrence_id, StaticProp::RecurId, ComponentKind::Event, p);
-                    }
-                    (StaticProp::DtEnd, PropValue::DateTimeOrDate(p)) => {
-                        if duration.is_some() {
-                            return Err(CalendarParseError::EventTerminationCollision);
-                        }
-                        once!(dtend, StaticProp::DtEnd, ComponentKind::Event, p);
-                    }
-                    (StaticProp::Duration, PropValue::Duration(p)) => {
-                        if dtend.is_some() {
-                            return Err(CalendarParseError::EventTerminationCollision);
-                        }
-                        once!(duration, StaticProp::Duration, ComponentKind::Event, p);
-                    }
-                    (StaticProp::Color, PropValue::Color(p)) => {
-                        once!(color, StaticProp::Color, ComponentKind::Event, p);
-                    }
-                    // Multi-valued
-                    (StaticProp::Attach, PropValue::Attachment(p)) => {
-                        attach.push(p);
-                    }
-                    (StaticProp::Attendee, PropValue::Uri(p)) => {
-                        attendee.push(p);
-                    }
-                    (StaticProp::Categories, PropValue::TextSeq(p)) => {
-                        categories.push(p);
-                    }
-                    (StaticProp::Comment, PropValue::Text(p)) => {
-                        comment.push(p);
-                    }
-                    (StaticProp::Contact, PropValue::Text(p)) => {
-                        contact.push(p);
-                    }
-                    (StaticProp::ExDate, PropValue::ExDateSeq(seq, params)) => {
-                        match seq {
-                            ExDateSeq::DateTime(dates) => {
-                                for dt in dates {
-                                    exdate.push(Prop { value: DateTimeOrDate::DateTime(dt), params: params.clone() });
-                                }
-                            }
-                            ExDateSeq::Date(dates) => {
-                                for d in dates {
-                                    exdate.push(Prop { value: DateTimeOrDate::Date(d), params: params.clone() });
-                                }
-                            }
+    // Subcomponent vectors
+    let mut alarms: Vec<Alarm> = Vec::new();
+    let mut participants: Vec<Participant> = Vec::new();
+    let mut locations: Vec<LocationComponent> = Vec::new();
+    let mut resource_components: Vec<ResourceComponent> = Vec::new();
+
+    // Parse properties and subcomponents in any order
+    #[allow(unused_variables)]
+    loop {
+        // Skip blank lines
+        let _: usize = repeat(0.., line_terminator(le)).parse_next(input)?;
+
+        // Check for END:VEVENT — we're done
+        let checkpoint = input.checkpoint();
+        if end(empty::<I, E>).parse_next(input).is_ok() {
+            input.reset(&checkpoint);
+            break;
+        }
+        input.reset(&checkpoint);
+
+        // Try to parse a subcomponent (BEGIN:...)
+        let checkpoint = input.checkpoint();
+        if begin(empty::<I, E>).parse_next(input).is_ok() {
+            input.reset(&checkpoint);
+            // Peek at the component name after BEGIN:
+            let cp = input.checkpoint();
+            if terminated(begin(Caseless("VALARM")), line_terminator::<I, E>(le)).parse_next(input).is_ok() {
+                input.reset(&cp);
+                alarms.push(alarm(input, le)?);
+            } else {
+                input.reset(&cp);
+                let cp = input.checkpoint();
+                if terminated(begin(Caseless("PARTICIPANT")), line_terminator::<I, E>(le)).parse_next(input).is_ok() {
+                    input.reset(&cp);
+                    participants.push(participant(input, le)?);
+                } else {
+                    input.reset(&cp);
+                    let cp = input.checkpoint();
+                    if terminated(begin(Caseless("VLOCATION")), line_terminator::<I, E>(le)).parse_next(input).is_ok() {
+                        input.reset(&cp);
+                        locations.push(location(input, le)?);
+                    } else {
+                        input.reset(&cp);
+                        let cp = input.checkpoint();
+                        if terminated(begin(Caseless("VRESOURCE")), line_terminator::<I, E>(le)).parse_next(input).is_ok() {
+                            input.reset(&cp);
+                            resource_components.push(resource(input, le)?);
+                        } else {
+                            input.reset(&cp);
+                            let _ = other_with_name(input, le)?;
                         }
                     }
-                    (StaticProp::RequestStatus, PropValue::RequestStatus(p)) => {
-                        request_status.push(p);
-                    }
-                    (StaticProp::RelatedTo, PropValue::Uid(p)) => {
-                        related_to.push(p);
-                    }
-                    (StaticProp::Resources, PropValue::TextSeq(p)) => {
-                        resources.push(p);
-                    }
-                    (StaticProp::RDate, PropValue::RDateSeq(p)) => {
-                        rdate.push(p);
-                    }
-                    (StaticProp::RRule, PropValue::RRule(p)) => {
-                        rrule.push(p);
-                    }
-                    (StaticProp::Image, PropValue::Attachment(p)) => {
-                        image.push(p);
-                    }
-                    (StaticProp::Conference, PropValue::Uri(p)) => {
-                        conference.push(p);
-                    }
-                    (StaticProp::StyledDescription, PropValue::StyledDescription(p)) => {
-                        styled_description.push(p);
-                    }
-                    (StaticProp::StructuredData, PropValue::StructuredData(p)) => {
-                        structured_data.push(p);
-                    }
-                    _ => { /* ignore - property parser guarantees correct variant */ }
                 }
             }
-            ParsedProp::Unknown(UnknownProp { name: uname, params, value, .. }) => {
-                let name_string: String = I::try_into_string(&uname)?;
-                handle_unknown!(x_props, name_string, params, value);
-            }
+            continue;
         }
-        Ok(())
-    });
+        input.reset(&checkpoint);
 
-    // Parse subcomponents
-    let alarms: Vec<Alarm> = repeat(0.., preceded(peek(begin(Caseless("VALARM"))), |i: &mut I| alarm(i, le))).parse_next(input)?;
-    let participants: Vec<Participant> = repeat(0.., preceded(peek(begin(Caseless("PARTICIPANT"))), |i: &mut I| participant(i, le))).parse_next(input)?;
-    let locations: Vec<LocationComponent> = repeat(0.., preceded(peek(begin(Caseless("VLOCATION"))), |i: &mut I| location(i, le))).parse_next(input)?;
-    let resource_components: Vec<ResourceComponent> = repeat(0.., preceded(peek(begin(Caseless("VRESOURCE"))), |i: &mut I| resource(i, le))).parse_next(input)?;
+        // Otherwise parse a property
+        let parsed: ParsedProp<I::Slice> = terminated(property, line_terminator(le)).parse_next(input)?;
+        let result: Result<(), CalendarParseError<I::Slice>> = (|| {
+            match parsed {
+                ParsedProp::Known(KnownProp { name: prop_name, value }) => {
+                    match (prop_name, value) {
+                        (StaticProp::DtStamp, PropValue::DateTimeUtc(p)) => {
+                            once!(dtstamp, StaticProp::DtStamp, ComponentKind::Event, p);
+                        }
+                        (StaticProp::Uid, PropValue::Uid(p)) => {
+                            once!(uid, StaticProp::Uid, ComponentKind::Event, p);
+                        }
+                        (StaticProp::DtStart, PropValue::DateTimeOrDate(p)) => {
+                            once!(dtstart, StaticProp::DtStart, ComponentKind::Event, p);
+                        }
+                        (StaticProp::Class, PropValue::ClassValue(p)) => {
+                            once!(class, StaticProp::Class, ComponentKind::Event, p);
+                        }
+                        (StaticProp::Created, PropValue::DateTimeUtc(p)) => {
+                            once!(created, StaticProp::Created, ComponentKind::Event, p);
+                        }
+                        (StaticProp::Description, PropValue::Text(p)) => {
+                            once!(description, StaticProp::Description, ComponentKind::Event, p);
+                        }
+                        (StaticProp::Geo, PropValue::Geo(p)) => {
+                            once!(geo, StaticProp::Geo, ComponentKind::Event, p);
+                        }
+                        (StaticProp::LastModified, PropValue::DateTimeUtc(p)) => {
+                            once!(last_modified, StaticProp::LastModified, ComponentKind::Event, p);
+                        }
+                        (StaticProp::Location, PropValue::Text(p)) => {
+                            once!(loc_prop, StaticProp::Location, ComponentKind::Event, p);
+                        }
+                        (StaticProp::Organizer, PropValue::Uri(p)) => {
+                            once!(organizer, StaticProp::Organizer, ComponentKind::Event, p);
+                        }
+                        (StaticProp::Priority, PropValue::Priority(p)) => {
+                            once!(priority, StaticProp::Priority, ComponentKind::Event, p);
+                        }
+                        (StaticProp::Sequence, PropValue::Integer(p)) => {
+                            once!(sequence, StaticProp::Sequence, ComponentKind::Event, p);
+                        }
+                        (StaticProp::Status, PropValue::Status(p)) => {
+                            if status.is_some() {
+                                return Err(CalendarParseError::MoreThanOneProp {
+                                    prop: PropName::Known(StaticProp::Status),
+                                    component: ComponentKind::Event,
+                                });
+                            }
+                            match p.value {
+                                Status::Tentative | Status::Confirmed | Status::Cancelled => {}
+                                s => return Err(CalendarParseError::InvalidEventStatus(s)),
+                            }
+                            status = Some(p);
+                        }
+                        (StaticProp::Summary, PropValue::Text(p)) => {
+                            once!(summary, StaticProp::Summary, ComponentKind::Event, p);
+                        }
+                        (StaticProp::Transp, PropValue::TimeTransparency(p)) => {
+                            once!(transp, StaticProp::Transp, ComponentKind::Event, p);
+                        }
+                        (StaticProp::Url, PropValue::Uri(p)) => {
+                            once!(url, StaticProp::Url, ComponentKind::Event, p);
+                        }
+                        (StaticProp::RecurId, PropValue::DateTimeOrDate(p)) => {
+                            once!(recurrence_id, StaticProp::RecurId, ComponentKind::Event, p);
+                        }
+                        (StaticProp::DtEnd, PropValue::DateTimeOrDate(p)) => {
+                            if duration.is_some() {
+                                return Err(CalendarParseError::EventTerminationCollision);
+                            }
+                            once!(dtend, StaticProp::DtEnd, ComponentKind::Event, p);
+                        }
+                        (StaticProp::Duration, PropValue::Duration(p)) => {
+                            if dtend.is_some() {
+                                return Err(CalendarParseError::EventTerminationCollision);
+                            }
+                            once!(duration, StaticProp::Duration, ComponentKind::Event, p);
+                        }
+                        (StaticProp::Color, PropValue::Color(p)) => {
+                            once!(color, StaticProp::Color, ComponentKind::Event, p);
+                        }
+                        // Multi-valued
+                        (StaticProp::Attach, PropValue::Attachment(p)) => {
+                            attach.push(p);
+                        }
+                        (StaticProp::Attendee, PropValue::Uri(p)) => {
+                            attendee.push(p);
+                        }
+                        (StaticProp::Categories, PropValue::TextSeq(p)) => {
+                            categories.push(p);
+                        }
+                        (StaticProp::Comment, PropValue::Text(p)) => {
+                            comment.push(p);
+                        }
+                        (StaticProp::Contact, PropValue::Text(p)) => {
+                            contact.push(p);
+                        }
+                        (StaticProp::ExDate, PropValue::ExDateSeq(seq, params)) => {
+                            match seq {
+                                ExDateSeq::DateTime(dates) => {
+                                    for dt in dates {
+                                        exdate.push(Prop { value: DateTimeOrDate::DateTime(dt), params: params.clone() });
+                                    }
+                                }
+                                ExDateSeq::Date(dates) => {
+                                    for d in dates {
+                                        exdate.push(Prop { value: DateTimeOrDate::Date(d), params: params.clone() });
+                                    }
+                                }
+                            }
+                        }
+                        (StaticProp::RequestStatus, PropValue::RequestStatus(p)) => {
+                            request_status.push(p);
+                        }
+                        (StaticProp::RelatedTo, PropValue::Uid(p)) => {
+                            related_to.push(p);
+                        }
+                        (StaticProp::Resources, PropValue::TextSeq(p)) => {
+                            resources.push(p);
+                        }
+                        (StaticProp::RDate, PropValue::RDateSeq(p)) => {
+                            rdate.push(p);
+                        }
+                        (StaticProp::RRule, PropValue::RRule(p)) => {
+                            rrule.push(p);
+                        }
+                        (StaticProp::Image, PropValue::Attachment(p)) => {
+                            image.push(p);
+                        }
+                        (StaticProp::Conference, PropValue::Uri(p)) => {
+                            conference.push(p);
+                        }
+                        (StaticProp::StyledDescription, PropValue::StyledDescription(p)) => {
+                            styled_description.push(p);
+                        }
+                        (StaticProp::StructuredData, PropValue::StructuredData(p)) => {
+                            structured_data.push(p);
+                        }
+                        _ => { /* ignore - property parser guarantees correct variant */ }
+                    }
+                }
+                ParsedProp::Unknown(UnknownProp { name: uname, params, value, .. }) => {
+                    let name_string: String = I::try_into_string(&uname)?;
+                    handle_unknown!(x_props, name_string, params, value);
+                }
+            }
+            Ok(())
+        })();
+        result.map_err(|e| E::from_external_error(input, e))?;
+    }
 
     terminated(end(Caseless("VEVENT")), line_terminator(le)).parse_next(input)?;
 
@@ -615,134 +680,186 @@ where
     // Unknown
     let mut x_props: HashMap<Box<CaselessStr>, Vec<Prop<Value<String>, Params>>> = HashMap::new();
 
-    parse_props!(input, le, parsed, {
-        match parsed {
-            ParsedProp::Known(KnownProp { name: prop_name, value }) => {
-                match (prop_name, value) {
-                    (StaticProp::DtStamp, PropValue::DateTimeUtc(p)) => {
-                        once!(dtstamp, StaticProp::DtStamp, ComponentKind::Todo, p);
-                    }
-                    (StaticProp::Uid, PropValue::Uid(p)) => {
-                        once!(uid, StaticProp::Uid, ComponentKind::Todo, p);
-                    }
-                    (StaticProp::DtStart, PropValue::DateTimeOrDate(p)) => {
-                        once!(dtstart, StaticProp::DtStart, ComponentKind::Todo, p);
-                    }
-                    (StaticProp::Class, PropValue::ClassValue(p)) => {
-                        once!(class, StaticProp::Class, ComponentKind::Todo, p);
-                    }
-                    (StaticProp::DtCompleted, PropValue::DateTimeUtc(p)) => {
-                        once!(completed, StaticProp::DtCompleted, ComponentKind::Todo, p);
-                    }
-                    (StaticProp::Created, PropValue::DateTimeUtc(p)) => {
-                        once!(created, StaticProp::Created, ComponentKind::Todo, p);
-                    }
-                    (StaticProp::Description, PropValue::Text(p)) => {
-                        once!(description, StaticProp::Description, ComponentKind::Todo, p);
-                    }
-                    (StaticProp::Geo, PropValue::Geo(p)) => {
-                        once!(geo, StaticProp::Geo, ComponentKind::Todo, p);
-                    }
-                    (StaticProp::LastModified, PropValue::DateTimeUtc(p)) => {
-                        once!(last_modified, StaticProp::LastModified, ComponentKind::Todo, p);
-                    }
-                    (StaticProp::Location, PropValue::Text(p)) => {
-                        once!(loc_prop, StaticProp::Location, ComponentKind::Todo, p);
-                    }
-                    (StaticProp::Organizer, PropValue::Uri(p)) => {
-                        once!(organizer, StaticProp::Organizer, ComponentKind::Todo, p);
-                    }
-                    (StaticProp::PercentComplete, PropValue::CompletionPercentage(p)) => {
-                        once!(percent_complete, StaticProp::PercentComplete, ComponentKind::Todo, p);
-                    }
-                    (StaticProp::Priority, PropValue::Priority(p)) => {
-                        once!(priority, StaticProp::Priority, ComponentKind::Todo, p);
-                    }
-                    (StaticProp::RecurId, PropValue::DateTimeOrDate(p)) => {
-                        once!(recurrence_id, StaticProp::RecurId, ComponentKind::Todo, p);
-                    }
-                    (StaticProp::Sequence, PropValue::Integer(p)) => {
-                        once!(sequence, StaticProp::Sequence, ComponentKind::Todo, p);
-                    }
-                    (StaticProp::Status, PropValue::Status(p)) => {
-                        if status.is_some() {
-                            return Err(CalendarParseError::MoreThanOneProp {
-                                prop: PropName::Known(StaticProp::Status),
-                                component: ComponentKind::Todo,
-                            });
-                        }
-                        match p.value {
-                            Status::NeedsAction | Status::Completed | Status::InProcess | Status::Cancelled => {}
-                            s => return Err(CalendarParseError::InvalidTodoStatus(s)),
-                        }
-                        status = Some(p);
-                    }
-                    (StaticProp::Summary, PropValue::Text(p)) => {
-                        once!(summary, StaticProp::Summary, ComponentKind::Todo, p);
-                    }
-                    (StaticProp::Url, PropValue::Uri(p)) => {
-                        once!(url, StaticProp::Url, ComponentKind::Todo, p);
-                    }
-                    (StaticProp::DtDue, PropValue::DateTimeOrDate(p)) => {
-                        if duration.is_some() {
-                            return Err(CalendarParseError::TodoTerminationCollision);
-                        }
-                        once!(due, StaticProp::DtDue, ComponentKind::Todo, p);
-                    }
-                    (StaticProp::Duration, PropValue::Duration(p)) => {
-                        if due.is_some() {
-                            return Err(CalendarParseError::TodoTerminationCollision);
-                        }
-                        once!(duration, StaticProp::Duration, ComponentKind::Todo, p);
-                    }
-                    (StaticProp::Color, PropValue::Color(p)) => {
-                        once!(color, StaticProp::Color, ComponentKind::Todo, p);
-                    }
-                    // Multi-valued
-                    (StaticProp::Attach, PropValue::Attachment(p)) => { attach.push(p); }
-                    (StaticProp::Attendee, PropValue::Uri(p)) => { attendee.push(p); }
-                    (StaticProp::Categories, PropValue::TextSeq(p)) => { categories.push(p); }
-                    (StaticProp::Comment, PropValue::Text(p)) => { comment.push(p); }
-                    (StaticProp::Contact, PropValue::Text(p)) => { contact.push(p); }
-                    (StaticProp::ExDate, PropValue::ExDateSeq(seq, params)) => {
-                        match seq {
-                            ExDateSeq::DateTime(dates) => {
-                                for dt in dates {
-                                    exdate.push(Prop { value: DateTimeOrDate::DateTime(dt), params: params.clone() });
-                                }
-                            }
-                            ExDateSeq::Date(dates) => {
-                                for d in dates {
-                                    exdate.push(Prop { value: DateTimeOrDate::Date(d), params: params.clone() });
-                                }
-                            }
+    // Subcomponent vectors
+    let mut alarms: Vec<Alarm> = Vec::new();
+    let mut participants: Vec<Participant> = Vec::new();
+    let mut locations: Vec<LocationComponent> = Vec::new();
+    let mut resource_components: Vec<ResourceComponent> = Vec::new();
+
+    // Parse properties and subcomponents in any order
+    #[allow(unused_variables)]
+    loop {
+        // Skip blank lines
+        let _: usize = repeat(0.., line_terminator(le)).parse_next(input)?;
+
+        let checkpoint = input.checkpoint();
+        if end(empty::<I, E>).parse_next(input).is_ok() {
+            input.reset(&checkpoint);
+            break;
+        }
+        input.reset(&checkpoint);
+
+        let checkpoint = input.checkpoint();
+        if begin(empty::<I, E>).parse_next(input).is_ok() {
+            input.reset(&checkpoint);
+            let cp = input.checkpoint();
+            if terminated(begin(Caseless("VALARM")), line_terminator::<I, E>(le)).parse_next(input).is_ok() {
+                input.reset(&cp);
+                alarms.push(alarm(input, le)?);
+            } else {
+                input.reset(&cp);
+                let cp = input.checkpoint();
+                if terminated(begin(Caseless("PARTICIPANT")), line_terminator::<I, E>(le)).parse_next(input).is_ok() {
+                    input.reset(&cp);
+                    participants.push(participant(input, le)?);
+                } else {
+                    input.reset(&cp);
+                    let cp = input.checkpoint();
+                    if terminated(begin(Caseless("VLOCATION")), line_terminator::<I, E>(le)).parse_next(input).is_ok() {
+                        input.reset(&cp);
+                        locations.push(location(input, le)?);
+                    } else {
+                        input.reset(&cp);
+                        let cp = input.checkpoint();
+                        if terminated(begin(Caseless("VRESOURCE")), line_terminator::<I, E>(le)).parse_next(input).is_ok() {
+                            input.reset(&cp);
+                            resource_components.push(resource(input, le)?);
+                        } else {
+                            input.reset(&cp);
+                            let _ = other_with_name(input, le)?;
                         }
                     }
-                    (StaticProp::RequestStatus, PropValue::RequestStatus(p)) => { request_status.push(p); }
-                    (StaticProp::RelatedTo, PropValue::Uid(p)) => { related_to.push(p); }
-                    (StaticProp::Resources, PropValue::TextSeq(p)) => { resources.push(p); }
-                    (StaticProp::RDate, PropValue::RDateSeq(p)) => { rdate.push(p); }
-                    (StaticProp::RRule, PropValue::RRule(p)) => { rrule.push(p); }
-                    (StaticProp::Image, PropValue::Attachment(p)) => { image.push(p); }
-                    (StaticProp::Conference, PropValue::Uri(p)) => { conference.push(p); }
-                    (StaticProp::StyledDescription, PropValue::StyledDescription(p)) => { styled_description.push(p); }
-                    (StaticProp::StructuredData, PropValue::StructuredData(p)) => { structured_data.push(p); }
-                    _ => { /* ignore - property parser guarantees correct variant */ }
                 }
             }
-            ParsedProp::Unknown(UnknownProp { name: uname, params, value, .. }) => {
-                let name_string: String = I::try_into_string(&uname)?;
-                handle_unknown!(x_props, name_string, params, value);
-            }
+            continue;
         }
-        Ok(())
-    });
+        input.reset(&checkpoint);
 
-    // Parse subcomponents
-    let alarms: Vec<Alarm> = repeat(0.., preceded(peek(begin(Caseless("VALARM"))), |i: &mut I| alarm(i, le))).parse_next(input)?;
-    let participants: Vec<Participant> = repeat(0.., preceded(peek(begin(Caseless("PARTICIPANT"))), |i: &mut I| participant(i, le))).parse_next(input)?;
-    let locations: Vec<LocationComponent> = repeat(0.., preceded(peek(begin(Caseless("VLOCATION"))), |i: &mut I| location(i, le))).parse_next(input)?;
-    let resource_components: Vec<ResourceComponent> = repeat(0.., preceded(peek(begin(Caseless("VRESOURCE"))), |i: &mut I| resource(i, le))).parse_next(input)?;
+        let parsed: ParsedProp<I::Slice> = terminated(property, line_terminator(le)).parse_next(input)?;
+        let result: Result<(), CalendarParseError<I::Slice>> = (|| {
+            match parsed {
+                ParsedProp::Known(KnownProp { name: prop_name, value }) => {
+                    match (prop_name, value) {
+                        (StaticProp::DtStamp, PropValue::DateTimeUtc(p)) => {
+                            once!(dtstamp, StaticProp::DtStamp, ComponentKind::Todo, p);
+                        }
+                        (StaticProp::Uid, PropValue::Uid(p)) => {
+                            once!(uid, StaticProp::Uid, ComponentKind::Todo, p);
+                        }
+                        (StaticProp::DtStart, PropValue::DateTimeOrDate(p)) => {
+                            once!(dtstart, StaticProp::DtStart, ComponentKind::Todo, p);
+                        }
+                        (StaticProp::Class, PropValue::ClassValue(p)) => {
+                            once!(class, StaticProp::Class, ComponentKind::Todo, p);
+                        }
+                        (StaticProp::DtCompleted, PropValue::DateTimeUtc(p)) => {
+                            once!(completed, StaticProp::DtCompleted, ComponentKind::Todo, p);
+                        }
+                        (StaticProp::Created, PropValue::DateTimeUtc(p)) => {
+                            once!(created, StaticProp::Created, ComponentKind::Todo, p);
+                        }
+                        (StaticProp::Description, PropValue::Text(p)) => {
+                            once!(description, StaticProp::Description, ComponentKind::Todo, p);
+                        }
+                        (StaticProp::Geo, PropValue::Geo(p)) => {
+                            once!(geo, StaticProp::Geo, ComponentKind::Todo, p);
+                        }
+                        (StaticProp::LastModified, PropValue::DateTimeUtc(p)) => {
+                            once!(last_modified, StaticProp::LastModified, ComponentKind::Todo, p);
+                        }
+                        (StaticProp::Location, PropValue::Text(p)) => {
+                            once!(loc_prop, StaticProp::Location, ComponentKind::Todo, p);
+                        }
+                        (StaticProp::Organizer, PropValue::Uri(p)) => {
+                            once!(organizer, StaticProp::Organizer, ComponentKind::Todo, p);
+                        }
+                        (StaticProp::PercentComplete, PropValue::CompletionPercentage(p)) => {
+                            once!(percent_complete, StaticProp::PercentComplete, ComponentKind::Todo, p);
+                        }
+                        (StaticProp::Priority, PropValue::Priority(p)) => {
+                            once!(priority, StaticProp::Priority, ComponentKind::Todo, p);
+                        }
+                        (StaticProp::RecurId, PropValue::DateTimeOrDate(p)) => {
+                            once!(recurrence_id, StaticProp::RecurId, ComponentKind::Todo, p);
+                        }
+                        (StaticProp::Sequence, PropValue::Integer(p)) => {
+                            once!(sequence, StaticProp::Sequence, ComponentKind::Todo, p);
+                        }
+                        (StaticProp::Status, PropValue::Status(p)) => {
+                            if status.is_some() {
+                                return Err(CalendarParseError::MoreThanOneProp {
+                                    prop: PropName::Known(StaticProp::Status),
+                                    component: ComponentKind::Todo,
+                                });
+                            }
+                            match p.value {
+                                Status::NeedsAction | Status::Completed | Status::InProcess | Status::Cancelled => {}
+                                s => return Err(CalendarParseError::InvalidTodoStatus(s)),
+                            }
+                            status = Some(p);
+                        }
+                        (StaticProp::Summary, PropValue::Text(p)) => {
+                            once!(summary, StaticProp::Summary, ComponentKind::Todo, p);
+                        }
+                        (StaticProp::Url, PropValue::Uri(p)) => {
+                            once!(url, StaticProp::Url, ComponentKind::Todo, p);
+                        }
+                        (StaticProp::DtDue, PropValue::DateTimeOrDate(p)) => {
+                            if duration.is_some() {
+                                return Err(CalendarParseError::TodoTerminationCollision);
+                            }
+                            once!(due, StaticProp::DtDue, ComponentKind::Todo, p);
+                        }
+                        (StaticProp::Duration, PropValue::Duration(p)) => {
+                            if due.is_some() {
+                                return Err(CalendarParseError::TodoTerminationCollision);
+                            }
+                            once!(duration, StaticProp::Duration, ComponentKind::Todo, p);
+                        }
+                        (StaticProp::Color, PropValue::Color(p)) => {
+                            once!(color, StaticProp::Color, ComponentKind::Todo, p);
+                        }
+                        // Multi-valued
+                        (StaticProp::Attach, PropValue::Attachment(p)) => { attach.push(p); }
+                        (StaticProp::Attendee, PropValue::Uri(p)) => { attendee.push(p); }
+                        (StaticProp::Categories, PropValue::TextSeq(p)) => { categories.push(p); }
+                        (StaticProp::Comment, PropValue::Text(p)) => { comment.push(p); }
+                        (StaticProp::Contact, PropValue::Text(p)) => { contact.push(p); }
+                        (StaticProp::ExDate, PropValue::ExDateSeq(seq, params)) => {
+                            match seq {
+                                ExDateSeq::DateTime(dates) => {
+                                    for dt in dates {
+                                        exdate.push(Prop { value: DateTimeOrDate::DateTime(dt), params: params.clone() });
+                                    }
+                                }
+                                ExDateSeq::Date(dates) => {
+                                    for d in dates {
+                                        exdate.push(Prop { value: DateTimeOrDate::Date(d), params: params.clone() });
+                                    }
+                                }
+                            }
+                        }
+                        (StaticProp::RequestStatus, PropValue::RequestStatus(p)) => { request_status.push(p); }
+                        (StaticProp::RelatedTo, PropValue::Uid(p)) => { related_to.push(p); }
+                        (StaticProp::Resources, PropValue::TextSeq(p)) => { resources.push(p); }
+                        (StaticProp::RDate, PropValue::RDateSeq(p)) => { rdate.push(p); }
+                        (StaticProp::RRule, PropValue::RRule(p)) => { rrule.push(p); }
+                        (StaticProp::Image, PropValue::Attachment(p)) => { image.push(p); }
+                        (StaticProp::Conference, PropValue::Uri(p)) => { conference.push(p); }
+                        (StaticProp::StyledDescription, PropValue::StyledDescription(p)) => { styled_description.push(p); }
+                        (StaticProp::StructuredData, PropValue::StructuredData(p)) => { structured_data.push(p); }
+                        _ => { /* ignore - property parser guarantees correct variant */ }
+                    }
+                }
+                ParsedProp::Unknown(UnknownProp { name: uname, params, value, .. }) => {
+                    let name_string: String = I::try_into_string(&uname)?;
+                    handle_unknown!(x_props, name_string, params, value);
+                }
+            }
+            Ok(())
+        })();
+        result.map_err(|e| E::from_external_error(input, e))?;
+    }
 
     terminated(end(Caseless("VTODO")), line_terminator(le)).parse_next(input)?;
 
@@ -831,96 +948,141 @@ where
     let mut request_status: Vec<Prop<RequestStatus, Params>> = Vec::new();
     let mut x_props: HashMap<Box<CaselessStr>, Vec<Prop<Value<String>, Params>>> = HashMap::new();
 
-    parse_props!(input, le, parsed, {
-        match parsed {
-            ParsedProp::Known(KnownProp { name: prop_name, value }) => {
-                match (prop_name, value) {
-                    (StaticProp::DtStamp, PropValue::DateTimeUtc(p)) => {
-                        once!(dtstamp, StaticProp::DtStamp, ComponentKind::Journal, p);
+    // Subcomponent vectors
+    let mut participants: Vec<Participant> = Vec::new();
+    let mut locations: Vec<LocationComponent> = Vec::new();
+    let mut resource_components: Vec<ResourceComponent> = Vec::new();
+
+    // Parse properties and subcomponents in any order
+    #[allow(unused_variables)]
+    loop {
+        // Skip blank lines
+        let _: usize = repeat(0.., line_terminator(le)).parse_next(input)?;
+
+        let checkpoint = input.checkpoint();
+        if end(empty::<I, E>).parse_next(input).is_ok() {
+            input.reset(&checkpoint);
+            break;
+        }
+        input.reset(&checkpoint);
+
+        let checkpoint = input.checkpoint();
+        if begin(empty::<I, E>).parse_next(input).is_ok() {
+            input.reset(&checkpoint);
+            let cp = input.checkpoint();
+            if terminated(begin(Caseless("PARTICIPANT")), line_terminator::<I, E>(le)).parse_next(input).is_ok() {
+                input.reset(&cp);
+                participants.push(participant(input, le)?);
+            } else {
+                input.reset(&cp);
+                let cp = input.checkpoint();
+                if terminated(begin(Caseless("VLOCATION")), line_terminator::<I, E>(le)).parse_next(input).is_ok() {
+                    input.reset(&cp);
+                    locations.push(location(input, le)?);
+                } else {
+                    input.reset(&cp);
+                    let cp = input.checkpoint();
+                    if terminated(begin(Caseless("VRESOURCE")), line_terminator::<I, E>(le)).parse_next(input).is_ok() {
+                        input.reset(&cp);
+                        resource_components.push(resource(input, le)?);
+                    } else {
+                        input.reset(&cp);
+                        let _ = other_with_name(input, le)?;
                     }
-                    (StaticProp::Uid, PropValue::Uid(p)) => {
-                        once!(uid, StaticProp::Uid, ComponentKind::Journal, p);
-                    }
-                    (StaticProp::DtStart, PropValue::DateTimeOrDate(p)) => {
-                        once!(dtstart, StaticProp::DtStart, ComponentKind::Journal, p);
-                    }
-                    (StaticProp::Class, PropValue::ClassValue(p)) => {
-                        once!(class, StaticProp::Class, ComponentKind::Journal, p);
-                    }
-                    (StaticProp::Created, PropValue::DateTimeUtc(p)) => {
-                        once!(created, StaticProp::Created, ComponentKind::Journal, p);
-                    }
-                    (StaticProp::LastModified, PropValue::DateTimeUtc(p)) => {
-                        once!(last_modified, StaticProp::LastModified, ComponentKind::Journal, p);
-                    }
-                    (StaticProp::Organizer, PropValue::Uri(p)) => {
-                        once!(organizer, StaticProp::Organizer, ComponentKind::Journal, p);
-                    }
-                    (StaticProp::RecurId, PropValue::DateTimeOrDate(p)) => {
-                        once!(recurrence_id, StaticProp::RecurId, ComponentKind::Journal, p);
-                    }
-                    (StaticProp::Sequence, PropValue::Integer(p)) => {
-                        once!(sequence, StaticProp::Sequence, ComponentKind::Journal, p);
-                    }
-                    (StaticProp::Status, PropValue::Status(p)) => {
-                        if status.is_some() {
-                            return Err(CalendarParseError::MoreThanOneProp {
-                                prop: PropName::Known(StaticProp::Status),
-                                component: ComponentKind::Journal,
-                            });
-                        }
-                        match p.value {
-                            Status::Draft | Status::Final | Status::Cancelled => {}
-                            s => return Err(CalendarParseError::InvalidJournalStatus(s)),
-                        }
-                        status = Some(p);
-                    }
-                    (StaticProp::Summary, PropValue::Text(p)) => {
-                        once!(summary, StaticProp::Summary, ComponentKind::Journal, p);
-                    }
-                    (StaticProp::Url, PropValue::Uri(p)) => {
-                        once!(url, StaticProp::Url, ComponentKind::Journal, p);
-                    }
-                    // Multi-valued
-                    (StaticProp::Attach, PropValue::Attachment(p)) => { attach.push(p); }
-                    (StaticProp::Attendee, PropValue::Uri(p)) => { attendee.push(p); }
-                    (StaticProp::Categories, PropValue::TextSeq(p)) => { categories.push(p); }
-                    (StaticProp::Comment, PropValue::Text(p)) => { comment.push(p); }
-                    (StaticProp::Contact, PropValue::Text(p)) => { contact.push(p); }
-                    (StaticProp::Description, PropValue::Text(p)) => { description.push(p); }
-                    (StaticProp::ExDate, PropValue::ExDateSeq(seq, params)) => {
-                        match seq {
-                            ExDateSeq::DateTime(dates) => {
-                                for dt in dates {
-                                    exdate.push(Prop { value: DateTimeOrDate::DateTime(dt), params: params.clone() });
-                                }
-                            }
-                            ExDateSeq::Date(dates) => {
-                                for d in dates {
-                                    exdate.push(Prop { value: DateTimeOrDate::Date(d), params: params.clone() });
-                                }
-                            }
-                        }
-                    }
-                    (StaticProp::RelatedTo, PropValue::Uid(p)) => { related_to.push(p); }
-                    (StaticProp::RDate, PropValue::RDateSeq(p)) => { rdate.push(p); }
-                    (StaticProp::RRule, PropValue::RRule(p)) => { rrule.push(p); }
-                    (StaticProp::RequestStatus, PropValue::RequestStatus(p)) => { request_status.push(p); }
-                    _ => { /* ignore - property parser guarantees correct variant */ }
                 }
             }
-            ParsedProp::Unknown(UnknownProp { name: uname, params, value, .. }) => {
-                let name_string: String = I::try_into_string(&uname)?;
-                handle_unknown!(x_props, name_string, params, value);
-            }
+            continue;
         }
-        Ok(())
-    });
+        input.reset(&checkpoint);
 
-    // Parse subcomponents
-    let participants: Vec<Participant> = repeat(0.., preceded(peek(begin(Caseless("PARTICIPANT"))), |i: &mut I| participant(i, le))).parse_next(input)?;
-    let locations: Vec<LocationComponent> = repeat(0.., preceded(peek(begin(Caseless("VLOCATION"))), |i: &mut I| location(i, le))).parse_next(input)?;
-    let resource_components: Vec<ResourceComponent> = repeat(0.., preceded(peek(begin(Caseless("VRESOURCE"))), |i: &mut I| resource(i, le))).parse_next(input)?;
+        let parsed: ParsedProp<I::Slice> = terminated(property, line_terminator(le)).parse_next(input)?;
+        let result: Result<(), CalendarParseError<I::Slice>> = (|| {
+            match parsed {
+                ParsedProp::Known(KnownProp { name: prop_name, value }) => {
+                    match (prop_name, value) {
+                        (StaticProp::DtStamp, PropValue::DateTimeUtc(p)) => {
+                            once!(dtstamp, StaticProp::DtStamp, ComponentKind::Journal, p);
+                        }
+                        (StaticProp::Uid, PropValue::Uid(p)) => {
+                            once!(uid, StaticProp::Uid, ComponentKind::Journal, p);
+                        }
+                        (StaticProp::DtStart, PropValue::DateTimeOrDate(p)) => {
+                            once!(dtstart, StaticProp::DtStart, ComponentKind::Journal, p);
+                        }
+                        (StaticProp::Class, PropValue::ClassValue(p)) => {
+                            once!(class, StaticProp::Class, ComponentKind::Journal, p);
+                        }
+                        (StaticProp::Created, PropValue::DateTimeUtc(p)) => {
+                            once!(created, StaticProp::Created, ComponentKind::Journal, p);
+                        }
+                        (StaticProp::LastModified, PropValue::DateTimeUtc(p)) => {
+                            once!(last_modified, StaticProp::LastModified, ComponentKind::Journal, p);
+                        }
+                        (StaticProp::Organizer, PropValue::Uri(p)) => {
+                            once!(organizer, StaticProp::Organizer, ComponentKind::Journal, p);
+                        }
+                        (StaticProp::RecurId, PropValue::DateTimeOrDate(p)) => {
+                            once!(recurrence_id, StaticProp::RecurId, ComponentKind::Journal, p);
+                        }
+                        (StaticProp::Sequence, PropValue::Integer(p)) => {
+                            once!(sequence, StaticProp::Sequence, ComponentKind::Journal, p);
+                        }
+                        (StaticProp::Status, PropValue::Status(p)) => {
+                            if status.is_some() {
+                                return Err(CalendarParseError::MoreThanOneProp {
+                                    prop: PropName::Known(StaticProp::Status),
+                                    component: ComponentKind::Journal,
+                                });
+                            }
+                            match p.value {
+                                Status::Draft | Status::Final | Status::Cancelled => {}
+                                s => return Err(CalendarParseError::InvalidJournalStatus(s)),
+                            }
+                            status = Some(p);
+                        }
+                        (StaticProp::Summary, PropValue::Text(p)) => {
+                            once!(summary, StaticProp::Summary, ComponentKind::Journal, p);
+                        }
+                        (StaticProp::Url, PropValue::Uri(p)) => {
+                            once!(url, StaticProp::Url, ComponentKind::Journal, p);
+                        }
+                        // Multi-valued
+                        (StaticProp::Attach, PropValue::Attachment(p)) => { attach.push(p); }
+                        (StaticProp::Attendee, PropValue::Uri(p)) => { attendee.push(p); }
+                        (StaticProp::Categories, PropValue::TextSeq(p)) => { categories.push(p); }
+                        (StaticProp::Comment, PropValue::Text(p)) => { comment.push(p); }
+                        (StaticProp::Contact, PropValue::Text(p)) => { contact.push(p); }
+                        (StaticProp::Description, PropValue::Text(p)) => { description.push(p); }
+                        (StaticProp::ExDate, PropValue::ExDateSeq(seq, params)) => {
+                            match seq {
+                                ExDateSeq::DateTime(dates) => {
+                                    for dt in dates {
+                                        exdate.push(Prop { value: DateTimeOrDate::DateTime(dt), params: params.clone() });
+                                    }
+                                }
+                                ExDateSeq::Date(dates) => {
+                                    for d in dates {
+                                        exdate.push(Prop { value: DateTimeOrDate::Date(d), params: params.clone() });
+                                    }
+                                }
+                            }
+                        }
+                        (StaticProp::RelatedTo, PropValue::Uid(p)) => { related_to.push(p); }
+                        (StaticProp::RDate, PropValue::RDateSeq(p)) => { rdate.push(p); }
+                        (StaticProp::RRule, PropValue::RRule(p)) => { rrule.push(p); }
+                        (StaticProp::RequestStatus, PropValue::RequestStatus(p)) => { request_status.push(p); }
+                        _ => { /* ignore - property parser guarantees correct variant */ }
+                    }
+                }
+                ParsedProp::Unknown(UnknownProp { name: uname, params, value, .. }) => {
+                    let name_string: String = I::try_into_string(&uname)?;
+                    handle_unknown!(x_props, name_string, params, value);
+                }
+            }
+            Ok(())
+        })();
+        result.map_err(|e| E::from_external_error(input, e))?;
+    }
 
     terminated(end(Caseless("VJOURNAL")), line_terminator(le)).parse_next(input)?;
 
@@ -995,51 +1157,96 @@ where
     let mut request_status: Vec<Prop<RequestStatus, Params>> = Vec::new();
     let mut x_props: HashMap<Box<CaselessStr>, Vec<Prop<Value<String>, Params>>> = HashMap::new();
 
-    parse_props!(input, le, parsed, {
-        match parsed {
-            ParsedProp::Known(KnownProp { name: prop_name, value }) => {
-                match (prop_name, value) {
-                    (StaticProp::DtStamp, PropValue::DateTimeUtc(p)) => {
-                        once!(dtstamp, StaticProp::DtStamp, ComponentKind::FreeBusy, p);
+    // Subcomponent vectors
+    let mut participants: Vec<Participant> = Vec::new();
+    let mut locations: Vec<LocationComponent> = Vec::new();
+    let mut resource_components: Vec<ResourceComponent> = Vec::new();
+
+    // Parse properties and subcomponents in any order
+    #[allow(unused_variables)]
+    loop {
+        // Skip blank lines
+        let _: usize = repeat(0.., line_terminator(le)).parse_next(input)?;
+
+        let checkpoint = input.checkpoint();
+        if end(empty::<I, E>).parse_next(input).is_ok() {
+            input.reset(&checkpoint);
+            break;
+        }
+        input.reset(&checkpoint);
+
+        let checkpoint = input.checkpoint();
+        if begin(empty::<I, E>).parse_next(input).is_ok() {
+            input.reset(&checkpoint);
+            let cp = input.checkpoint();
+            if terminated(begin(Caseless("PARTICIPANT")), line_terminator::<I, E>(le)).parse_next(input).is_ok() {
+                input.reset(&cp);
+                participants.push(participant(input, le)?);
+            } else {
+                input.reset(&cp);
+                let cp = input.checkpoint();
+                if terminated(begin(Caseless("VLOCATION")), line_terminator::<I, E>(le)).parse_next(input).is_ok() {
+                    input.reset(&cp);
+                    locations.push(location(input, le)?);
+                } else {
+                    input.reset(&cp);
+                    let cp = input.checkpoint();
+                    if terminated(begin(Caseless("VRESOURCE")), line_terminator::<I, E>(le)).parse_next(input).is_ok() {
+                        input.reset(&cp);
+                        resource_components.push(resource(input, le)?);
+                    } else {
+                        input.reset(&cp);
+                        let _ = other_with_name(input, le)?;
                     }
-                    (StaticProp::Uid, PropValue::Uid(p)) => {
-                        once!(uid, StaticProp::Uid, ComponentKind::FreeBusy, p);
-                    }
-                    (StaticProp::Contact, PropValue::Text(p)) => {
-                        once!(contact, StaticProp::Contact, ComponentKind::FreeBusy, p);
-                    }
-                    (StaticProp::DtStart, PropValue::DateTimeOrDate(p)) => {
-                        once!(dtstart, StaticProp::DtStart, ComponentKind::FreeBusy, p);
-                    }
-                    (StaticProp::DtEnd, PropValue::DateTimeOrDate(p)) => {
-                        once!(dtend, StaticProp::DtEnd, ComponentKind::FreeBusy, p);
-                    }
-                    (StaticProp::Organizer, PropValue::Uri(p)) => {
-                        once!(organizer, StaticProp::Organizer, ComponentKind::FreeBusy, p);
-                    }
-                    (StaticProp::Url, PropValue::Uri(p)) => {
-                        once!(url, StaticProp::Url, ComponentKind::FreeBusy, p);
-                    }
-                    // Multi-valued
-                    (StaticProp::Attendee, PropValue::Uri(p)) => { attendee.push(p); }
-                    (StaticProp::Comment, PropValue::Text(p)) => { comment.push(p); }
-                    (StaticProp::FreeBusy, PropValue::FreeBusyPeriods(p)) => { freebusy.push(p); }
-                    (StaticProp::RequestStatus, PropValue::RequestStatus(p)) => { request_status.push(p); }
-                    _ => { /* ignore - property parser guarantees correct variant */ }
                 }
             }
-            ParsedProp::Unknown(UnknownProp { name: uname, params, value, .. }) => {
-                let name_string: String = I::try_into_string(&uname)?;
-                handle_unknown!(x_props, name_string, params, value);
-            }
+            continue;
         }
-        Ok(())
-    });
+        input.reset(&checkpoint);
 
-    // Parse subcomponents
-    let participants: Vec<Participant> = repeat(0.., preceded(peek(begin(Caseless("PARTICIPANT"))), |i: &mut I| participant(i, le))).parse_next(input)?;
-    let locations: Vec<LocationComponent> = repeat(0.., preceded(peek(begin(Caseless("VLOCATION"))), |i: &mut I| location(i, le))).parse_next(input)?;
-    let resource_components: Vec<ResourceComponent> = repeat(0.., preceded(peek(begin(Caseless("VRESOURCE"))), |i: &mut I| resource(i, le))).parse_next(input)?;
+        let parsed: ParsedProp<I::Slice> = terminated(property, line_terminator(le)).parse_next(input)?;
+        let result: Result<(), CalendarParseError<I::Slice>> = (|| {
+            match parsed {
+                ParsedProp::Known(KnownProp { name: prop_name, value }) => {
+                    match (prop_name, value) {
+                        (StaticProp::DtStamp, PropValue::DateTimeUtc(p)) => {
+                            once!(dtstamp, StaticProp::DtStamp, ComponentKind::FreeBusy, p);
+                        }
+                        (StaticProp::Uid, PropValue::Uid(p)) => {
+                            once!(uid, StaticProp::Uid, ComponentKind::FreeBusy, p);
+                        }
+                        (StaticProp::Contact, PropValue::Text(p)) => {
+                            once!(contact, StaticProp::Contact, ComponentKind::FreeBusy, p);
+                        }
+                        (StaticProp::DtStart, PropValue::DateTimeOrDate(p)) => {
+                            once!(dtstart, StaticProp::DtStart, ComponentKind::FreeBusy, p);
+                        }
+                        (StaticProp::DtEnd, PropValue::DateTimeOrDate(p)) => {
+                            once!(dtend, StaticProp::DtEnd, ComponentKind::FreeBusy, p);
+                        }
+                        (StaticProp::Organizer, PropValue::Uri(p)) => {
+                            once!(organizer, StaticProp::Organizer, ComponentKind::FreeBusy, p);
+                        }
+                        (StaticProp::Url, PropValue::Uri(p)) => {
+                            once!(url, StaticProp::Url, ComponentKind::FreeBusy, p);
+                        }
+                        // Multi-valued
+                        (StaticProp::Attendee, PropValue::Uri(p)) => { attendee.push(p); }
+                        (StaticProp::Comment, PropValue::Text(p)) => { comment.push(p); }
+                        (StaticProp::FreeBusy, PropValue::FreeBusyPeriods(p)) => { freebusy.push(p); }
+                        (StaticProp::RequestStatus, PropValue::RequestStatus(p)) => { request_status.push(p); }
+                        _ => { /* ignore - property parser guarantees correct variant */ }
+                    }
+                }
+                ParsedProp::Unknown(UnknownProp { name: uname, params, value, .. }) => {
+                    let name_string: String = I::try_into_string(&uname)?;
+                    handle_unknown!(x_props, name_string, params, value);
+                }
+            }
+            Ok(())
+        })();
+        result.map_err(|e| E::from_external_error(input, e))?;
+    }
 
     terminated(end(Caseless("VFREEBUSY")), line_terminator(le)).parse_next(input)?;
 
@@ -1098,6 +1305,9 @@ where
     let mut rules: Vec<TzRule> = Vec::new();
 
     loop {
+        // Skip blank lines
+        let _: usize = repeat(0.., line_terminator(le)).parse_next(input)?;
+
         // Check for END:VTIMEZONE — we're done
         let checkpoint = input.checkpoint();
         if end(empty::<I, E>).parse_next(input).is_ok() {
@@ -1474,74 +1684,112 @@ where
     let mut x_props: HashMap<Box<CaselessStr>, Vec<Prop<Value<String>, Params>>> = HashMap::new();
 
 
-    parse_props!(input, le, parsed, {
-        match parsed {
-            ParsedProp::Known(KnownProp { name: prop_name, value }) => {
-                match (prop_name, value) {
-                    (StaticProp::Uid, PropValue::Uid(p)) => {
-                        once!(uid, StaticProp::Uid, ComponentKind::Unknown, p);
-                    }
-                    (StaticProp::ParticipantType, PropValue::ParticipantType(p)) => {
-                        once!(participant_type, StaticProp::ParticipantType, ComponentKind::Unknown, p);
-                    }
-                    (StaticProp::CalendarAddress, PropValue::Uri(p)) => {
-                        once!(calendar_address, StaticProp::CalendarAddress, ComponentKind::Unknown, p);
-                    }
-                    (StaticProp::Created, PropValue::DateTimeUtc(p)) => {
-                        once!(created, StaticProp::Created, ComponentKind::Unknown, p);
-                    }
-                    (StaticProp::Description, PropValue::Text(p)) => {
-                        once!(description, StaticProp::Description, ComponentKind::Unknown, p);
-                    }
-                    (StaticProp::DtStamp, PropValue::DateTimeUtc(p)) => {
-                        once!(dtstamp, StaticProp::DtStamp, ComponentKind::Unknown, p);
-                    }
-                    (StaticProp::Geo, PropValue::Geo(p)) => {
-                        once!(geo, StaticProp::Geo, ComponentKind::Unknown, p);
-                    }
-                    (StaticProp::LastModified, PropValue::DateTimeUtc(p)) => {
-                        once!(last_modified, StaticProp::LastModified, ComponentKind::Unknown, p);
-                    }
-                    (StaticProp::Priority, PropValue::Priority(p)) => {
-                        once!(priority, StaticProp::Priority, ComponentKind::Unknown, p);
-                    }
-                    (StaticProp::Sequence, PropValue::Integer(p)) => {
-                        once!(sequence, StaticProp::Sequence, ComponentKind::Unknown, p);
-                    }
-                    (StaticProp::Status, PropValue::Status(p)) => {
-                        once!(status, StaticProp::Status, ComponentKind::Unknown, p);
-                    }
-                    (StaticProp::Summary, PropValue::Text(p)) => {
-                        once!(summary, StaticProp::Summary, ComponentKind::Unknown, p);
-                    }
-                    (StaticProp::Url, PropValue::Uri(p)) => {
-                        once!(url, StaticProp::Url, ComponentKind::Unknown, p);
-                    }
-                    // Multi-valued
-                    (StaticProp::Attach, PropValue::Attachment(p)) => { attach.push(p); }
-                    (StaticProp::Categories, PropValue::TextSeq(p)) => { categories.push(p); }
-                    (StaticProp::Comment, PropValue::Text(p)) => { comment.push(p); }
-                    (StaticProp::Contact, PropValue::Text(p)) => { contact.push(p); }
-                    (StaticProp::Location, PropValue::Text(p)) => { location_prop.push(p); }
-                    (StaticProp::RequestStatus, PropValue::RequestStatus(p)) => { request_status.push(p); }
-                    (StaticProp::RelatedTo, PropValue::Uid(p)) => { related_to.push(p); }
-                    (StaticProp::Resources, PropValue::TextSeq(p)) => { resources.push(p); }
-                    (StaticProp::StyledDescription, PropValue::StyledDescription(p)) => { styled_description.push(p); }
-                    (StaticProp::StructuredData, PropValue::StructuredData(p)) => { structured_data.push(p); }
-                    _ => { /* ignore - property parser guarantees correct variant */ }
+    // Subcomponent vectors
+    let mut locations: Vec<LocationComponent> = Vec::new();
+    let mut resource_components: Vec<ResourceComponent> = Vec::new();
+
+    // Parse properties and subcomponents in any order
+    #[allow(unused_variables)]
+    loop {
+        // Skip blank lines
+        let _: usize = repeat(0.., line_terminator(le)).parse_next(input)?;
+
+        let checkpoint = input.checkpoint();
+        if end(empty::<I, E>).parse_next(input).is_ok() {
+            input.reset(&checkpoint);
+            break;
+        }
+        input.reset(&checkpoint);
+
+        let checkpoint = input.checkpoint();
+        if begin(empty::<I, E>).parse_next(input).is_ok() {
+            input.reset(&checkpoint);
+            let cp = input.checkpoint();
+            if terminated(begin(Caseless("VLOCATION")), line_terminator::<I, E>(le)).parse_next(input).is_ok() {
+                input.reset(&cp);
+                locations.push(location(input, le)?);
+            } else {
+                input.reset(&cp);
+                let cp = input.checkpoint();
+                if terminated(begin(Caseless("VRESOURCE")), line_terminator::<I, E>(le)).parse_next(input).is_ok() {
+                    input.reset(&cp);
+                    resource_components.push(resource(input, le)?);
+                } else {
+                    input.reset(&cp);
+                    let _ = other_with_name(input, le)?;
                 }
             }
-            ParsedProp::Unknown(UnknownProp { name: uname, params, value, .. }) => {
-                let name_string: String = I::try_into_string(&uname)?;
-                handle_unknown!(x_props, name_string, params, value);
-            }
+            continue;
         }
-        Ok(())
-    });
+        input.reset(&checkpoint);
 
-    // Parse subcomponents
-    let locations: Vec<LocationComponent> = repeat(0.., preceded(peek(begin(Caseless("VLOCATION"))), |i: &mut I| location(i, le))).parse_next(input)?;
-    let resource_components: Vec<ResourceComponent> = repeat(0.., preceded(peek(begin(Caseless("VRESOURCE"))), |i: &mut I| resource(i, le))).parse_next(input)?;
+        let parsed: ParsedProp<I::Slice> = terminated(property, line_terminator(le)).parse_next(input)?;
+        let result: Result<(), CalendarParseError<I::Slice>> = (|| {
+            match parsed {
+                ParsedProp::Known(KnownProp { name: prop_name, value }) => {
+                    match (prop_name, value) {
+                        (StaticProp::Uid, PropValue::Uid(p)) => {
+                            once!(uid, StaticProp::Uid, ComponentKind::Unknown, p);
+                        }
+                        (StaticProp::ParticipantType, PropValue::ParticipantType(p)) => {
+                            once!(participant_type, StaticProp::ParticipantType, ComponentKind::Unknown, p);
+                        }
+                        (StaticProp::CalendarAddress, PropValue::Uri(p)) => {
+                            once!(calendar_address, StaticProp::CalendarAddress, ComponentKind::Unknown, p);
+                        }
+                        (StaticProp::Created, PropValue::DateTimeUtc(p)) => {
+                            once!(created, StaticProp::Created, ComponentKind::Unknown, p);
+                        }
+                        (StaticProp::Description, PropValue::Text(p)) => {
+                            once!(description, StaticProp::Description, ComponentKind::Unknown, p);
+                        }
+                        (StaticProp::DtStamp, PropValue::DateTimeUtc(p)) => {
+                            once!(dtstamp, StaticProp::DtStamp, ComponentKind::Unknown, p);
+                        }
+                        (StaticProp::Geo, PropValue::Geo(p)) => {
+                            once!(geo, StaticProp::Geo, ComponentKind::Unknown, p);
+                        }
+                        (StaticProp::LastModified, PropValue::DateTimeUtc(p)) => {
+                            once!(last_modified, StaticProp::LastModified, ComponentKind::Unknown, p);
+                        }
+                        (StaticProp::Priority, PropValue::Priority(p)) => {
+                            once!(priority, StaticProp::Priority, ComponentKind::Unknown, p);
+                        }
+                        (StaticProp::Sequence, PropValue::Integer(p)) => {
+                            once!(sequence, StaticProp::Sequence, ComponentKind::Unknown, p);
+                        }
+                        (StaticProp::Status, PropValue::Status(p)) => {
+                            once!(status, StaticProp::Status, ComponentKind::Unknown, p);
+                        }
+                        (StaticProp::Summary, PropValue::Text(p)) => {
+                            once!(summary, StaticProp::Summary, ComponentKind::Unknown, p);
+                        }
+                        (StaticProp::Url, PropValue::Uri(p)) => {
+                            once!(url, StaticProp::Url, ComponentKind::Unknown, p);
+                        }
+                        // Multi-valued
+                        (StaticProp::Attach, PropValue::Attachment(p)) => { attach.push(p); }
+                        (StaticProp::Categories, PropValue::TextSeq(p)) => { categories.push(p); }
+                        (StaticProp::Comment, PropValue::Text(p)) => { comment.push(p); }
+                        (StaticProp::Contact, PropValue::Text(p)) => { contact.push(p); }
+                        (StaticProp::Location, PropValue::Text(p)) => { location_prop.push(p); }
+                        (StaticProp::RequestStatus, PropValue::RequestStatus(p)) => { request_status.push(p); }
+                        (StaticProp::RelatedTo, PropValue::Uid(p)) => { related_to.push(p); }
+                        (StaticProp::Resources, PropValue::TextSeq(p)) => { resources.push(p); }
+                        (StaticProp::StyledDescription, PropValue::StyledDescription(p)) => { styled_description.push(p); }
+                        (StaticProp::StructuredData, PropValue::StructuredData(p)) => { structured_data.push(p); }
+                        _ => { /* ignore - property parser guarantees correct variant */ }
+                    }
+                }
+                ParsedProp::Unknown(UnknownProp { name: uname, params, value, .. }) => {
+                    let name_string: String = I::try_into_string(&uname)?;
+                    handle_unknown!(x_props, name_string, params, value);
+                }
+            }
+            Ok(())
+        })();
+        result.map_err(|e| E::from_external_error(input, e))?;
+    }
 
     terminated(end(Caseless("PARTICIPANT")), line_terminator(le)).parse_next(input)?;
 
@@ -1782,6 +2030,9 @@ where
 
     // Skip all properties (just consume them)
     loop {
+        // Skip blank lines
+        let _: usize = repeat(0.., line_terminator(le)).parse_next(input)?;
+
         let checkpoint = input.checkpoint();
         if alt((begin(empty::<I, E>), end(empty::<I, E>))).parse_next(input).is_ok() {
             input.reset(&checkpoint);
@@ -2266,7 +2517,7 @@ mod tests {
         assert!(remaining.is_empty());
 
         assert_eq!(cal.prod_id().unwrap().value, "-//Test//Test//EN");
-        assert_eq!(cal.version().value, Version::V2_0);
+        assert_eq!(cal.version().value, Token::Known(Version::V2_0));
         assert_eq!(cal.components().len(), 1);
 
         match &cal.components()[0] {
@@ -2358,7 +2609,7 @@ mod tests {
         let result: Result<Calendar, ()> = calendar(&mut esc);
         assert!(result.is_ok(), "parse failed: {:?}", result.err());
         let cal = result.unwrap();
-        assert_eq!(cal.version().value, Version::V2_0);
+        assert_eq!(cal.version().value, Token::Known(Version::V2_0));
         assert_eq!(cal.components().len(), 1);
         match &cal.components()[0] {
             CalendarComponent::Event(ev) => {

@@ -25,7 +25,7 @@ use super::{
 #[structible]
 pub struct Calendar {
     // Required
-    pub version: Prop<Version, Params>,
+    pub version: Prop<Token<Version, String>, Params>,
 
     // Optional (at most once, but required by RFC 5545 — omitted by some producers)
     pub prod_id: Option<Prop<String, Params>>,

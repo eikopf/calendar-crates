@@ -30,7 +30,7 @@ use winnow::{
 use crate::{
     model::{
         parameter::{KnownParam, Param, ParamName, StaticParam, UnknownParam, UnknownParamValue},
-        string::{Name, NameKind, Uri},
+        string::{Name, Uri},
     },
     parser::{
         InputStream,
@@ -95,9 +95,13 @@ where
         comma_seq1(quoted_uri).parse_next(input)
     }
 
-    let name = terminated(param_name, '=').parse_next(input)?;
+    let raw_name: Box<Name> = terminated(name, '=').parse_next(input)?;
+    let parsed_name = match StaticParam::from_str(raw_name.as_str()) {
+        Ok(static_param) => ParamName::Known(static_param),
+        Err(_) => ParamName::Unknown(raw_name.clone()),
+    };
 
-    match name {
+    match parsed_name {
         ParamName::Unknown(name) => {
             let kind = name.kind();
             let values = comma_seq1(param_value).parse_next(input)?;
@@ -107,72 +111,77 @@ where
                 value: UnknownParamValue { kind, values },
             }))
         }
-        ParamName::Known(name) => match name {
-            // RFC 5545 PARAMETERS
-            StaticParam::AltRep => quoted_uri.map(KnownParam::AltRep).parse_next(input),
-            StaticParam::CommonName => param_value.map(KnownParam::CommonName).parse_next(input),
-            StaticParam::CalUserType => maybe_quoted(calendar_user_type)
-                .map(KnownParam::CUType)
-                .parse_next(input),
-            StaticParam::DelFrom => quoted_addresses.map(KnownParam::DelFrom).parse_next(input),
-            StaticParam::DelTo => quoted_addresses.map(KnownParam::DelTo).parse_next(input),
-            StaticParam::Dir => quoted_uri.map(KnownParam::Dir).parse_next(input),
-            StaticParam::Encoding => {
-                // Try standard encodings (8BIT, BASE64). Fall back to unknown
-                // for deprecated values like QUOTED-PRINTABLE from RFC 2445.
-                let checkpoint = input.checkpoint();
-                match inline_encoding.map(KnownParam::Encoding).parse_next(input) {
-                    ok @ Ok(_) => ok,
-                    Err(_) => {
-                        input.reset(&checkpoint);
-                        let values = comma_seq1(param_value).parse_next(input)?;
-                        let boxed_name: Box<Name> = Name::new("ENCODING").unwrap().into();
-                        return Ok(Param::Unknown(UnknownParam {
-                            name: boxed_name,
-                            value: UnknownParamValue {
-                                kind: NameKind::Iana,
-                                values,
-                            },
-                        }));
-                    }
+        ParamName::Known(name) => {
+            // Try the typed parser for the known parameter. On failure, fall
+            // back to treating it as unknown so that malformed values (e.g.
+            // `SENT-BY=;`) don't abort the entire parse.
+            let checkpoint = input.checkpoint();
+            let known_result: Result<KnownParam, E> = match name {
+                // RFC 5545 PARAMETERS
+                StaticParam::AltRep => quoted_uri.map(KnownParam::AltRep).parse_next(input),
+                StaticParam::CommonName => param_value.map(KnownParam::CommonName).parse_next(input),
+                StaticParam::CalUserType => maybe_quoted(calendar_user_type)
+                    .map(KnownParam::CUType)
+                    .parse_next(input),
+                StaticParam::DelFrom => quoted_addresses.map(KnownParam::DelFrom).parse_next(input),
+                StaticParam::DelTo => quoted_addresses.map(KnownParam::DelTo).parse_next(input),
+                StaticParam::Dir => quoted_uri.map(KnownParam::Dir).parse_next(input),
+                StaticParam::Encoding => {
+                    inline_encoding.map(KnownParam::Encoding).parse_next(input)
+                }
+                StaticParam::FormatType => format_type.map(KnownParam::FormatType).parse_next(input),
+                StaticParam::FreeBusyType => free_busy_type.map(KnownParam::FBType).parse_next(input),
+                StaticParam::Language => language.map(KnownParam::Language).parse_next(input),
+                StaticParam::Member => quoted_addresses.map(KnownParam::Member).parse_next(input),
+                StaticParam::PartStat => maybe_quoted(participation_status)
+                    .map(KnownParam::PartStatus)
+                    .parse_next(input),
+                StaticParam::Range => Caseless("THISANDFUTURE")
+                    .value(KnownParam::RecurrenceIdentifierRange)
+                    .parse_next(input),
+                StaticParam::Related => alarm_trigger_relationship
+                    .map(KnownParam::AlarmTrigger)
+                    .parse_next(input),
+                StaticParam::RelType => relationship_type.map(KnownParam::RelType).parse_next(input),
+                StaticParam::Role => maybe_quoted(participation_role)
+                    .map(KnownParam::Role)
+                    .parse_next(input),
+                StaticParam::Rsvp => maybe_quoted(bool_caseless)
+                    .map(KnownParam::Rsvp)
+                    .parse_next(input),
+                StaticParam::SentBy => quoted_uri.map(KnownParam::SentBy).parse_next(input),
+                StaticParam::TzId => tz_id_param.map(KnownParam::TzId).parse_next(input),
+                StaticParam::Value => value_type.map(KnownParam::Value).parse_next(input),
+
+                // RFC 7986 PARAMETERS
+                StaticParam::Display => display_type.map(KnownParam::Display).parse_next(input),
+                StaticParam::Email => param_value.map(KnownParam::Email).parse_next(input),
+                StaticParam::Feature => feature_type.map(KnownParam::Feature).parse_next(input),
+                StaticParam::Label => param_value.map(KnownParam::Label).parse_next(input),
+
+                // RFC 9073 PARAMETERS
+                StaticParam::Order => positive_integer.map(KnownParam::Order).parse_next(input),
+                StaticParam::Schema => quoted_uri.map(KnownParam::Schema).parse_next(input),
+                StaticParam::Derived => bool_caseless.map(KnownParam::Derived).parse_next(input),
+            };
+
+            match known_result {
+                Ok(known) => Ok(Param::Known(known)),
+                Err(_) => {
+                    // Fall back to unknown parameter
+                    input.reset(&checkpoint);
+                    let kind = raw_name.kind();
+                    let values = comma_seq1(param_value).parse_next(input)?;
+                    Ok(Param::Unknown(UnknownParam {
+                        name: raw_name,
+                        value: UnknownParamValue {
+                            kind,
+                            values,
+                        },
+                    }))
                 }
             }
-            StaticParam::FormatType => format_type.map(KnownParam::FormatType).parse_next(input),
-            StaticParam::FreeBusyType => free_busy_type.map(KnownParam::FBType).parse_next(input),
-            StaticParam::Language => language.map(KnownParam::Language).parse_next(input),
-            StaticParam::Member => quoted_addresses.map(KnownParam::Member).parse_next(input),
-            StaticParam::PartStat => maybe_quoted(participation_status)
-                .map(KnownParam::PartStatus)
-                .parse_next(input),
-            StaticParam::Range => Caseless("THISANDFUTURE")
-                .value(KnownParam::RecurrenceIdentifierRange)
-                .parse_next(input),
-            StaticParam::Related => alarm_trigger_relationship
-                .map(KnownParam::AlarmTrigger)
-                .parse_next(input),
-            StaticParam::RelType => relationship_type.map(KnownParam::RelType).parse_next(input),
-            StaticParam::Role => maybe_quoted(participation_role)
-                .map(KnownParam::Role)
-                .parse_next(input),
-            StaticParam::Rsvp => maybe_quoted(bool_caseless)
-                .map(KnownParam::Rsvp)
-                .parse_next(input),
-            StaticParam::SentBy => quoted_uri.map(KnownParam::SentBy).parse_next(input),
-            StaticParam::TzId => tz_id_param.map(KnownParam::TzId).parse_next(input),
-            StaticParam::Value => value_type.map(KnownParam::Value).parse_next(input),
-
-            // RFC 7986 PARAMETERS
-            StaticParam::Display => display_type.map(KnownParam::Display).parse_next(input),
-            StaticParam::Email => param_value.map(KnownParam::Email).parse_next(input),
-            StaticParam::Feature => feature_type.map(KnownParam::Feature).parse_next(input),
-            StaticParam::Label => param_value.map(KnownParam::Label).parse_next(input),
-
-            // RFC 9073 PARAMETERS
-            StaticParam::Order => positive_integer.map(KnownParam::Order).parse_next(input),
-            StaticParam::Schema => quoted_uri.map(KnownParam::Schema).parse_next(input),
-            StaticParam::Derived => bool_caseless.map(KnownParam::Derived).parse_next(input),
         }
-        .map(Param::Known),
     }
 }
 
@@ -289,8 +298,12 @@ mod tests {
             ));
         }
 
+        // Malformed values fall back to unknown parameters
         for input in ["FMTTYPE=", "FMTTYPE=missing slash", "FMTTYPE=back\\slash"] {
-            assert!(parameter::<_, ()>.parse_peek(input).is_err());
+            let result = parameter::<_, ()>.parse_peek(input);
+            assert!(result.is_ok(), "should fall back to unknown for: {input}");
+            let (_, p) = result.unwrap();
+            assert!(p.try_into_known().is_err(), "should be unknown for: {input}");
         }
     }
 
@@ -310,8 +323,12 @@ mod tests {
             ));
         }
 
+        // Malformed values fall back to unknown parameters
         for input in ["RANGE=", "RANGE=garbage", "RANGE=this-and-future"] {
-            assert!(parameter::<_, ()>.parse_peek(input).is_err());
+            let result = parameter::<_, ()>.parse_peek(input);
+            assert!(result.is_ok(), "should fall back to unknown for: {input}");
+            let (_, p) = result.unwrap();
+            assert!(p.try_into_known().is_err(), "should be unknown for: {input}");
         }
     }
 
@@ -337,14 +354,24 @@ mod tests {
             ));
         }
 
+        // Malformed values fall back to unknown parameters
         for input in ["RELATED=", "RELATED=,garbage", "RELATED=anything-else"] {
-            assert!(parameter::<_, ()>.parse_peek(input).is_err());
+            let result = parameter::<_, ()>.parse_peek(input);
+            assert!(result.is_ok(), "should fall back to unknown for: {input}");
+            let (_, p) = result.unwrap();
+            assert!(p.try_into_known().is_err(), "should be unknown for: {input}");
         }
     }
 
     #[test]
     fn parameter_edge_cases() {
-        assert!(parameter::<_, ()>.parse_peek("VALUE=").is_err()); // missing value
+        // Empty value for a known parameter falls back to unknown
+        {
+            let result = parameter::<_, ()>.parse_peek("VALUE=");
+            assert!(result.is_ok());
+            let (_, p) = result.unwrap();
+            assert!(p.try_into_known().is_err()); // fell back to unknown
+        }
         assert!(parameter::<_, ()>.parse_peek("=RECUR").is_err()); // missing name
         assert!(parameter::<_, ()>.parse_peek("=").is_err()); // missing name & value
 
