@@ -278,6 +278,67 @@ where
 }
 
 // ============================================================================
+// iCalendar stream parser
+// ============================================================================
+
+/// Parses an iCalendar stream (a sequence of zero or more [`Calendar`] objects).
+///
+/// Line endings are auto-detected from the input.
+pub fn icalendar_stream<I, E>(input: &mut I) -> Result<Vec<Calendar>, E>
+where
+    I: InputStream,
+    I::Token: AsChar + Clone,
+    I::Slice: AsBStr + Clone + PartialEq + Eq + SliceLen + Stream + Hash + AsRef<[u8]>,
+    <<I as Stream>::Slice as Stream>::Token: AsChar,
+    E: ParserError<I> + FromExternalError<I, CalendarParseError<I::Slice>>,
+{
+    let le = LineEnding::detect(input.as_ref());
+    let mut config = DefaultConfig::new(le);
+    icalendar_stream_with_config(input, &mut config)
+}
+
+/// Parses an iCalendar stream using the provided [`Config`].
+///
+/// The caller is responsible for setting [`Config::line_ending`] before calling this function
+/// (e.g. via [`LineEnding::detect`]).
+pub fn icalendar_stream_with_config<I, E>(input: &mut I, config: &mut impl Config) -> Result<Vec<Calendar>, E>
+where
+    I: InputStream,
+    I::Token: AsChar + Clone,
+    I::Slice: AsBStr + Clone + PartialEq + Eq + SliceLen + Stream + Hash + AsRef<[u8]>,
+    <<I as Stream>::Slice as Stream>::Token: AsChar,
+    E: ParserError<I> + FromExternalError<I, CalendarParseError<I::Slice>>,
+{
+    let le = config.line_ending();
+    icalendar_stream_impl(input, le)
+}
+
+fn icalendar_stream_impl<I, E>(input: &mut I, le: LineEnding) -> Result<Vec<Calendar>, E>
+where
+    I: InputStream,
+    I::Token: AsChar + Clone,
+    I::Slice: AsBStr + Clone + PartialEq + Eq + SliceLen + Stream + Hash + AsRef<[u8]>,
+    <<I as Stream>::Slice as Stream>::Token: AsChar,
+    E: ParserError<I> + FromExternalError<I, CalendarParseError<I::Slice>>,
+{
+    let mut calendars = Vec::new();
+
+    loop {
+        // Skip blank lines between calendar objects
+        let _: usize = repeat(0.., line_terminator(le)).parse_next(input)?;
+
+        // Check for end of input
+        if eof::<I, E>.parse_next(input).is_ok() {
+            break;
+        }
+
+        calendars.push(calendar_impl(input, le)?);
+    }
+
+    Ok(calendars)
+}
+
+// ============================================================================
 // CalendarComponent dispatcher
 // ============================================================================
 
@@ -2838,5 +2899,75 @@ mod tests {
         let cal = result.expect("BOM should be silently consumed");
         assert_eq!(cal.prod_id().value, "-//Test//Test//EN");
         assert_eq!(cal.components().len(), 1);
+    }
+
+    // ======================================================================
+    // icalendar_stream tests
+    // ======================================================================
+
+    /// A minimal valid calendar for stream tests.
+    const MINIMAL_CAL: &str = concat!(
+        "BEGIN:VCALENDAR\r\n",
+        "VERSION:2.0\r\n",
+        "PRODID:-//Test//Test//EN\r\n",
+        "END:VCALENDAR\r\n",
+    );
+
+    /// A minimal calendar with one event.
+    const CAL_WITH_EVENT: &str = concat!(
+        "BEGIN:VCALENDAR\r\n",
+        "VERSION:2.0\r\n",
+        "PRODID:-//Test//Test//EN\r\n",
+        "BEGIN:VEVENT\r\n",
+        "DTSTAMP:19970901T130000Z\r\n",
+        "UID:uid1@example.com\r\n",
+        "END:VEVENT\r\n",
+        "END:VCALENDAR\r\n",
+    );
+
+    #[test]
+    fn icalendar_stream_empty_input() {
+        let mut input = "".as_escaped();
+        let result: Result<Vec<Calendar>, ()> = icalendar_stream(&mut input);
+        let cals = result.expect("empty input should succeed");
+        assert!(cals.is_empty());
+    }
+
+    #[test]
+    fn icalendar_stream_single_calendar() {
+        let mut input = MINIMAL_CAL.as_escaped();
+        let result: Result<Vec<Calendar>, ()> = icalendar_stream(&mut input);
+        let cals = result.expect("single calendar should parse");
+        assert_eq!(cals.len(), 1);
+        assert_eq!(cals[0].prod_id().value, "-//Test//Test//EN");
+    }
+
+    #[test]
+    fn icalendar_stream_two_calendars() {
+        let src = format!("{}\r\n{}", MINIMAL_CAL, CAL_WITH_EVENT);
+        let mut input = src.as_escaped();
+        let result: Result<Vec<Calendar>, ()> = icalendar_stream(&mut input);
+        let cals = result.expect("two calendars should parse");
+        assert_eq!(cals.len(), 2);
+        assert_eq!(cals[0].components().len(), 0);
+        assert_eq!(cals[1].components().len(), 1);
+    }
+
+    #[test]
+    fn icalendar_stream_no_blank_lines_between() {
+        let src = format!("{}{}", MINIMAL_CAL, CAL_WITH_EVENT);
+        let mut input = src.as_escaped();
+        let result: Result<Vec<Calendar>, ()> = icalendar_stream(&mut input);
+        let cals = result.expect("adjacent calendars should parse");
+        assert_eq!(cals.len(), 2);
+    }
+
+    #[test]
+    fn icalendar_stream_trailing_blank_lines() {
+        let src = format!("{}\r\n\r\n\r\n", MINIMAL_CAL);
+        let mut input = src.as_escaped();
+        let result: Result<Vec<Calendar>, ()> = icalendar_stream(&mut input);
+        let cals = result.expect("trailing blank lines should be consumed");
+        assert_eq!(cals.len(), 1);
     }
 }
