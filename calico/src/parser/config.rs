@@ -5,8 +5,45 @@ use crate::{
     parser::error::{CalendarParseError, ParseFloatError},
 };
 
+/// The line ending convention used in an iCalendar document.
+///
+/// RFC 5545 mandates CRLF (`\r\n`), but many real-world `.ics` files use bare LF (`\n`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum LineEnding {
+    /// `\r\n`
+    Crlf,
+    /// `\n`
+    Lf,
+}
+
+impl LineEnding {
+    /// Auto-detect the line ending convention from the input by finding the first `\n` and
+    /// checking whether it is preceded by `\r`.
+    pub fn detect(input: &[u8]) -> LineEnding {
+        for (i, &b) in input.iter().enumerate() {
+            if b == b'\n' {
+                if i > 0 && input[i - 1] == b'\r' {
+                    return LineEnding::Crlf;
+                } else {
+                    return LineEnding::Lf;
+                }
+            }
+        }
+        // No newline found; default to CRLF.
+        LineEnding::Crlf
+    }
+}
+
 /// A trait providing customizable behaviour for a parser.
 pub trait Config {
+    /// Returns the line ending convention to use when parsing line terminators between properties.
+    fn line_ending(&self) -> LineEnding {
+        LineEnding::Crlf
+    }
+
+    /// Sets the line ending convention. The default implementation is a no-op.
+    fn set_line_ending(&mut self, _le: LineEnding) {}
+
     /// Updates the value of an existing parameter when a duplicate parameter is encountered. The
     /// default behaviour simply appends the `new_value` to the `previous_value` and returns
     /// `Ok(())`, but (for example) a simpler implementation might just replace the `previous_value`
@@ -37,8 +74,33 @@ pub trait Config {
     }
 }
 
-/// A unit struct that implements [`Config`].
+/// A struct that implements [`Config`] with configurable line ending.
 #[derive(Debug, Clone, Copy)]
-pub struct DefaultConfig;
+pub struct DefaultConfig {
+    line_ending: LineEnding,
+}
 
-impl Config for DefaultConfig {}
+impl DefaultConfig {
+    /// Creates a new `DefaultConfig` with the given line ending.
+    pub fn new(line_ending: LineEnding) -> Self {
+        Self { line_ending }
+    }
+}
+
+impl Default for DefaultConfig {
+    fn default() -> Self {
+        Self {
+            line_ending: LineEnding::Crlf,
+        }
+    }
+}
+
+impl Config for DefaultConfig {
+    fn line_ending(&self) -> LineEnding {
+        self.line_ending
+    }
+
+    fn set_line_ending(&mut self, le: LineEnding) {
+        self.line_ending = le;
+    }
+}

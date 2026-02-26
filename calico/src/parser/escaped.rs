@@ -54,15 +54,12 @@ impl<'a> Escaped<'a> {
     pub fn into_escaped_bytes(&self) -> Cow<'a, [u8]> {
         let (_, input) = split_fold_prefix(self.0);
         let mut bytes = None;
-        let mut skip_until = 0;
+        let mut i = 0;
 
-        for (i, &b) in input.iter().enumerate() {
-            if i < skip_until {
-                continue;
-            }
-
+        while i < input.len() {
+            // Check for CRLF fold: \r\n followed by SP or HTAB
             if i + 2 < input.len()
-                && b == b'\r'
+                && input[i] == b'\r'
                 && input[i + 1] == b'\n'
                 && (input[i + 2] == b' ' || input[i + 2] == b'\t')
             {
@@ -71,10 +68,23 @@ impl<'a> Escaped<'a> {
                     v.extend_from_slice(&input[..i]);
                     v
                 });
-
-                skip_until = i + 3;
-            } else if let Some(ref mut v) = bytes {
-                v.push(b);
+                i += 3;
+            // Check for bare LF fold: \n followed by SP or HTAB
+            } else if i + 1 < input.len()
+                && input[i] == b'\n'
+                && (input[i + 1] == b' ' || input[i + 1] == b'\t')
+            {
+                bytes.get_or_insert_with(|| {
+                    let mut v = Vec::with_capacity(input.len());
+                    v.extend_from_slice(&input[..i]);
+                    v
+                });
+                i += 2;
+            } else {
+                if let Some(ref mut v) = bytes {
+                    v.push(input[i]);
+                }
+                i += 1;
             }
         }
 
@@ -380,18 +390,21 @@ impl<'a> Iterator for IterOffsets<'a> {
 }
 
 /// Splits the `input` at the longest foldable prefix.
+///
+/// A fold sequence is either `\r\n` followed by a space or tab (3 bytes),
+/// or a bare `\n` followed by a space or tab (2 bytes).
 #[inline(always)]
 pub(crate) fn split_fold_prefix(input: &[u8]) -> (&[u8], &[u8]) {
-    if input.is_empty() {
-        return (input, input);
+    let mut i = 0;
+    while i < input.len() {
+        if input[i] == b'\r' && i + 2 < input.len() && input[i + 1] == b'\n' && (input[i + 2] == b' ' || input[i + 2] == b'\t') {
+            i += 3;
+        } else if input[i] == b'\n' && i + 1 < input.len() && (input[i + 1] == b' ' || input[i + 1] == b'\t') {
+            i += 2;
+        } else {
+            break;
+        }
     }
-
-    let i = input
-        .chunks_exact(3)
-        .position(|xs| !(xs[0] == b'\r' && xs[1] == b'\n' && (xs[2] == b'\t' || xs[2] == b' ')))
-        .map(|i| i * 3)
-        .unwrap_or(input.len() - input.len() % 3);
-
     input.split_at(i)
 }
 
@@ -628,5 +641,103 @@ mod tests {
             split_fold_prefix("\r\n ab\r\n\t".as_bytes()),
             ("\r\n ".as_bytes(), "ab\r\n\t".as_bytes()),
         );
+    }
+
+    // ==================================================================
+    // LF fold tests
+    // ==================================================================
+
+    #[test]
+    fn fold_prefix_splitting_lf() {
+        // Single LF fold with space
+        assert_eq!(
+            split_fold_prefix("\n ".as_bytes()),
+            ("\n ".as_bytes(), "".as_bytes()),
+        );
+
+        // Single LF fold with tab
+        assert_eq!(
+            split_fold_prefix("\n\t".as_bytes()),
+            ("\n\t".as_bytes(), "".as_bytes()),
+        );
+
+        // Two consecutive LF folds
+        assert_eq!(
+            split_fold_prefix("\n \n\ta".as_bytes()),
+            ("\n \n\t".as_bytes(), "a".as_bytes()),
+        );
+
+        // LF not followed by SP/HTAB is not a fold
+        assert_eq!(
+            split_fold_prefix("\na".as_bytes()),
+            ("".as_bytes(), "\na".as_bytes()),
+        );
+
+        // Mixed CRLF and LF folds
+        assert_eq!(
+            split_fold_prefix("\r\n \n\ta".as_bytes()),
+            ("\r\n \n\t".as_bytes(), "a".as_bytes()),
+        );
+
+        assert_eq!(
+            split_fold_prefix("\n \r\n\ta".as_bytes()),
+            ("\n \r\n\t".as_bytes(), "a".as_bytes()),
+        );
+    }
+
+    #[test]
+    fn into_escaped_bytes_lf_folds() {
+        // LF folds within content
+        let input = b"hel\n lo \n\t\n world!".as_escaped();
+        assert_eq!(input.into_escaped_bytes().as_ref(), b"hello world!");
+
+        // Mixed CRLF and LF folds
+        let input = b"ab\r\n cd\n ef".as_escaped();
+        assert_eq!(input.into_escaped_bytes().as_ref(), b"abcdef");
+    }
+
+    #[test]
+    fn iter_offsets_lf_folds() {
+        assert_eq!(
+            IterOffsets::new("\n\ta\n\tbc".as_bytes()).collect::<Vec<_>>(),
+            vec![(2, b'a'), (5, b'b'), (6, b'c')]
+        );
+
+        // Mixed
+        assert_eq!(
+            IterOffsets::new("\r\n\ta\n bc".as_bytes()).collect::<Vec<_>>(),
+            vec![(3, b'a'), (6, b'b'), (7, b'c')]
+        );
+    }
+
+    #[test]
+    fn next_token_lf_folds() {
+        assert_eq!(Escaped("\n\ta".as_bytes()).next_token(), Some(b'a'));
+
+        let mut input = Escaped("\n\ta\n b".as_bytes());
+        assert_eq!(input.next_token(), Some(b'a'));
+        assert_eq!(input.0, "\n b".as_bytes());
+        assert_eq!(input.next_token(), Some(b'b'));
+        assert_eq!(input.0, "".as_bytes());
+    }
+
+    #[test]
+    fn peek_token_lf_folds() {
+        let mut input = Escaped("\n\ta\n b".as_bytes());
+        assert_eq!(input.peek_token(), Some(b'a'));
+        assert_eq!(input.0, "\n\ta\n b".as_bytes());
+        assert_eq!(input.next_token(), Some(b'a'));
+        assert_eq!(input.0, "\n b".as_bytes());
+        assert_eq!(input.peek_token(), Some(b'b'));
+    }
+
+    #[test]
+    fn try_into_cow_str_lf_folds() {
+        let input = b"hel\n lo \n\t\n world!".as_escaped();
+        assert_eq!(input.try_into_cow_str(), Ok("hello world!".into()));
+
+        // Bare LF fold only prefix
+        let input = b"\n\t\n ".as_escaped();
+        assert_eq!(input.try_into_cow_str(), Ok("".into()));
     }
 }

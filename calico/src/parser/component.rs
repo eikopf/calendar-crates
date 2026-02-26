@@ -29,6 +29,7 @@ use crate::{
     model::css::Css3Color,
     parser::{
         InputStream,
+        config::{Config, DefaultConfig, LineEnding},
         error::{CalendarParseError, ComponentKind},
         property::{ParsedProp, KnownProp, PropValue, UnknownProp, PropName, property},
     },
@@ -41,7 +42,7 @@ use crate::{
 /// Parses properties in a loop, breaking when BEGIN or END is encountered.
 /// The body of the match is provided by the caller.
 macro_rules! parse_props {
-    ($input:ident, $parsed:ident, $body:block) => {
+    ($input:ident, $le:expr, $parsed:ident, $body:block) => {
         loop {
             let checkpoint = $input.checkpoint();
             if alt((begin(empty::<I, E>), end(empty::<I, E>))).parse_next($input).is_ok() {
@@ -50,7 +51,7 @@ macro_rules! parse_props {
             }
             $input.reset(&checkpoint);
 
-            let $parsed: ParsedProp<I::Slice> = terminated(property, crlf).parse_next($input)?;
+            let $parsed: ParsedProp<I::Slice> = terminated(property, line_terminator($le)).parse_next($input)?;
             let result: Result<(), CalendarParseError<I::Slice>> = (|| $body)();
             result.map_err(|e| E::from_external_error($input, e))?;
         }
@@ -90,7 +91,36 @@ where
     <<I as Stream>::Slice as Stream>::Token: AsChar,
     E: ParserError<I> + FromExternalError<I, CalendarParseError<I::Slice>>,
 {
-    terminated(begin(Caseless("VCALENDAR")), crlf).parse_next(input)?;
+    let le = LineEnding::detect(input.as_ref());
+    let mut config = DefaultConfig::new(le);
+    calendar_with_config(input, &mut config)
+}
+
+/// Parses a [`Calendar`] using the provided [`Config`].
+///
+/// The caller is responsible for setting [`Config::line_ending`] before calling this function
+/// (e.g. via [`LineEnding::detect`]).
+pub fn calendar_with_config<I, E>(input: &mut I, config: &mut impl Config) -> Result<Calendar, E>
+where
+    I: InputStream,
+    I::Token: AsChar + Clone,
+    I::Slice: AsBStr + Clone + PartialEq + Eq + SliceLen + Stream + Hash + AsRef<[u8]>,
+    <<I as Stream>::Slice as Stream>::Token: AsChar,
+    E: ParserError<I> + FromExternalError<I, CalendarParseError<I::Slice>>,
+{
+    let le = config.line_ending();
+    calendar_impl(input, le)
+}
+
+fn calendar_impl<I, E>(input: &mut I, le: LineEnding) -> Result<Calendar, E>
+where
+    I: InputStream,
+    I::Token: AsChar + Clone,
+    I::Slice: AsBStr + Clone + PartialEq + Eq + SliceLen + Stream + Hash + AsRef<[u8]>,
+    <<I as Stream>::Slice as Stream>::Token: AsChar,
+    E: ParserError<I> + FromExternalError<I, CalendarParseError<I::Slice>>,
+{
+    terminated(begin(Caseless("VCALENDAR")), line_terminator(le)).parse_next(input)?;
 
     // Once-only properties
     let mut prod_id: Option<Prop<String, Params>> = None;
@@ -129,13 +159,13 @@ where
         let checkpoint = input.checkpoint();
         if begin(empty::<I, E>).parse_next(input).is_ok() {
             input.reset(&checkpoint);
-            components.push(calendar_component(input)?);
+            components.push(calendar_component_lt(input, le)?);
             continue;
         }
         input.reset(&checkpoint);
 
         // Otherwise parse a property
-        let parsed: ParsedProp<I::Slice> = terminated(property, crlf).parse_next(input)?;
+        let parsed: ParsedProp<I::Slice> = terminated(property, line_terminator(le)).parse_next(input)?;
         let result: Result<(), CalendarParseError<I::Slice>> = (|| {
             match parsed {
                 ParsedProp::Known(KnownProp { name: prop_name, value }) => {
@@ -195,7 +225,7 @@ where
         result.map_err(|e| E::from_external_error(input, e))?;
     }
 
-    terminated(end(Caseless("VCALENDAR")), alt((crlf, eof))).parse_next(input)?;
+    terminated(end(Caseless("VCALENDAR")), alt((line_terminator(le), eof))).parse_next(input)?;
 
     // Check mandatory fields
     let version = version.ok_or_else(|| {
@@ -233,8 +263,19 @@ where
 // CalendarComponent dispatcher
 // ============================================================================
 
-/// Parses a [`CalendarComponent`].
+/// Parses a [`CalendarComponent`] assuming CRLF line endings.
 pub fn calendar_component<I, E>(input: &mut I) -> Result<CalendarComponent, E>
+where
+    I: InputStream,
+    I::Token: AsChar + Clone,
+    I::Slice: AsBStr + Clone + PartialEq + Eq + SliceLen + Stream + Hash + AsRef<[u8]>,
+    <<I as Stream>::Slice as Stream>::Token: AsChar,
+    E: ParserError<I> + FromExternalError<I, CalendarParseError<I::Slice>>,
+{
+    calendar_component_lt(input, LineEnding::Crlf)
+}
+
+fn calendar_component_lt<I, E>(input: &mut I, le: LineEnding) -> Result<CalendarComponent, E>
 where
     I: InputStream,
     I::Token: AsChar + Clone,
@@ -249,7 +290,7 @@ where
             let matched: Result<I::Slice, E> = begin(Caseless($name)).parse_next(input);
             input.reset(&checkpoint);
             if matched.is_ok() {
-                return $parser.map($variant).parse_next(input);
+                return $parser(input, le).map($variant);
             }
         }};
     }
@@ -261,7 +302,7 @@ where
     try_component!("VTIMEZONE", timezone, CalendarComponent::TimeZone);
 
     // Anything else (including VALARM at calendar level) → other
-    other_with_name.map(CalendarComponent::Other).parse_next(input)
+    other_with_name(input, le).map(CalendarComponent::Other)
 }
 
 // ============================================================================
@@ -269,7 +310,7 @@ where
 // ============================================================================
 
 /// Parses a [`Event`].
-fn event<I, E>(input: &mut I) -> Result<Event, E>
+fn event<I, E>(input: &mut I, le: LineEnding) -> Result<Event, E>
 where
     I: InputStream,
     I::Token: AsChar + Clone,
@@ -277,7 +318,7 @@ where
     <<I as Stream>::Slice as Stream>::Token: AsChar,
     E: ParserError<I> + FromExternalError<I, CalendarParseError<I::Slice>>,
 {
-    terminated(begin(Caseless("VEVENT")), crlf).parse_next(input)?;
+    terminated(begin(Caseless("VEVENT")), line_terminator(le)).parse_next(input)?;
 
     // Once-only properties
     let mut dtstamp: Option<Prop<DateTime<Utc>, Params>> = None;
@@ -319,7 +360,7 @@ where
     // Unknown
     let mut x_props: HashMap<Box<CaselessStr>, Vec<Prop<Value<String>, Params>>> = HashMap::new();
 
-    parse_props!(input, parsed, {
+    parse_props!(input, le, parsed, {
         match parsed {
             ParsedProp::Known(KnownProp { name: prop_name, value }) => {
                 match (prop_name, value) {
@@ -468,12 +509,12 @@ where
     });
 
     // Parse subcomponents
-    let alarms: Vec<Alarm> = repeat(0.., preceded(peek(begin(Caseless("VALARM"))), alarm)).parse_next(input)?;
-    let participants: Vec<Participant> = repeat(0.., preceded(peek(begin(Caseless("PARTICIPANT"))), participant)).parse_next(input)?;
-    let locations: Vec<LocationComponent> = repeat(0.., preceded(peek(begin(Caseless("VLOCATION"))), location)).parse_next(input)?;
-    let resource_components: Vec<ResourceComponent> = repeat(0.., preceded(peek(begin(Caseless("VRESOURCE"))), resource)).parse_next(input)?;
+    let alarms: Vec<Alarm> = repeat(0.., preceded(peek(begin(Caseless("VALARM"))), |i: &mut I| alarm(i, le))).parse_next(input)?;
+    let participants: Vec<Participant> = repeat(0.., preceded(peek(begin(Caseless("PARTICIPANT"))), |i: &mut I| participant(i, le))).parse_next(input)?;
+    let locations: Vec<LocationComponent> = repeat(0.., preceded(peek(begin(Caseless("VLOCATION"))), |i: &mut I| location(i, le))).parse_next(input)?;
+    let resource_components: Vec<ResourceComponent> = repeat(0.., preceded(peek(begin(Caseless("VRESOURCE"))), |i: &mut I| resource(i, le))).parse_next(input)?;
 
-    terminated(end(Caseless("VEVENT")), crlf).parse_next(input)?;
+    terminated(end(Caseless("VEVENT")), line_terminator(le)).parse_next(input)?;
 
     let mut ev = Event::new(alarms, participants, locations, resource_components);
     if let Some(v) = dtstamp { ev.set_dtstamp(v); }
@@ -523,7 +564,7 @@ where
 // ============================================================================
 
 /// Parses a [`Todo`].
-fn todo_comp<I, E>(input: &mut I) -> Result<Todo, E>
+fn todo_comp<I, E>(input: &mut I, le: LineEnding) -> Result<Todo, E>
 where
     I: InputStream,
     I::Token: AsChar + Clone,
@@ -531,7 +572,7 @@ where
     <<I as Stream>::Slice as Stream>::Token: AsChar,
     E: ParserError<I> + FromExternalError<I, CalendarParseError<I::Slice>>,
 {
-    terminated(begin(Caseless("VTODO")), crlf).parse_next(input)?;
+    terminated(begin(Caseless("VTODO")), line_terminator(le)).parse_next(input)?;
 
     // Once-only properties
     let mut dtstamp: Option<Prop<DateTime<Utc>, Params>> = None;
@@ -574,7 +615,7 @@ where
     // Unknown
     let mut x_props: HashMap<Box<CaselessStr>, Vec<Prop<Value<String>, Params>>> = HashMap::new();
 
-    parse_props!(input, parsed, {
+    parse_props!(input, le, parsed, {
         match parsed {
             ParsedProp::Known(KnownProp { name: prop_name, value }) => {
                 match (prop_name, value) {
@@ -698,12 +739,12 @@ where
     });
 
     // Parse subcomponents
-    let alarms: Vec<Alarm> = repeat(0.., preceded(peek(begin(Caseless("VALARM"))), alarm)).parse_next(input)?;
-    let participants: Vec<Participant> = repeat(0.., preceded(peek(begin(Caseless("PARTICIPANT"))), participant)).parse_next(input)?;
-    let locations: Vec<LocationComponent> = repeat(0.., preceded(peek(begin(Caseless("VLOCATION"))), location)).parse_next(input)?;
-    let resource_components: Vec<ResourceComponent> = repeat(0.., preceded(peek(begin(Caseless("VRESOURCE"))), resource)).parse_next(input)?;
+    let alarms: Vec<Alarm> = repeat(0.., preceded(peek(begin(Caseless("VALARM"))), |i: &mut I| alarm(i, le))).parse_next(input)?;
+    let participants: Vec<Participant> = repeat(0.., preceded(peek(begin(Caseless("PARTICIPANT"))), |i: &mut I| participant(i, le))).parse_next(input)?;
+    let locations: Vec<LocationComponent> = repeat(0.., preceded(peek(begin(Caseless("VLOCATION"))), |i: &mut I| location(i, le))).parse_next(input)?;
+    let resource_components: Vec<ResourceComponent> = repeat(0.., preceded(peek(begin(Caseless("VRESOURCE"))), |i: &mut I| resource(i, le))).parse_next(input)?;
 
-    terminated(end(Caseless("VTODO")), crlf).parse_next(input)?;
+    terminated(end(Caseless("VTODO")), line_terminator(le)).parse_next(input)?;
 
     let mut td = Todo::new(alarms, participants, locations, resource_components);
     if let Some(v) = dtstamp { td.set_dtstamp(v); }
@@ -754,7 +795,7 @@ where
 // ============================================================================
 
 /// Parses a [`Journal`].
-fn journal<I, E>(input: &mut I) -> Result<Journal, E>
+fn journal<I, E>(input: &mut I, le: LineEnding) -> Result<Journal, E>
 where
     I: InputStream,
     I::Token: AsChar + Clone,
@@ -762,7 +803,7 @@ where
     <<I as Stream>::Slice as Stream>::Token: AsChar,
     E: ParserError<I> + FromExternalError<I, CalendarParseError<I::Slice>>,
 {
-    terminated(begin(Caseless("VJOURNAL")), crlf).parse_next(input)?;
+    terminated(begin(Caseless("VJOURNAL")), line_terminator(le)).parse_next(input)?;
 
     let mut dtstamp: Option<Prop<DateTime<Utc>, Params>> = None;
     let mut uid: Option<Prop<Box<Uid>, Params>> = None;
@@ -790,7 +831,7 @@ where
     let mut request_status: Vec<Prop<RequestStatus, Params>> = Vec::new();
     let mut x_props: HashMap<Box<CaselessStr>, Vec<Prop<Value<String>, Params>>> = HashMap::new();
 
-    parse_props!(input, parsed, {
+    parse_props!(input, le, parsed, {
         match parsed {
             ParsedProp::Known(KnownProp { name: prop_name, value }) => {
                 match (prop_name, value) {
@@ -877,11 +918,11 @@ where
     });
 
     // Parse subcomponents
-    let participants: Vec<Participant> = repeat(0.., preceded(peek(begin(Caseless("PARTICIPANT"))), participant)).parse_next(input)?;
-    let locations: Vec<LocationComponent> = repeat(0.., preceded(peek(begin(Caseless("VLOCATION"))), location)).parse_next(input)?;
-    let resource_components: Vec<ResourceComponent> = repeat(0.., preceded(peek(begin(Caseless("VRESOURCE"))), resource)).parse_next(input)?;
+    let participants: Vec<Participant> = repeat(0.., preceded(peek(begin(Caseless("PARTICIPANT"))), |i: &mut I| participant(i, le))).parse_next(input)?;
+    let locations: Vec<LocationComponent> = repeat(0.., preceded(peek(begin(Caseless("VLOCATION"))), |i: &mut I| location(i, le))).parse_next(input)?;
+    let resource_components: Vec<ResourceComponent> = repeat(0.., preceded(peek(begin(Caseless("VRESOURCE"))), |i: &mut I| resource(i, le))).parse_next(input)?;
 
-    terminated(end(Caseless("VJOURNAL")), crlf).parse_next(input)?;
+    terminated(end(Caseless("VJOURNAL")), line_terminator(le)).parse_next(input)?;
 
     let dtstamp = dtstamp.ok_or_else(|| {
         E::from_external_error(input, CalendarParseError::MissingProp {
@@ -930,7 +971,7 @@ where
 // ============================================================================
 
 /// Parses a [`FreeBusy`].
-fn free_busy<I, E>(input: &mut I) -> Result<FreeBusy, E>
+fn free_busy<I, E>(input: &mut I, le: LineEnding) -> Result<FreeBusy, E>
 where
     I: InputStream,
     I::Token: AsChar + Clone,
@@ -938,7 +979,7 @@ where
     <<I as Stream>::Slice as Stream>::Token: AsChar,
     E: ParserError<I> + FromExternalError<I, CalendarParseError<I::Slice>>,
 {
-    terminated(begin(Caseless("VFREEBUSY")), crlf).parse_next(input)?;
+    terminated(begin(Caseless("VFREEBUSY")), line_terminator(le)).parse_next(input)?;
 
     let mut dtstamp: Option<Prop<DateTime<Utc>, Params>> = None;
     let mut uid: Option<Prop<Box<Uid>, Params>> = None;
@@ -954,7 +995,7 @@ where
     let mut request_status: Vec<Prop<RequestStatus, Params>> = Vec::new();
     let mut x_props: HashMap<Box<CaselessStr>, Vec<Prop<Value<String>, Params>>> = HashMap::new();
 
-    parse_props!(input, parsed, {
+    parse_props!(input, le, parsed, {
         match parsed {
             ParsedProp::Known(KnownProp { name: prop_name, value }) => {
                 match (prop_name, value) {
@@ -996,11 +1037,11 @@ where
     });
 
     // Parse subcomponents
-    let participants: Vec<Participant> = repeat(0.., preceded(peek(begin(Caseless("PARTICIPANT"))), participant)).parse_next(input)?;
-    let locations: Vec<LocationComponent> = repeat(0.., preceded(peek(begin(Caseless("VLOCATION"))), location)).parse_next(input)?;
-    let resource_components: Vec<ResourceComponent> = repeat(0.., preceded(peek(begin(Caseless("VRESOURCE"))), resource)).parse_next(input)?;
+    let participants: Vec<Participant> = repeat(0.., preceded(peek(begin(Caseless("PARTICIPANT"))), |i: &mut I| participant(i, le))).parse_next(input)?;
+    let locations: Vec<LocationComponent> = repeat(0.., preceded(peek(begin(Caseless("VLOCATION"))), |i: &mut I| location(i, le))).parse_next(input)?;
+    let resource_components: Vec<ResourceComponent> = repeat(0.., preceded(peek(begin(Caseless("VRESOURCE"))), |i: &mut I| resource(i, le))).parse_next(input)?;
 
-    terminated(end(Caseless("VFREEBUSY")), crlf).parse_next(input)?;
+    terminated(end(Caseless("VFREEBUSY")), line_terminator(le)).parse_next(input)?;
 
     let dtstamp = dtstamp.ok_or_else(|| {
         E::from_external_error(input, CalendarParseError::MissingProp {
@@ -1037,7 +1078,7 @@ where
 // ============================================================================
 
 /// Parses a [`TimeZone`].
-fn timezone<I, E>(input: &mut I) -> Result<TimeZone, E>
+fn timezone<I, E>(input: &mut I, le: LineEnding) -> Result<TimeZone, E>
 where
     I: InputStream,
     I::Token: AsChar + Clone,
@@ -1045,7 +1086,7 @@ where
     <<I as Stream>::Slice as Stream>::Token: AsChar,
     E: ParserError<I> + FromExternalError<I, CalendarParseError<I::Slice>>,
 {
-    terminated(begin(Caseless("VTIMEZONE")), crlf).parse_next(input)?;
+    terminated(begin(Caseless("VTIMEZONE")), line_terminator(le)).parse_next(input)?;
 
     let mut tz_id: Option<Prop<Box<TzId>, Params>> = None;
     let mut last_modified: Option<Prop<DateTime<Utc>, Params>> = None;
@@ -1069,13 +1110,13 @@ where
         let checkpoint = input.checkpoint();
         if begin(empty::<I, E>).parse_next(input).is_ok() {
             input.reset(&checkpoint);
-            rules.push(tz_rule(input)?);
+            rules.push(tz_rule(input, le)?);
             continue;
         }
         input.reset(&checkpoint);
 
         // Otherwise parse a property
-        let parsed: ParsedProp<I::Slice> = terminated(property, crlf).parse_next(input)?;
+        let parsed: ParsedProp<I::Slice> = terminated(property, line_terminator(le)).parse_next(input)?;
         let result: Result<(), CalendarParseError<I::Slice>> = (|| {
             match parsed {
                 ParsedProp::Known(KnownProp { name: prop_name, value }) => {
@@ -1102,7 +1143,7 @@ where
         result.map_err(|e| E::from_external_error(input, e))?;
     }
 
-    terminated(end(Caseless("VTIMEZONE")), crlf).parse_next(input)?;
+    terminated(end(Caseless("VTIMEZONE")), line_terminator(le)).parse_next(input)?;
 
     let tz_id = tz_id.ok_or_else(|| {
         E::from_external_error(input, CalendarParseError::MissingProp {
@@ -1122,7 +1163,7 @@ where
 }
 
 /// Parses a STANDARD or DAYLIGHT subcomponent of a VTIMEZONE.
-fn tz_rule<I, E>(input: &mut I) -> Result<TzRule, E>
+fn tz_rule<I, E>(input: &mut I, le: LineEnding) -> Result<TzRule, E>
 where
     I: InputStream,
     I::Token: AsChar + Clone,
@@ -1135,7 +1176,7 @@ where
             Caseless("STANDARD").value(TzRuleKind::Standard),
             Caseless("DAYLIGHT").value(TzRuleKind::Daylight),
         ))),
-        crlf,
+        line_terminator(le),
     )
     .parse_next(input)?;
 
@@ -1148,7 +1189,7 @@ where
     let mut tz_name: Vec<Prop<String, Params>> = Vec::new();
     let mut x_props: HashMap<Box<CaselessStr>, Vec<Prop<Value<String>, Params>>> = HashMap::new();
 
-    parse_props!(input, parsed, {
+    parse_props!(input, le, parsed, {
         match parsed {
             ParsedProp::Known(KnownProp { name: prop_name, value }) => {
                 match (prop_name, value) {
@@ -1182,7 +1223,7 @@ where
             Caseless("STANDARD").value(TzRuleKind::Standard),
             Caseless("DAYLIGHT").value(TzRuleKind::Daylight),
         ))),
-        crlf,
+        line_terminator(le),
     )
     .parse_next(input)?;
 
@@ -1231,7 +1272,7 @@ where
 // Alarm parser (RFC 5545 §3.6.6)
 // ============================================================================
 
-fn alarm<I, E>(input: &mut I) -> Result<Alarm, E>
+fn alarm<I, E>(input: &mut I, le: LineEnding) -> Result<Alarm, E>
 where
     I: InputStream,
     I::Token: AsChar + Clone,
@@ -1241,7 +1282,7 @@ where
 {
     use crate::model::primitive::AlarmAction;
 
-    terminated(begin(Caseless("VALARM")), crlf).parse_next(input)?;
+    terminated(begin(Caseless("VALARM")), line_terminator(le)).parse_next(input)?;
 
     // Shared alarm properties
     let mut action: Option<Prop<Token<AlarmAction, String>, Params>> = None;
@@ -1258,7 +1299,7 @@ where
     let mut related_to: Vec<Prop<Box<Uid>, Params>> = Vec::new();
     let mut x_props: HashMap<Box<CaselessStr>, Vec<Prop<Value<String>, Params>>> = HashMap::new();
 
-    parse_props!(input, parsed, {
+    parse_props!(input, le, parsed, {
         match parsed {
             ParsedProp::Known(KnownProp { name: prop_name, value }) => {
                 match (prop_name, value) {
@@ -1300,7 +1341,7 @@ where
         Ok(())
     });
 
-    terminated(end(Caseless("VALARM")), crlf).parse_next(input)?;
+    terminated(end(Caseless("VALARM")), line_terminator(le)).parse_next(input)?;
 
     // Check mandatory: trigger
     let trigger = trigger.ok_or_else(|| {
@@ -1396,7 +1437,7 @@ where
 // Participant parser (RFC 9073 §7.1)
 // ============================================================================
 
-fn participant<I, E>(input: &mut I) -> Result<Participant, E>
+fn participant<I, E>(input: &mut I, le: LineEnding) -> Result<Participant, E>
 where
     I: InputStream,
     I::Token: AsChar + Clone,
@@ -1404,7 +1445,7 @@ where
     <<I as Stream>::Slice as Stream>::Token: AsChar,
     E: ParserError<I> + FromExternalError<I, CalendarParseError<I::Slice>>,
 {
-    terminated(begin(Caseless("PARTICIPANT")), crlf).parse_next(input)?;
+    terminated(begin(Caseless("PARTICIPANT")), line_terminator(le)).parse_next(input)?;
 
     let mut uid: Option<Prop<Box<Uid>, Params>> = None;
     let mut participant_type: Option<Prop<Token<ParticipantType, String>, Params>> = None;
@@ -1433,7 +1474,7 @@ where
     let mut x_props: HashMap<Box<CaselessStr>, Vec<Prop<Value<String>, Params>>> = HashMap::new();
 
 
-    parse_props!(input, parsed, {
+    parse_props!(input, le, parsed, {
         match parsed {
             ParsedProp::Known(KnownProp { name: prop_name, value }) => {
                 match (prop_name, value) {
@@ -1499,10 +1540,10 @@ where
     });
 
     // Parse subcomponents
-    let locations: Vec<LocationComponent> = repeat(0.., preceded(peek(begin(Caseless("VLOCATION"))), location)).parse_next(input)?;
-    let resource_components: Vec<ResourceComponent> = repeat(0.., preceded(peek(begin(Caseless("VRESOURCE"))), resource)).parse_next(input)?;
+    let locations: Vec<LocationComponent> = repeat(0.., preceded(peek(begin(Caseless("VLOCATION"))), |i: &mut I| location(i, le))).parse_next(input)?;
+    let resource_components: Vec<ResourceComponent> = repeat(0.., preceded(peek(begin(Caseless("VRESOURCE"))), |i: &mut I| resource(i, le))).parse_next(input)?;
 
-    terminated(end(Caseless("PARTICIPANT")), crlf).parse_next(input)?;
+    terminated(end(Caseless("PARTICIPANT")), line_terminator(le)).parse_next(input)?;
 
     let uid = uid.ok_or_else(|| {
         E::from_external_error(input, CalendarParseError::MissingProp {
@@ -1550,7 +1591,7 @@ where
 // Location parser (RFC 9073 §7.2)
 // ============================================================================
 
-fn location<I, E>(input: &mut I) -> Result<LocationComponent, E>
+fn location<I, E>(input: &mut I, le: LineEnding) -> Result<LocationComponent, E>
 where
     I: InputStream,
     I::Token: AsChar + Clone,
@@ -1558,7 +1599,7 @@ where
     <<I as Stream>::Slice as Stream>::Token: AsChar,
     E: ParserError<I> + FromExternalError<I, CalendarParseError<I::Slice>>,
 {
-    terminated(begin(Caseless("VLOCATION")), crlf).parse_next(input)?;
+    terminated(begin(Caseless("VLOCATION")), line_terminator(le)).parse_next(input)?;
 
     let mut uid: Option<Prop<Box<Uid>, Params>> = None;
     let mut description: Option<Prop<String, Params>> = None;
@@ -1570,7 +1611,7 @@ where
     let mut x_props: HashMap<Box<CaselessStr>, Vec<Prop<Value<String>, Params>>> = HashMap::new();
 
 
-    parse_props!(input, parsed, {
+    parse_props!(input, le, parsed, {
         match parsed {
             ParsedProp::Known(KnownProp { name: prop_name, value }) => {
                 match (prop_name, value) {
@@ -1609,7 +1650,7 @@ where
         Ok(())
     });
 
-    terminated(end(Caseless("VLOCATION")), crlf).parse_next(input)?;
+    terminated(end(Caseless("VLOCATION")), line_terminator(le)).parse_next(input)?;
 
     let uid = uid.ok_or_else(|| {
         E::from_external_error(input, CalendarParseError::MissingProp {
@@ -1637,7 +1678,7 @@ where
 // ============================================================================
 
 /// Parses a [`ResourceComponent`].
-fn resource<I, E>(input: &mut I) -> Result<ResourceComponent, E>
+fn resource<I, E>(input: &mut I, le: LineEnding) -> Result<ResourceComponent, E>
 where
     I: InputStream,
     I::Token: AsChar + Clone,
@@ -1645,7 +1686,7 @@ where
     <<I as Stream>::Slice as Stream>::Token: AsChar,
     E: ParserError<I> + FromExternalError<I, CalendarParseError<I::Slice>>,
 {
-    terminated(begin(Caseless("VRESOURCE")), crlf).parse_next(input)?;
+    terminated(begin(Caseless("VRESOURCE")), line_terminator(le)).parse_next(input)?;
 
     let mut uid: Option<Prop<Box<Uid>, Params>> = None;
     let mut description: Option<Prop<String, Params>> = None;
@@ -1656,7 +1697,7 @@ where
     let mut x_props: HashMap<Box<CaselessStr>, Vec<Prop<Value<String>, Params>>> = HashMap::new();
 
 
-    parse_props!(input, parsed, {
+    parse_props!(input, le, parsed, {
         match parsed {
             ParsedProp::Known(KnownProp { name: prop_name, value }) => {
                 match (prop_name, value) {
@@ -1689,7 +1730,7 @@ where
         Ok(())
     });
 
-    terminated(end(Caseless("VRESOURCE")), crlf).parse_next(input)?;
+    terminated(end(Caseless("VRESOURCE")), line_terminator(le)).parse_next(input)?;
 
     let uid = uid.ok_or_else(|| {
         E::from_external_error(input, CalendarParseError::MissingProp {
@@ -1716,7 +1757,7 @@ where
 // ============================================================================
 
 /// Parses an arbitrary component with BEGIN and END lines.
-fn other_with_name<I, E>(input: &mut I) -> Result<OtherComponent, E>
+fn other_with_name<I, E>(input: &mut I, le: LineEnding) -> Result<OtherComponent, E>
 where
     I: InputStream,
     I::Token: AsChar + Clone,
@@ -1732,7 +1773,7 @@ where
     // Parse BEGIN:<name>
     let name_slice = terminated(
         begin(winnow::token::take_while(1.., is_name_char)),
-        crlf,
+        line_terminator(le),
     )
     .parse_next(input)?;
 
@@ -1749,16 +1790,16 @@ where
         input.reset(&checkpoint);
 
         // Consume the property line (we don't need to interpret it)
-        let _: ParsedProp<I::Slice> = terminated(property, crlf).parse_next(input)?;
+        let _: ParsedProp<I::Slice> = terminated(property, line_terminator(le)).parse_next(input)?;
     }
 
     // Parse nested subcomponents recursively
-    let subcomponents: Vec<OtherComponent> = repeat(0.., other_with_name).parse_next(input)?;
+    let subcomponents: Vec<OtherComponent> = repeat(0.., |i: &mut I| other_with_name(i, le)).parse_next(input)?;
 
     // Parse END:<name>
     let end_name_slice = terminated(
         end(winnow::token::take_while(1.., is_name_char)),
-        crlf,
+        line_terminator(le),
     )
     .parse_next(input)?;
 
@@ -1802,6 +1843,21 @@ where
     E: ParserError<I>,
 {
     preceded(Caseless("END:"), name)
+}
+
+/// Returns a parser that matches the given line ending convention.
+///
+/// - [`LineEnding::Crlf`] matches `\r\n`
+/// - [`LineEnding::Lf`] matches `\n`
+pub fn line_terminator<I, E>(le: LineEnding) -> impl Parser<I, I::Slice, E>
+where
+    I: StreamIsPartial + Stream + Compare<char>,
+    E: ParserError<I>,
+{
+    move |input: &mut I| match le {
+        LineEnding::Crlf => ('\r', '\n').take().parse_next(input),
+        LineEnding::Lf => '\n'.take().parse_next(input),
+    }
 }
 
 /// A version of [`winnow::ascii::crlf`] bounded by `Compare<char>` instead
@@ -2248,5 +2304,105 @@ mod tests {
             }
             other => panic!("expected Other component, got {:?}", other),
         }
+    }
+
+    // ======================================================================
+    // Bare-LF line ending tests
+    // ======================================================================
+
+    macro_rules! concat_lf {
+        ($($l:literal),* $(,)?) => {
+            concat!(
+                $($l, "\n",)*
+            )
+        };
+    }
+
+    #[test]
+    fn line_ending_detect() {
+        assert_eq!(LineEnding::detect(b"BEGIN:VCALENDAR\r\n"), LineEnding::Crlf);
+        assert_eq!(LineEnding::detect(b"BEGIN:VCALENDAR\n"), LineEnding::Lf);
+        assert_eq!(LineEnding::detect(b"no newline"), LineEnding::Crlf);
+    }
+
+    #[test]
+    fn parse_minimal_event_lf() {
+        let input = concat_lf!(
+            "BEGIN:VEVENT",
+            "DTSTAMP:19970901T130000Z",
+            "UID:uid1@example.com",
+            "END:VEVENT",
+        );
+
+        let mut esc = input.as_escaped();
+        let result: Result<Event, ()> = event(&mut esc, LineEnding::Lf);
+        assert!(result.is_ok(), "parse failed: {:?}", result.err());
+        assert!(esc.is_empty(), "remaining input: {:?}", std::str::from_utf8(esc.0));
+    }
+
+    #[test]
+    fn parse_calendar_lf() {
+        let input = concat_lf!(
+            "BEGIN:VCALENDAR",
+            "VERSION:2.0",
+            "PRODID:-//Test//Test//EN",
+            "BEGIN:VEVENT",
+            "DTSTAMP:19970901T130000Z",
+            "UID:uid1@example.com",
+            "SUMMARY:Test Event",
+            "END:VEVENT",
+            "END:VCALENDAR",
+        );
+
+        let mut esc = input.as_escaped();
+        let result: Result<Calendar, ()> = calendar(&mut esc);
+        assert!(result.is_ok(), "parse failed: {:?}", result.err());
+        let cal = result.unwrap();
+        assert_eq!(cal.version().value, Version::V2_0);
+        assert_eq!(cal.components().len(), 1);
+        match &cal.components()[0] {
+            CalendarComponent::Event(ev) => {
+                assert_eq!(ev.summary().unwrap().value, "Test Event");
+            }
+            other => panic!("expected Event, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn parse_timezone_lf() {
+        let input = concat_lf!(
+            "BEGIN:VTIMEZONE",
+            "TZID:America/New_York",
+            "BEGIN:STANDARD",
+            "DTSTART:19971026T020000",
+            "TZOFFSETFROM:-0400",
+            "TZOFFSETTO:-0500",
+            "END:STANDARD",
+            "END:VTIMEZONE",
+        );
+
+        let mut esc = input.as_escaped();
+        let result: Result<TimeZone, ()> = timezone(&mut esc, LineEnding::Lf);
+        assert!(result.is_ok(), "parse failed: {:?}", result.err());
+        let tz = result.unwrap();
+        assert_eq!(tz.tz_id().value.as_str(), "America/New_York");
+    }
+
+    #[test]
+    fn parse_calendar_auto_detect_lf() {
+        // The calendar() function should auto-detect LF line endings.
+        let input = concat_lf!(
+            "BEGIN:VCALENDAR",
+            "VERSION:2.0",
+            "BEGIN:VEVENT",
+            "DTSTAMP:20200101T000000Z",
+            "UID:auto@detect.lf",
+            "END:VEVENT",
+            "END:VCALENDAR",
+        );
+
+        let mut esc = input.as_escaped();
+        let result: Result<Calendar, ()> = calendar(&mut esc);
+        assert!(result.is_ok(), "auto-detect LF failed: {:?}", result.err());
     }
 }

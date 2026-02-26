@@ -217,7 +217,7 @@ where
     <<I as Stream>::Slice as Stream>::Token: AsChar,
     E: ParserError<I> + FromExternalError<I, CalendarParseError<I::Slice>>,
 {
-    let mut config = DefaultConfig;
+    let mut config = DefaultConfig::default();
     property_with_config(input, &mut config)
 }
 

@@ -341,7 +341,7 @@ where
     I: InputStream,
     E: ParserError<I> + FromExternalError<I, CalendarParseError<I::Slice>>,
 {
-    let mut config = DefaultConfig;
+    let mut config = DefaultConfig::default();
     binary_with_config(input, &mut config)
 }
 
@@ -1205,7 +1205,7 @@ where
     I::Token: AsChar,
     E: ParserError<I> + FromExternalError<I, CalendarParseError<I::Slice>>,
 {
-    let mut config = DefaultConfig;
+    let mut config = DefaultConfig::default();
     geo_with_config(input, &mut config)
 }
 
@@ -1291,7 +1291,7 @@ where
     I::Token: AsChar,
     E: ParserError<I> + FromExternalError<I, CalendarParseError<I::Slice>>,
 {
-    let mut config = DefaultConfig;
+    let mut config = DefaultConfig::default();
     float_with_config(input, &mut config)
 }
 
