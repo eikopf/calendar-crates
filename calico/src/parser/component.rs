@@ -247,8 +247,17 @@ where
         )
     })?;
 
-    let mut cal = Calendar::new(version, components);
-    if let Some(v) = prod_id { cal.set_prod_id(v); }
+    let prod_id = prod_id.ok_or_else(|| {
+        E::from_external_error(
+            input,
+            CalendarParseError::MissingProp {
+                prop: PropName::Known(StaticProp::ProdId),
+                component: ComponentKind::Calendar,
+            },
+        )
+    })?;
+
+    let mut cal = Calendar::new(version, prod_id, components);
     if let Some(v) = cal_scale { cal.set_cal_scale(v); }
     if let Some(v) = method { cal.set_method(v); }
     if let Some(v) = uid { cal.set_uid(v); }
@@ -1589,8 +1598,13 @@ where
             Ok(Alarm::Audio(a))
         }
         Token::Known(AlarmAction::Display) => {
-            let mut a = DisplayAlarm::new(trigger);
-            if let Some(v) = description { a.set_description(v); }
+            let description = description.ok_or_else(|| {
+                E::from_external_error(input, CalendarParseError::MissingProp {
+                    prop: PropName::Known(StaticProp::Description),
+                    component: ComponentKind::DisplayAlarm,
+                })
+            })?;
+            let mut a = DisplayAlarm::new(trigger, description);
             if let Some(v) = uid { a.set_uid(v); }
             if let Some(v) = duration { a.set_duration(v); }
             if let Some(v) = repeat { a.set_repeat(v); }
@@ -2468,7 +2482,7 @@ mod tests {
                 assert_eq!(ev.alarms().len(), 1);
                 match &ev.alarms()[0] {
                     Alarm::Display(da) => {
-                        assert_eq!(da.description().unwrap().value, "Breakfast meeting");
+                        assert_eq!(da.description().value, "Breakfast meeting");
                         // TRIGGER:-PT15M is a negative duration of 15 minutes
                         match &da.trigger().value {
                             TriggerValue::Duration(sd) => {
@@ -2516,7 +2530,7 @@ mod tests {
         let (remaining, cal) = result.unwrap();
         assert!(remaining.is_empty());
 
-        assert_eq!(cal.prod_id().unwrap().value, "-//Test//Test//EN");
+        assert_eq!(cal.prod_id().value, "-//Test//Test//EN");
         assert_eq!(cal.version().value, Token::Known(Version::V2_0));
         assert_eq!(cal.components().len(), 1);
 
@@ -2644,6 +2658,7 @@ mod tests {
         // The calendar() function should auto-detect LF line endings.
         let input = concat_lf!(
             "BEGIN:VCALENDAR",
+            "PRODID:-//Test//Test//EN",
             "VERSION:2.0",
             "BEGIN:VEVENT",
             "DTSTAMP:20200101T000000Z",
@@ -2821,7 +2836,7 @@ mod tests {
         let mut esc = input.as_escaped();
         let result: Result<Calendar, ()> = calendar(&mut esc);
         let cal = result.expect("BOM should be silently consumed");
-        assert_eq!(cal.prod_id().unwrap().value, "-//Test//Test//EN");
+        assert_eq!(cal.prod_id().value, "-//Test//Test//EN");
         assert_eq!(cal.components().len(), 1);
     }
 }

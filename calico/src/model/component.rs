@@ -27,8 +27,8 @@ pub struct Calendar {
     // Required
     pub version: Prop<Token<Version, String>, Params>,
 
-    // Optional (at most once, but required by RFC 5545 — omitted by some producers)
-    pub prod_id: Option<Prop<String, Params>>,
+    // Required
+    pub prod_id: Prop<String, Params>,
 
     // Optional (at most once)
     pub cal_scale: Option<Prop<Token<Gregorian, String>, Params>>,
@@ -353,8 +353,8 @@ pub struct DisplayAlarm {
     // Required
     pub trigger: Prop<TriggerValue, Params>,
 
-    // Required by RFC 5545, but omitted by some producers
-    pub description: Option<Prop<String, Params>>,
+    // Required
+    pub description: Prop<String, Params>,
 
     // Optional (at most once)
     pub uid: Option<Prop<Box<Uid>, Params>>,
