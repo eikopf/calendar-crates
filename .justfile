@@ -1,7 +1,7 @@
-fetch-fixtures:
+fetch-ics-fixtures:
     bash calico/tests/fetch-fixtures.sh
 
-corpus-test: fetch-fixtures
+ics-corpus-test: fetch-ics-fixtures
     cargo test -p calico --test corpus -- --ignored --nocapture
 
 test:
