@@ -2,6 +2,8 @@
 
 use std::convert::Infallible;
 
+use winnow::error::{FromExternalError, ParserError};
+
 // TODO: replace this reexport with a custom error enum that provides a subset of the variants
 // (since some error variants are impossible).
 
@@ -14,6 +16,7 @@ use crate::{
         primitive::{Integer, Sign, Status, Token, ValueType},
         rrule,
     },
+    parser::escaped::Escaped,
     parser::property::PropName,
 };
 
@@ -227,4 +230,58 @@ pub struct InvalidDurationTimeError<T = u32> {
 pub struct UnexpectedKnownParamError<S> {
     pub(crate) current_property: PropName<S>,
     pub(crate) unexpected_param: KnownParam,
+}
+
+/// An error returned by [`Calendar::parse`](crate::model::component::Calendar::parse) and
+/// [`Calendar::parse_bytes`](crate::model::component::Calendar::parse_bytes).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ParseError {
+    offset: usize,
+}
+
+impl ParseError {
+    /// Returns the byte offset in the input where parsing failed.
+    pub fn offset(&self) -> usize {
+        self.offset
+    }
+
+    /// Converts a remaining-byte count into a true byte offset.
+    pub(crate) fn with_total_len(self, total: usize) -> Self {
+        Self {
+            offset: total - self.offset,
+        }
+    }
+}
+
+impl std::fmt::Display for ParseError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "parse error at byte offset {}", self.offset)
+    }
+}
+
+impl std::error::Error for ParseError {}
+
+impl<'a> ParserError<Escaped<'a>> for ParseError {
+    type Inner = Self;
+
+    #[inline]
+    fn from_input(input: &Escaped<'a>) -> Self {
+        Self {
+            offset: input.0.len(),
+        }
+    }
+
+    #[inline]
+    fn into_inner(self) -> Result<Self::Inner, Self> {
+        Ok(self)
+    }
+}
+
+impl<'a> FromExternalError<Escaped<'a>, CalendarParseError<Escaped<'a>>> for ParseError {
+    #[inline]
+    fn from_external_error(input: &Escaped<'a>, _e: CalendarParseError<Escaped<'a>>) -> Self {
+        Self {
+            offset: input.0.len(),
+        }
+    }
 }

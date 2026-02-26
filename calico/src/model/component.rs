@@ -56,6 +56,28 @@ pub struct Calendar {
     pub x_property: Option<Vec<Prop<Value<String>, Params>>>,
 }
 
+impl Calendar {
+    /// Parses an iCalendar stream from a string, returning zero or more [`Calendar`] objects.
+    pub fn parse(s: &str) -> Result<Vec<Calendar>, crate::parser::error::ParseError> {
+        use crate::parser::{
+            component::icalendar_stream, error::ParseError, escaped::AsEscaped,
+        };
+        let total = s.len();
+        let mut input = s.as_escaped();
+        icalendar_stream::<_, ParseError>(&mut input).map_err(|e| e.with_total_len(total))
+    }
+
+    /// Parses an iCalendar stream from a byte slice, returning zero or more [`Calendar`] objects.
+    pub fn parse_bytes(b: &[u8]) -> Result<Vec<Calendar>, crate::parser::error::ParseError> {
+        use crate::parser::{
+            component::icalendar_stream, error::ParseError, escaped::AsEscaped,
+        };
+        let total = b.len();
+        let mut input = b.as_escaped();
+        icalendar_stream::<_, ParseError>(&mut input).map_err(|e| e.with_total_len(total))
+    }
+}
+
 // ============================================================================
 // CalendarComponent enum
 // ============================================================================
