@@ -15,12 +15,14 @@ pub fn main() {
     let input = input.as_escaped();
 
     let parse_start = Instant::now();
-    let res = calendar::<_, winnow::error::InputError<_>>.parse_peek(input);
-    dbg![res];
+    let (tail, cal) = calendar::<_, winnow::error::InputError<_>>
+        .parse_peek(input)
+        .unwrap();
 
     let end = Instant::now();
-    // dbg![cal.components().len()];
-    // dbg![tail.len()];
+    dbg![&cal];
+    dbg![cal.components().len()];
+    dbg![tail.len()];
     eprintln!("load time: {:?}", end - load_start);
     eprintln!("parse time: {:?}", end - parse_start);
 }
