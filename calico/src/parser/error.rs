@@ -104,6 +104,8 @@ pub enum CalendarParseError<S> {
     TodoTerminationCollision,
     /// The ORDER parameter occurred on a property that cannot occur more than once.
     OrderOnNonRepeatableProp,
+    /// A decimal integer literal overflowed the target type.
+    IntegerOverflow,
 }
 
 impl<S> From<language_tags::ParseError> for CalendarParseError<S> {

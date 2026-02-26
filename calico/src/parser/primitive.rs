@@ -1360,14 +1360,8 @@ where
             .try_map(|s: <I as Stream>::Slice| {
                 let source = I::try_into_str(&s)?;
 
-                // the digit1 parser guarantees that `source` will be a sequence of ascii digits,
-                // so the only reason that O::try_from_dec_uint could fail is if there's a mistake
-                // somewhere else within this crate.
-
-                match O::try_from_dec_uint(source.as_ref()) {
-                    Some(uint) => Ok(uint),
-                    None => unreachable!(),
-                }
+                O::try_from_dec_uint(source.as_ref())
+                    .ok_or(CalendarParseError::IntegerOverflow)
             })
             .parse_next(input)
     })
