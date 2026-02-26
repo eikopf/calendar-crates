@@ -2114,4 +2114,19 @@ mod tests {
             assert_eq!(c, res);
         }
     }
+
+    // ======================================================================
+    // Fix I: binary parser with fold after colon
+    // ======================================================================
+
+    #[test]
+    fn binary_with_fold_after_colon() {
+        // Simulates a binary value that starts with a fold right after the colon.
+        // The Escaped stream transparently removes the fold, so the base64 data
+        // "SGVsbG8gV29ybGQ=" decodes to "Hello World".
+        let input = "\r\n SGVsbG8gV29ybGQ=".as_escaped();
+        let result = binary::<_, ()>.parse(input);
+        assert!(result.is_ok(), "binary with leading fold failed: {result:?}");
+        assert_eq!(result.unwrap(), b"Hello World");
+    }
 }

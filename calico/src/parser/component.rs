@@ -2656,4 +2656,172 @@ mod tests {
         let result: Result<Calendar, ()> = calendar(&mut esc);
         assert!(result.is_ok(), "auto-detect LF failed: {:?}", result.err());
     }
+
+    // ======================================================================
+    // Fix D: properties after subcomponents (interleaving)
+    // ======================================================================
+
+    #[test]
+    fn event_property_after_alarm() {
+        let input = concat_crlf!(
+            "BEGIN:VEVENT",
+            "DTSTAMP:19970901T130000Z",
+            "UID:interleave@example.com",
+            "BEGIN:VALARM",
+            "ACTION:DISPLAY",
+            "DESCRIPTION:Reminder",
+            "TRIGGER:-PT10M",
+            "END:VALARM",
+            "SUMMARY:Late Summary",
+            "END:VEVENT",
+        );
+
+        let (remaining, comp) = calendar_component::<_, ()>
+            .parse_peek(input.as_escaped())
+            .expect("event with property after alarm should parse");
+        assert!(remaining.is_empty());
+
+        match comp {
+            CalendarComponent::Event(ev) => {
+                assert_eq!(ev.alarms().len(), 1);
+                assert_eq!(
+                    ev.summary().expect("summary should be present").value,
+                    "Late Summary"
+                );
+            }
+            other => panic!("expected Event, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn todo_property_after_alarm() {
+        let input = concat_crlf!(
+            "BEGIN:VTODO",
+            "DTSTAMP:19980130T134500Z",
+            "UID:todo-interleave@example.com",
+            "BEGIN:VALARM",
+            "ACTION:DISPLAY",
+            "DESCRIPTION:Todo reminder",
+            "TRIGGER:-PT5M",
+            "END:VALARM",
+            "SUMMARY:Finish report",
+            "END:VTODO",
+        );
+
+        let (remaining, comp) = calendar_component::<_, ()>
+            .parse_peek(input.as_escaped())
+            .expect("todo with property after alarm should parse");
+        assert!(remaining.is_empty());
+
+        match comp {
+            CalendarComponent::Todo(td) => {
+                assert_eq!(td.alarms().len(), 1);
+                assert_eq!(
+                    td.summary().expect("summary should be present").value,
+                    "Finish report"
+                );
+            }
+            other => panic!("expected Todo, got {other:?}"),
+        }
+    }
+
+    // ======================================================================
+    // Fix F: blank lines inside VCALENDAR and components
+    // ======================================================================
+
+    #[test]
+    fn blank_lines_between_properties() {
+        let input = concat_crlf!(
+            "BEGIN:VCALENDAR",
+            "PRODID:-//Test//Test//EN",
+            "VERSION:2.0",
+            "",
+            "BEGIN:VEVENT",
+            "DTSTAMP:19970901T130000Z",
+            "UID:blank-lines@example.com",
+            "END:VEVENT",
+            "",
+            "END:VCALENDAR",
+        );
+
+        let mut esc = input.as_escaped();
+        let result: Result<Calendar, ()> = calendar(&mut esc);
+        let cal = result.expect("blank lines between properties should parse");
+        assert_eq!(cal.components().len(), 1);
+    }
+
+    #[test]
+    fn blank_lines_inside_event() {
+        let input = concat_crlf!(
+            "BEGIN:VEVENT",
+            "DTSTAMP:19970901T130000Z",
+            "",
+            "UID:blank-in-event@example.com",
+            "SUMMARY:Test",
+            "",
+            "END:VEVENT",
+        );
+
+        let (remaining, comp) = calendar_component::<_, ()>
+            .parse_peek(input.as_escaped())
+            .expect("blank lines inside event should parse");
+        assert!(remaining.is_empty());
+
+        match comp {
+            CalendarComponent::Event(ev) => {
+                assert_eq!(ev.uid().unwrap().value.as_str(), "blank-in-event@example.com");
+                assert_eq!(ev.summary().unwrap().value, "Test");
+            }
+            other => panic!("expected Event, got {other:?}"),
+        }
+    }
+
+    // ======================================================================
+    // Fix H: non-standard VERSION values in full calendar
+    // ======================================================================
+
+    #[test]
+    fn non_standard_version_in_calendar() {
+        let input = concat_crlf!(
+            "BEGIN:VCALENDAR",
+            "PRODID:-//Test//Test//EN",
+            "VERSION:3.0",
+            "BEGIN:VEVENT",
+            "DTSTAMP:19970901T130000Z",
+            "UID:v3@example.com",
+            "END:VEVENT",
+            "END:VCALENDAR",
+        );
+
+        let mut esc = input.as_escaped();
+        let result: Result<Calendar, ()> = calendar(&mut esc);
+        let cal = result.expect("non-standard VERSION should parse");
+        assert_eq!(cal.version().value, Token::Unknown("3.0".to_string()));
+        assert_eq!(cal.components().len(), 1);
+    }
+
+    // ======================================================================
+    // Fix P: UTF-8 BOM stripping
+    // ======================================================================
+
+    #[test]
+    fn calendar_with_utf8_bom() {
+        let input = concat!(
+            "\u{FEFF}",
+            "BEGIN:VCALENDAR\r\n",
+            "PRODID:-//Test//Test//EN\r\n",
+            "VERSION:2.0\r\n",
+            "BEGIN:VEVENT\r\n",
+            "DTSTAMP:19970901T130000Z\r\n",
+            "UID:bom@example.com\r\n",
+            "END:VEVENT\r\n",
+            "END:VCALENDAR\r\n",
+        );
+
+        let mut esc = input.as_escaped();
+        let result: Result<Calendar, ()> = calendar(&mut esc);
+        let cal = result.expect("BOM should be silently consumed");
+        assert_eq!(cal.prod_id().unwrap().value, "-//Test//Test//EN");
+        assert_eq!(cal.components().len(), 1);
+    }
 }

@@ -500,4 +500,21 @@ mod tests {
             Ok(Param::Known(KnownParam::DelFrom(uris))),
         );
     }
+
+    // ======================================================================
+    // Fix E: empty parameter values fall back to unknown
+    // ======================================================================
+
+    #[test]
+    fn empty_parameter_values_fall_back_to_unknown() {
+        for input in ["SENT-BY=", "LANGUAGE=", "RSVP=", "RELATED=", "DIR="] {
+            let result = parameter::<_, ()>.parse_peek(input);
+            assert!(result.is_ok(), "should not fail for: {input}");
+            let (_, p) = result.unwrap();
+            assert!(
+                p.try_into_known().is_err(),
+                "should fall back to unknown for: {input}"
+            );
+        }
+    }
 }

@@ -2861,4 +2861,82 @@ mod tests {
             PropName::Known(StaticProp::PercentComplete),
         );
     }
+
+    // ======================================================================
+    // Fix C: commas in single-value text properties
+    // ======================================================================
+
+    #[test]
+    fn prodid_with_literal_commas() {
+        let input = "PRODID:-//Corp,Inc//Product,Suite//EN";
+        let (tail, prop) = property::<_, ()>.parse_peek(input).unwrap();
+        assert!(tail.is_empty());
+        assert_eq!(
+            prop,
+            known_prop!(ProdId, Text, "-//Corp,Inc//Product,Suite//EN".to_string())
+        );
+    }
+
+    #[test]
+    fn summary_with_literal_commas() {
+        let input = "SUMMARY:Meeting with Alice, Bob, and Carol";
+        let (tail, prop) = property::<_, ()>.parse_peek(input).unwrap();
+        assert!(tail.is_empty());
+        assert_eq!(
+            prop,
+            known_prop!(Summary, Text, "Meeting with Alice, Bob, and Carol".to_string())
+        );
+    }
+
+    #[test]
+    fn x_property_value_with_commas() {
+        let mut input: &str = "X-CUSTOM:one,two,three";
+        let prop = property::<_, ()>(&mut input).unwrap();
+        assert!(input.is_empty());
+        let unknown = prop.try_into_unknown().unwrap();
+        assert_eq!(unknown.name, "X-CUSTOM");
+        assert_eq!(unknown.value, Value::Text("one,two,three".to_string()));
+    }
+
+    #[test]
+    fn value_type_text_with_commas() {
+        let mut input: &str = "X-NOTES;VALUE=TEXT:alpha,beta,gamma";
+        let prop = property::<_, ()>(&mut input).unwrap();
+        assert!(input.is_empty());
+        let unknown = prop.try_into_unknown().unwrap();
+        assert_eq!(unknown.value, Value::Text("alpha,beta,gamma".to_string()));
+    }
+
+    // ======================================================================
+    // Fix H: non-standard VERSION values
+    // ======================================================================
+
+    #[test]
+    fn non_standard_version_value() {
+        let input = "VERSION:2.5";
+        let (tail, prop) = property::<_, ()>.parse_peek(input).unwrap();
+        assert!(tail.is_empty());
+        assert_eq!(
+            prop,
+            known_prop!(Version, Version, Token::Unknown("2.5".to_string()))
+        );
+    }
+
+    // ======================================================================
+    // Fix I: binary attachment with fold after colon
+    // ======================================================================
+
+    #[test]
+    fn binary_attachment_property_with_fold() {
+        let input = "ATTACH;ENCODING=BASE64;VALUE=BINARY:\r\n SGVsbG8gV29ybGQ=".as_escaped();
+        let (tail, prop) = property::<_, ()>.parse_peek(input).unwrap();
+        assert!(tail.is_empty());
+        let known = prop.try_into_known().unwrap();
+        assert_eq!(known.name, StaticProp::Attach);
+        let PropValue::Attachment(p) = known.value else { panic!("expected Attachment") };
+        match &p.value {
+            Attachment::Binary(data) => assert_eq!(&**data, b"Hello World"),
+            other => panic!("expected Attachment::Binary, got {other:?}"),
+        }
+    }
 }
