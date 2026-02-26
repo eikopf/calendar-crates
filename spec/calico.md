@@ -222,7 +222,94 @@ A type representing a UTC offset MUST admit second values in the range 0 to 59 i
 r[model.prim.utc-offset.negative-zero]
 A type representing a UTC offset MUST reject negative zero (i.e. an offset of `-000000`). The zero offset MUST only be represented with a positive sign.
 
+## Implied String Types
+Although RFC 5545 does not explicitly define string subtypes other than [Text](#model-types--primitive-values--text), it is still useful to explicitly define the string types which are implied by various grammar rules in the document.
+
+### Names
+
+As described by the `name` and `param-name` rules in RFC 5545 §3.1, a name is a non-empty string whose characters are restricted to the ASCII alphanumeric characters and the hyphen (U+002D).
+
+r[string.name.domain]
+A name is a non-empty string containing only ASCII alphanumeric characters and the hyphen (U+002D).
+
+There are several places in RFC 5545 where a grammar element admits only the `iana-token` and `x-name` rules (e.g. the `iana-comp` and `x-comp` rules in §3.6); in such cases it is usually correct to represent the corresponding strings with a name.
+
+## The iCalendar Object
+
+Whereas primitive values sit at the lowest level of the iCalendar data model, the iCalendar object is the principal and highest-level value; it is defined by RFC 5545 §3.4. Although the document treats it separately, the iCalendar object is essentially a [component](#model-types--components).
+
+r[model.icalendar-object.kind]
+An iCalendar object is a component.
+
+When 0 or more iCalendar objects are placed in a sequence, the resulting value is called an iCalendar stream.
+
+r[model.icalendar-object.stream]
+A type representing an iCalendar stream MUST admit arbitrary sequences of iCalendar objects.
+
 ## Components
+
+Components are defined by RFC 5545 §3.6, and consist of a name (e.g. `VEVENT`), a list of [properties](#model-types--properties), and a list of subcomponents. These constituent parts may be restricted based on the name of the component.
+
+r[model.component.name]
+A component MUST have a name.
+
+r[model.component.name.domain]
+The domain of a component's name MUST be the same as [the implied name string type](#model-types--implied-string-types--names).
+
+It's actually quite difficult to articulate precise requirements about the properties of a component, for a few different reasons. You might expect that the properties of a component just correspond to record fields, but properties are in general allowed to occur multiple times, and unless a property is explicitly disallowed it may always occur.
+
+r[model.component.properties]
+A component MUST have a collection of properties.
+
+r[model.component.properties.domain]
+Unless a restriction is given for a specific property, a component MUST admit any property to occur an arbitrary number of times.
+
+Subcomponents are a little simpler, although these requirements are still inferred rather than explicitly given by RFC 5545.
+
+r[model.component.subcomponents]
+A component MUST have a collection of subcomponents.
+
+### Calendar
+
+A calendar component (identified by the name `VCALENDAR`) represents an [iCalendar object](#model-types--the-icalendar-object).
+
+r[model.component.calendar.name]
+The name of a component representing an iCalendar object MUST be `VCALENDAR`.
+
+This component type has two mandatory properties.
+
+r[model.component.calendar.prodid]
+A component representing an iCalendar object MUST admit the `PRODID` property exactly once.
+
+r[model.component.calendar.version]
+A component representing an iCalendar object MUST admit the `VERSION` property exactly once.
+
+And two optional properties.
+
+r[model.component.calendar.calscale]
+A component representing an iCalendar object MUST admit the `CALSCALE` property at most once.
+
+r[model.component.calendar.method]
+A component representing an iCalendar object MUST admit the `METHOD` property at most once.
+
+The subcomponents of this component type may be event, todo, jounal, free-busy, time zone, or extension components.
+
+r[model.component.calendar.subcomponents]
+A component representing an iCalendar object MUST admit the VEVENT, VTODO, VJOURNAL, VFREEBUSY, and VTIMEZONE components as subcomponents, as well as any extension component.
+
+### Event
+
+### Todo
+
+### Journal
+
+### Free-Busy
+
+### Time Zone
+
+### Extension Components
+
+## Properties
 
 # Parsing
 
