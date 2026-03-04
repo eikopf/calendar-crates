@@ -1,3 +1,4 @@
+#![warn(missing_docs)]
 //! [JSCalendar (RFC 8984)](https://datatracker.ietf.org/doc/html/rfc8984) data model in Rust.
 //!
 //! This crate provides strongly-typed Rust representations of JSCalendar objects —

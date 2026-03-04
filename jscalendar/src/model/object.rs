@@ -73,7 +73,9 @@ pub struct Group<V: JsonValue> {
 /// A [`Task`] or an [`Event`].
 #[non_exhaustive]
 pub enum TaskOrEvent<V: JsonValue> {
+    /// A JSCalendar task.
     Task(Task<V>),
+    /// A JSCalendar event.
     Event(Event<V>),
 }
 
@@ -464,8 +466,11 @@ pub struct Alert<V: JsonValue> {
 #[derive(PartialEq)]
 #[non_exhaustive]
 pub enum Trigger<V: JsonValue> {
+    /// A trigger relative to the start or end of the calendar object.
     Offset(OffsetTrigger<V>),
+    /// A trigger at a fixed point in time.
     Absolute(AbsoluteTrigger<V>),
+    /// A trigger with an unrecognized `@type`.
     Unknown(V::Object),
 }
 
@@ -610,8 +615,10 @@ impl<V: DestructibleJsonValue> TryFromJson<V> for PatchObject<V> {
 #[derive(Debug, Clone, PartialEq, Eq, Error)]
 #[non_exhaustive]
 pub enum ObjectFromJsonError {
+    /// A required field was not present in the JSON object.
     #[error("missing required field: {0}")]
     MissingField(&'static str),
+    /// A field was present but had an invalid value.
     #[error("{0}")]
     InvalidFieldValue(Box<str>),
 }
@@ -800,8 +807,10 @@ fn parse_request_status(s: &str) -> Option<RequestStatus> {
 #[derive(Debug, Clone, PartialEq, Eq, Error)]
 #[non_exhaustive]
 pub enum RRuleFromJsonError {
+    /// A required field was not present in the JSON object.
     #[error("missing required field: {0}")]
     MissingField(&'static str),
+    /// A field was present but had an invalid value.
     #[error("invalid field value: {0}")]
     InvalidValue(Box<str>),
 }
@@ -1111,6 +1120,7 @@ fn parse_date_or_datetime(s: &str) -> Option<DateTimeOrDate<crate::model::time::
 #[derive(Debug, Clone, PartialEq, Eq, Error)]
 #[non_exhaustive]
 pub enum ByRuleParseError {
+    /// An element of the by-rule array was invalid.
     #[error("invalid value in by-rule array")]
     InvalidValue,
 }

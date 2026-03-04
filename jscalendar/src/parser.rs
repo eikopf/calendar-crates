@@ -60,26 +60,37 @@ pub enum JsCalendarParseError {
     #[error("more than 9 digits in fractional second")]
     FractionalSecondTooManyDigits,
     // Semantic errors (from calendar-types)
+    /// An invalid year value.
     #[error(transparent)]
     InvalidYear(#[from] InvalidYearError),
+    /// An invalid month value.
     #[error(transparent)]
     InvalidMonth(#[from] InvalidMonthError),
+    /// An invalid day value.
     #[error(transparent)]
     InvalidDay(#[from] InvalidDayError),
+    /// An invalid date (e.g. February 30).
     #[error(transparent)]
     InvalidDate(#[from] InvalidDateError),
+    /// An invalid hour value.
     #[error(transparent)]
     InvalidHour(#[from] InvalidHourError),
+    /// An invalid minute value.
     #[error(transparent)]
     InvalidMinute(#[from] InvalidMinuteError),
+    /// An invalid second value.
     #[error(transparent)]
     InvalidSecond(#[from] InvalidSecondError),
+    /// An invalid time value.
     #[error(transparent)]
     InvalidTime(#[from] InvalidTimeError),
+    /// An invalid date-time value.
     #[error(transparent)]
     InvalidDateTime(#[from] InvalidDateTimeError),
+    /// An invalid fractional second value.
     #[error(transparent)]
     InvalidFractionalSecond(#[from] InvalidFractionalSecondError),
+    /// An invalid duration value.
     #[error(transparent)]
     InvalidDuration(#[from] InvalidDurationError),
 }

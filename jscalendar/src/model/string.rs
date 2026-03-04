@@ -83,6 +83,7 @@ impl<E: std::error::Error + 'static> std::error::Error for StringError<E> {
 /// # Invariants
 /// 1. The underlying string has at least 1 and at most 255 characters.
 /// 2. All the characters of the string correspond to the variants of [`IdChar`].
+#[allow(missing_docs)]
 #[derive(PartialEq, Eq, PartialOrd, Ord, Hash, DstNewtype)]
 #[dizzy(invariant = Id::check_slice, error = InvalidIdError)]
 #[dizzy(constructor = pub const try_from_slice)]
@@ -238,12 +239,21 @@ impl Id {
     }
 }
 
+/// An error indicating that a string is not a valid [`Id`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Error)]
 pub enum InvalidIdError {
+    /// A character was not ASCII alphanumeric, hyphen, or underscore.
     #[error("expected an ASCII alphanumeric character, hyphen, or underscore, but got {c} instead")]
-    InvalidChar { index: u8, c: char },
+    InvalidChar {
+        /// The byte index of the invalid character.
+        index: u8,
+        /// The invalid character.
+        c: char,
+    },
+    /// The string was empty.
     #[error("empty string")]
     EmptyString,
+    /// The string exceeds 255 bytes.
     #[error("string exceeds 255 bytes in length")]
     TooLong,
 }
@@ -251,6 +261,7 @@ pub enum InvalidIdError {
 /// A character which may occur in an [`Id`].
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 #[repr(u8)]
+#[allow(missing_docs)]
 pub enum IdChar {
     Hyphen = 0x2C,
     Zero = 0x30,
@@ -346,6 +357,7 @@ impl std::fmt::Debug for IdChar {
 ///
 /// [IANA Time Zone Database]: https://www.iana.org/time-zones
 /// [RFC 5545 §3.1]: https://www.rfc-editor.org/rfc/rfc5545#section-3.1
+#[allow(missing_docs)]
 #[derive(PartialEq, Eq, PartialOrd, Ord, Hash, DstNewtype)]
 #[dizzy(invariant = CustomTimeZoneId::str_is_custom_time_zone_id)]
 #[dizzy(error = InvalidCustomTimeZoneIdError)]
@@ -394,26 +406,41 @@ impl CustomTimeZoneId {
     }
 }
 
+/// An error indicating that a string is not a valid [`CustomTimeZoneId`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Error)]
 pub enum InvalidCustomTimeZoneIdError {
+    /// The string was empty.
     #[error("expected at least one character")]
     EmptyString,
+    /// The string did not start with a forward slash.
     #[error("expected a forward slash")]
     MissingSlash,
+    /// The body contained an invalid character.
     #[error("{c} is invalid in a TimeZoneId")]
-    InvalidBodyChar { index: usize, c: char },
+    InvalidBodyChar {
+        /// The byte index of the invalid character.
+        index: usize,
+        /// The invalid character.
+        c: char,
+    },
 }
 
+/// An error indicating that a string is not a valid [`ImplicitJsonPointer`].
 #[derive(Debug, Clone, Copy, PartialEq, Error)]
 pub enum InvalidImplicitJsonPointerError {
     /// A tilde (`~`) occurred without being immediately followed by `0` or `1` at this index.
     #[error("a tilde ocurred without being immediately followed by `0` or `1` at index {index}")]
-    BareTilde { index: usize },
+    BareTilde {
+        /// The byte index of the bare tilde.
+        index: usize,
+    },
+    /// The pointer started with a forward slash, making it explicit rather than implicit.
     #[error("a forward slash occurred at the start of the pointer")]
     Explicit,
 }
 
 /// An implicit unevaluated JSON pointer (RFC 8984 §1.4.9).
+#[allow(missing_docs)]
 #[derive(PartialEq, Eq, PartialOrd, Ord, Hash, DstNewtype)]
 #[dizzy(invariant = ImplicitJsonPointer::str_is_implicit_json_pointer)]
 #[dizzy(error = InvalidImplicitJsonPointerError)]
@@ -481,6 +508,7 @@ impl ImplicitJsonPointer {
     }
 }
 
+/// An error indicating that a string is not a valid [`VendorStr`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum InvalidVendorStrError {
     /// The string was empty.
@@ -499,6 +527,7 @@ pub enum InvalidVendorStrError {
 /// 1. The underlying string is not empty.
 /// 2. The underlying string contains at least one colon (U+003A) character.
 /// 3. After splitting on the first colon, both resulting substrings will not be empty.
+#[allow(missing_docs)]
 #[derive(PartialEq, Eq, PartialOrd, Ord, Hash, DstNewtype)]
 #[dizzy(invariant = VendorStr::is_vendor_str, error = InvalidVendorStrError)]
 #[dizzy(constructor = pub const new)]
@@ -573,8 +602,10 @@ impl VendorStr {
 /// An error indicating that a string is not a valid calendar address.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Error)]
 pub enum InvalidCalAddressError {
+    /// The string was empty.
     #[error("expected at least one character")]
     EmptyString,
+    /// The string did not start with `mailto:`.
     #[error("expected mailto: scheme")]
     NotMailto,
 }
@@ -582,6 +613,7 @@ pub enum InvalidCalAddressError {
 /// A calendar user address (RFC 8984 §4.4.5).
 ///
 /// This must be a `mailto:` URI.
+#[allow(missing_docs)]
 #[derive(PartialEq, Eq, PartialOrd, Ord, Hash, DstNewtype)]
 #[dizzy(invariant = CalAddress::str_is_cal_address, error = InvalidCalAddressError)]
 #[dizzy(constructor = pub new)]
@@ -637,12 +669,16 @@ impl CalAddress {
 /// An error indicating that a string is not a valid email address.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Error)]
 pub enum InvalidEmailAddrError {
+    /// The string was empty.
     #[error("expected at least one character")]
     EmptyString,
+    /// The string contained zero or more than one `@` character.
     #[error("expected exactly one '@' character")]
     InvalidAtSign,
+    /// The local part (before `@`) was empty.
     #[error("empty local part before '@'")]
     EmptyLocalPart,
+    /// The domain part (after `@`) was empty.
     #[error("empty domain part after '@'")]
     EmptyDomainPart,
 }
@@ -651,6 +687,7 @@ pub enum InvalidEmailAddrError {
 ///
 /// This performs minimal validation: the string must be non-empty,
 /// contain exactly one `@` character, and have non-empty local and domain parts.
+#[allow(missing_docs)]
 #[derive(PartialEq, Eq, PartialOrd, Ord, Hash, DstNewtype)]
 #[dizzy(invariant = EmailAddr::str_is_email_addr, error = InvalidEmailAddrError)]
 #[dizzy(constructor = pub new)]
@@ -726,16 +763,22 @@ impl EmailAddr {
 /// An error indicating that a string is not a valid geo URI.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Error)]
 pub enum InvalidGeoUriError {
+    /// The string was empty.
     #[error("expected at least one character")]
     EmptyString,
+    /// The string did not start with `geo:`.
     #[error("expected 'geo:' scheme")]
     NotGeoScheme,
+    /// No latitude value was found after the scheme.
     #[error("missing latitude value")]
     MissingLatitude,
+    /// No longitude value was found after the latitude.
     #[error("missing longitude value")]
     MissingLongitude,
+    /// The latitude could not be parsed as a number.
     #[error("invalid latitude value")]
     InvalidLatitude,
+    /// The longitude could not be parsed as a number.
     #[error("invalid longitude value")]
     InvalidLongitude,
 }
@@ -743,6 +786,7 @@ pub enum InvalidGeoUriError {
 /// A geographic URI (RFC 5870).
 ///
 /// Format: `geo:latitude,longitude[,altitude][;parameters]`
+#[allow(missing_docs)]
 #[derive(PartialEq, Eq, PartialOrd, Ord, Hash, DstNewtype)]
 #[dizzy(invariant = GeoUri::str_is_geo_uri, error = InvalidGeoUriError)]
 #[dizzy(constructor = pub new)]
@@ -812,6 +856,7 @@ impl GeoUri {
 /// An error indicating that a string is not a valid Content-ID.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Error)]
 pub enum InvalidContentIdError {
+    /// The string was empty.
     #[error("expected at least one character")]
     EmptyString,
 }
@@ -820,6 +865,7 @@ pub enum InvalidContentIdError {
 ///
 /// This is a minimal validation: the string must be non-empty.
 /// Full Content-ID validation is complex; we defer to usage context.
+#[allow(missing_docs)]
 #[derive(PartialEq, Eq, PartialOrd, Ord, Hash, DstNewtype)]
 #[dizzy(invariant = ContentId::str_is_content_id, error = InvalidContentIdError)]
 #[dizzy(constructor = pub new)]
@@ -862,12 +908,16 @@ impl ContentId {
 /// An error indicating that a string is not a valid media type.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Error)]
 pub enum InvalidMediaTypeError {
+    /// The string was empty.
     #[error("expected at least one character")]
     EmptyString,
+    /// No `/` separator was found between type and subtype.
     #[error("expected '/' separator between type and subtype")]
     MissingSlash,
+    /// The type part (before `/`) was empty.
     #[error("empty type part before '/'")]
     EmptyType,
+    /// The subtype part (after `/`) was empty.
     #[error("empty subtype part after '/'")]
     EmptySubtype,
 }
@@ -875,6 +925,7 @@ pub enum InvalidMediaTypeError {
 /// A MIME media type (RFC 6838).
 ///
 /// Format: `type/subtype[;parameters]`
+#[allow(missing_docs)]
 #[derive(PartialEq, Eq, PartialOrd, Ord, Hash, DstNewtype)]
 #[dizzy(invariant = MediaType::str_is_media_type, error = InvalidMediaTypeError)]
 #[dizzy(constructor = pub new)]
@@ -954,6 +1005,7 @@ impl MediaType {
 }
 
 /// A string slice where every character is ASCII alphanumeric.
+#[allow(missing_docs)]
 #[derive(PartialEq, Eq, PartialOrd, Ord, Hash, DstNewtype)]
 #[dizzy(invariant = AlphaNumeric::str_is_alphanumeric, error = InvalidAlphaNumericError)]
 #[dizzy(constructor = pub new)]
@@ -978,6 +1030,7 @@ impl AlphaNumeric {
     }
 }
 
+/// An error indicating that a string contains a non-alphanumeric character.
 #[derive(Debug, Clone, Copy, Error)]
 #[error("encountered the non-alphanumeric character {c} at index {index}")]
 pub struct InvalidAlphaNumericError {

@@ -663,7 +663,9 @@ impl std::fmt::Display for ValueType {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Error)]
 #[error(transparent)]
 pub enum TypeErrorOr<E> {
+    /// The JSON value had the wrong type.
     TypeError(#[from] TypeError),
+    /// A domain-specific error.
     Other(E),
 }
 
@@ -671,17 +673,22 @@ pub enum TypeErrorOr<E> {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Error)]
 #[error("expected a value of type {expected} but received type {received} instead")]
 pub struct TypeError {
+    /// The JSON type that was expected.
     pub expected: ValueType,
+    /// The JSON type that was actually received.
     pub received: ValueType,
 }
 
 /// Error returned when a JSON number cannot be converted to [`Int`].
 #[derive(Debug, Clone, Copy, PartialEq, PartialOrd, Error)]
 pub enum IntoIntError {
+    /// The JSON number was not an integer.
     #[error("expected an integer but received {0}")]
     NotAnInteger(f64),
+    /// The signed integer was outside the valid range for [`Int`].
     #[error("the signed integer {0} falls outside the valid range for Int")]
     OutsideRangeSigned(i64),
+    /// The unsigned integer was outside the valid range for [`Int`].
     #[error("the unsigned integer {0} falls outside the valid range for Int")]
     OutsideRangeUnsigned(u64),
 }
@@ -689,10 +696,13 @@ pub enum IntoIntError {
 /// Error returned when a JSON number cannot be converted to [`UnsignedInt`].
 #[derive(Debug, Clone, Copy, PartialEq, PartialOrd, Error)]
 pub enum IntoUnsignedIntError {
+    /// The JSON number was not an integer.
     #[error("expected an integer but received {0}")]
     NotAnInteger(f64),
+    /// The JSON number was a negative integer.
     #[error("expected an unsigned integer but received {0}")]
     NegativeInteger(i64),
+    /// The unsigned integer was outside the valid range for [`UnsignedInt`].
     #[error("the unsigned integer {0} falls outside the valid range for UnsignedInt")]
     OutsideRange(u64),
 }
@@ -714,31 +724,37 @@ pub trait DestructibleJsonValue: Sized + JsonValue {
     /// Returns the [`ValueType`] of this JSON value.
     fn value_type(&self) -> ValueType;
 
+    /// Returns `true` if this value is null.
     #[inline(always)]
     fn is_null(&self) -> bool {
         self.value_type() == ValueType::Null
     }
 
+    /// Returns `true` if this value is a boolean.
     #[inline(always)]
     fn is_bool(&self) -> bool {
         self.value_type() == ValueType::Bool
     }
 
+    /// Returns `true` if this value is a number.
     #[inline(always)]
     fn is_number(&self) -> bool {
         self.value_type() == ValueType::Number
     }
 
+    /// Returns `true` if this value is a string.
     #[inline(always)]
     fn is_string(&self) -> bool {
         self.value_type() == ValueType::String
     }
 
+    /// Returns `true` if this value is an array.
     #[inline(always)]
     fn is_array(&self) -> bool {
         self.value_type() == ValueType::Array
     }
 
+    /// Returns `true` if this value is an object.
     #[inline(always)]
     fn is_object(&self) -> bool {
         self.value_type() == ValueType::Object
@@ -746,6 +762,7 @@ pub trait DestructibleJsonValue: Sized + JsonValue {
 
     // REFERENTIAL DOWNCASTS
 
+    /// Returns `Ok(())` if this value is null, or a [`TypeError`] otherwise.
     #[inline(always)]
     fn try_as_null(&self) -> Result<(), TypeError> {
         match self.value_type() {
@@ -846,21 +863,25 @@ pub trait JsonObject: Sized {
     /// Consumes the object, returning an iterator over owned key-value pairs.
     fn into_iter(self) -> impl Iterator<Item = (Self::Key, Self::Value)>;
 
+    /// Creates an empty object.
     #[inline(always)]
     fn new() -> Self {
         Self::with_capacity(0)
     }
 
+    /// Returns `true` if the object contains no entries.
     #[inline(always)]
     fn is_empty(&self) -> bool {
         self.len() == 0
     }
 
+    /// Returns an iterator over the keys.
     #[inline(always)]
     fn keys(&self) -> impl Iterator<Item = &Self::Key> {
         self.iter().map(|(key, _)| key)
     }
 
+    /// Returns an iterator over the values.
     #[inline(always)]
     fn values(&self) -> impl Iterator<Item = &Self::Value> {
         self.iter().map(|(_, value)| value)
@@ -885,11 +906,13 @@ pub trait JsonArray: Sized {
     /// Consumes the array, returning an iterator over owned elements.
     fn into_iter(self) -> impl Iterator<Item = Self::Elem>;
 
+    /// Creates an empty array.
     #[inline(always)]
     fn new() -> Self {
         Self::with_capacity(0)
     }
 
+    /// Returns `true` if the array contains no elements.
     #[inline(always)]
     fn is_empty(&self) -> bool {
         self.len() == 0

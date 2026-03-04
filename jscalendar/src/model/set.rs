@@ -237,6 +237,7 @@ impl<V: ConstructibleJsonValue> IntoJson<V> for Color {
     }
 }
 
+/// A string that is not a known CSS3 color name or `#RRGGBB` hex value.
 #[derive(Debug, Clone, PartialEq, Eq, Error)]
 #[error("not a known CSS3 color name or #RRGGBB hex string: {0:?}")]
 pub struct InvalidColorError(pub Box<str>);
