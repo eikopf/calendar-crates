@@ -5,7 +5,7 @@ repository.workspace = true
 license.workspace = true
 keywords = ["icalendar", "ical", "ics", "calendar", "rfc5545"]
 categories = ["date-and-time", "encoding", "parser-implementations"]
-version = "0.4.0"
+version = "0.5.0"
 edition = "2024"
 
 [dependencies]
