@@ -14,11 +14,11 @@ use crate::{
         css::Css3Color,
         parameter::{Param, Params, StaticParam, UnknownParam, UpcastParamValue},
         primitive::{
-            Attachment, ClassValue, CompletionPercentage, DateTime, DateTimeOrDate, Encoding,
-            ExDateSeq, Geo, Gregorian, Integer, Method, ParticipantType, Period, Priority,
-            ProximityValue, RDateSeq, RequestStatus, ResourceType, SignedDuration, Status,
-            StyledDescriptionValue, TimeTransparency, Token, TriggerValue, Utc, UtcOffset, Value,
-            ValueType, Version,
+            Attachment, ClassValue, CompletionPercentage, Date, DateTime, DateTimeOrDate, Encoding,
+            ExDateSeq, Geo, Gregorian, Hour, Integer, Method, Minute, ParticipantType, Period,
+            Priority, ProximityValue, RDateSeq, RequestStatus, ResourceType, Second,
+            SignedDuration, Status, StyledDescriptionValue, Time, TimeTransparency, Token,
+            TriggerValue, Utc, UtcOffset, Value, ValueType, Version,
         },
         property::{Prop, StaticProp, StructuredDataProp},
         rrule::RRule,
@@ -39,6 +39,35 @@ use crate::{
         rrule::rrule,
     },
 };
+
+/// Converts a [`Date`] to a [`DateTime<Utc>`] at midnight (00:00:00Z).
+///
+/// This is used to handle non-conformant iCalendar producers (notably Apple iCloud) that
+/// emit `VALUE=DATE` on properties whose value type is defined by RFC 5545 as strictly
+/// `DATE-TIME`. The affected properties are:
+///
+/// - `DTSTAMP` (RFC 5545 §3.8.7.2)
+/// - `CREATED` (RFC 5545 §3.8.7.1)
+/// - `LAST-MODIFIED` (RFC 5545 §3.8.7.3)
+/// - `COMPLETED` (RFC 5545 §3.8.4.1)
+/// - `ACKNOWLEDGED` (RFC 9074 §6.1)
+///
+/// Per the respective RFCs, these properties MUST have a `DATE-TIME` value in UTC. However,
+/// real-world calendars (e.g. Apple's iCloud holiday calendars at
+/// `calendars.icloud.com/holidays/`) use `DTSTAMP;VALUE=DATE:19760401` instead of a proper
+/// UTC datetime like `DTSTAMP:19760401T000000Z`. Rather than rejecting these calendars
+/// outright, we interpret the date as midnight UTC on the given day.
+fn date_to_midnight_utc(date: Date) -> DateTime<Utc> {
+    // SAFETY: Hour::H00, Minute::M00, and Second::S00 are all valid zero values,
+    // so Time::new cannot fail here.
+    let midnight = Time::new(Hour::H00, Minute::M00, Second::S00, None)
+        .expect("midnight is a valid time");
+    DateTime {
+        date,
+        time: midnight,
+        marker: Utc,
+    }
+}
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum ParsedProp<S> {
@@ -683,11 +712,32 @@ where
                 | StaticProp::Created
                 | StaticProp::DtStamp
                 | StaticProp::LastModified => {
-                    check_vt!(DateTime);
-                    PropValue::DateTimeUtc(Prop {
-                        value: datetime_utc.parse_next(input)?,
-                        params,
-                    })
+                    // RFC 5545 mandates DATE-TIME for these properties, but some
+                    // producers (e.g. Apple iCloud) emit VALUE=DATE instead. We
+                    // accept both, coercing a bare date to midnight UTC. See the
+                    // doc comment on `date_to_midnight_utc` for details.
+                    match &value_type {
+                        None | Some(Token::Known(ValueType::DateTime)) => {
+                            PropValue::DateTimeUtc(Prop {
+                                value: datetime_utc.parse_next(input)?,
+                                params,
+                            })
+                        }
+                        Some(Token::Known(ValueType::Date)) => {
+                            PropValue::DateTimeUtc(Prop {
+                                value: date_to_midnight_utc(
+                                    primitive::date.parse_next(input)?,
+                                ),
+                                params,
+                            })
+                        }
+                        Some(_) => {
+                            return Err(E::from_external_error(
+                                input,
+                                CalendarParseError::InvalidValueType(value_type.unwrap()),
+                            ));
+                        }
+                    }
                 }
                 StaticProp::DtEnd
                 | StaticProp::DtDue
@@ -861,11 +911,31 @@ where
                     })
                 }
                 StaticProp::Acknowledged => {
-                    check_vt!(DateTime);
-                    PropValue::DateTimeUtc(Prop {
-                        value: datetime_utc.parse_next(input)?,
-                        params,
-                    })
+                    // RFC 9074 §6.1 mandates DATE-TIME, but we apply the same
+                    // leniency as for DTSTAMP/CREATED/LAST-MODIFIED/COMPLETED.
+                    // See the doc comment on `date_to_midnight_utc` for details.
+                    match &value_type {
+                        None | Some(Token::Known(ValueType::DateTime)) => {
+                            PropValue::DateTimeUtc(Prop {
+                                value: datetime_utc.parse_next(input)?,
+                                params,
+                            })
+                        }
+                        Some(Token::Known(ValueType::Date)) => {
+                            PropValue::DateTimeUtc(Prop {
+                                value: date_to_midnight_utc(
+                                    primitive::date.parse_next(input)?,
+                                ),
+                                params,
+                            })
+                        }
+                        Some(_) => {
+                            return Err(E::from_external_error(
+                                input,
+                                CalendarParseError::InvalidValueType(value_type.unwrap()),
+                            ));
+                        }
+                    }
                 }
                 StaticProp::Proximity => {
                     check_vt!(Text);
@@ -2938,5 +3008,83 @@ mod tests {
             Attachment::Binary(data) => assert_eq!(&**data, b"Hello World"),
             other => panic!("expected Attachment::Binary, got {other:?}"),
         }
+    }
+
+    // ======================================================================
+    // Non-conformant VALUE=DATE on UTC datetime properties
+    // ======================================================================
+
+    /// Apple iCloud holiday calendars emit `DTSTAMP;VALUE=DATE:19760401`
+    /// instead of the RFC 5545-mandated `DTSTAMP:19760401T000000Z`. We
+    /// accept this and coerce to midnight UTC.
+    #[test]
+    fn dtstamp_value_date_coerced_to_midnight_utc() {
+        let input = "DTSTAMP;VALUE=DATE:19760401".as_escaped();
+        let (tail, prop) = property::<_, ()>.parse_peek(input).unwrap();
+        assert!(tail.is_empty());
+        let known = prop.try_into_known().unwrap();
+        assert_eq!(known.name, StaticProp::DtStamp);
+        let PropValue::DateTimeUtc(p) = known.value else {
+            panic!("expected DateTimeUtc");
+        };
+        assert_eq!(p.value.date, date!(1976; 4; 1));
+        assert_eq!(p.value.time, time!(0; 0; 0));
+    }
+
+    #[test]
+    fn created_value_date_coerced_to_midnight_utc() {
+        let input = "CREATED;VALUE=DATE:20240101".as_escaped();
+        let (tail, prop) = property::<_, ()>.parse_peek(input).unwrap();
+        assert!(tail.is_empty());
+        let known = prop.try_into_known().unwrap();
+        assert_eq!(known.name, StaticProp::Created);
+        let PropValue::DateTimeUtc(p) = known.value else {
+            panic!("expected DateTimeUtc");
+        };
+        assert_eq!(p.value.date, date!(2024; 1; 1));
+        assert_eq!(p.value.time, time!(0; 0; 0));
+    }
+
+    #[test]
+    fn last_modified_value_date_coerced_to_midnight_utc() {
+        let input = "LAST-MODIFIED;VALUE=DATE:20231231".as_escaped();
+        let (tail, prop) = property::<_, ()>.parse_peek(input).unwrap();
+        assert!(tail.is_empty());
+        let known = prop.try_into_known().unwrap();
+        assert_eq!(known.name, StaticProp::LastModified);
+        let PropValue::DateTimeUtc(p) = known.value else {
+            panic!("expected DateTimeUtc");
+        };
+        assert_eq!(p.value.date, date!(2023; 12; 31));
+        assert_eq!(p.value.time, time!(0; 0; 0));
+    }
+
+    #[test]
+    fn completed_value_date_coerced_to_midnight_utc() {
+        let input = "COMPLETED;VALUE=DATE:20250315".as_escaped();
+        let (tail, prop) = property::<_, ()>.parse_peek(input).unwrap();
+        assert!(tail.is_empty());
+        let known = prop.try_into_known().unwrap();
+        assert_eq!(known.name, StaticProp::DtCompleted);
+        let PropValue::DateTimeUtc(p) = known.value else {
+            panic!("expected DateTimeUtc");
+        };
+        assert_eq!(p.value.date, date!(2025; 3; 15));
+        assert_eq!(p.value.time, time!(0; 0; 0));
+    }
+
+    /// Conformant UTC datetime values must still parse correctly.
+    #[test]
+    fn dtstamp_conformant_utc_datetime_still_works() {
+        let input = "DTSTAMP:19970901T130000Z".as_escaped();
+        let (tail, prop) = property::<_, ()>.parse_peek(input).unwrap();
+        assert!(tail.is_empty());
+        let known = prop.try_into_known().unwrap();
+        assert_eq!(known.name, StaticProp::DtStamp);
+        let PropValue::DateTimeUtc(p) = known.value else {
+            panic!("expected DateTimeUtc");
+        };
+        assert_eq!(p.value.date, date!(1997; 9; 1));
+        assert_eq!(p.value.time, time!(13; 0; 0));
     }
 }
