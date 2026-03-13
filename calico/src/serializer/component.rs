@@ -16,7 +16,7 @@ use crate::model::{
 // ============================================================================
 
 impl WriteIcal for Calendar {
-    fn write_ical(&self, w: &mut dyn fmt::Write) -> fmt::Result {
+    fn write_ical<W: fmt::Write>(&self, w: &mut W) -> fmt::Result {
         w.write_str("BEGIN:VCALENDAR\r\n")?;
         write_prop("VERSION", self.version(), w)?;
         write_prop("PRODID", self.prod_id(), w)?;
@@ -56,18 +56,9 @@ impl Calendar {
     }
 
     /// Writes this calendar in iCalendar format to the given writer with line folding.
-    pub fn write_ical_to(&self, w: &mut dyn fmt::Write) -> fmt::Result {
-        let mut fw = FoldingWriter::new(WriteAdapter(w));
+    pub fn write_ical_to<W: fmt::Write>(&self, w: &mut W) -> fmt::Result {
+        let mut fw = FoldingWriter::new(w);
         self.write_ical(&mut fw)
-    }
-}
-
-/// Adapter to allow `FoldingWriter<&mut dyn Write>` since we need ownership.
-struct WriteAdapter<'a>(&'a mut dyn fmt::Write);
-
-impl fmt::Write for WriteAdapter<'_> {
-    fn write_str(&mut self, s: &str) -> fmt::Result {
-        self.0.write_str(s)
     }
 }
 
@@ -76,7 +67,7 @@ impl fmt::Write for WriteAdapter<'_> {
 // ============================================================================
 
 impl WriteIcal for CalendarComponent {
-    fn write_ical(&self, w: &mut dyn fmt::Write) -> fmt::Result {
+    fn write_ical<W: fmt::Write>(&self, w: &mut W) -> fmt::Result {
         match self {
             CalendarComponent::Event(e) => e.write_ical(w),
             CalendarComponent::Todo(t) => t.write_ical(w),
@@ -93,7 +84,7 @@ impl WriteIcal for CalendarComponent {
 // ============================================================================
 
 impl WriteIcal for Event {
-    fn write_ical(&self, w: &mut dyn fmt::Write) -> fmt::Result {
+    fn write_ical<W: fmt::Write>(&self, w: &mut W) -> fmt::Result {
         w.write_str("BEGIN:VEVENT\r\n")?;
 
         write_opt_prop("DTSTAMP", self.dtstamp(), w)?;
@@ -160,7 +151,7 @@ impl WriteIcal for Event {
 // ============================================================================
 
 impl WriteIcal for Todo {
-    fn write_ical(&self, w: &mut dyn fmt::Write) -> fmt::Result {
+    fn write_ical<W: fmt::Write>(&self, w: &mut W) -> fmt::Result {
         w.write_str("BEGIN:VTODO\r\n")?;
 
         write_opt_prop("DTSTAMP", self.dtstamp(), w)?;
@@ -228,7 +219,7 @@ impl WriteIcal for Todo {
 // ============================================================================
 
 impl WriteIcal for Journal {
-    fn write_ical(&self, w: &mut dyn fmt::Write) -> fmt::Result {
+    fn write_ical<W: fmt::Write>(&self, w: &mut W) -> fmt::Result {
         w.write_str("BEGIN:VJOURNAL\r\n")?;
 
         write_prop("DTSTAMP", self.dtstamp(), w)?;
@@ -280,7 +271,7 @@ impl WriteIcal for Journal {
 // ============================================================================
 
 impl WriteIcal for FreeBusy {
-    fn write_ical(&self, w: &mut dyn fmt::Write) -> fmt::Result {
+    fn write_ical<W: fmt::Write>(&self, w: &mut W) -> fmt::Result {
         w.write_str("BEGIN:VFREEBUSY\r\n")?;
 
         write_prop("DTSTAMP", self.dtstamp(), w)?;
@@ -320,7 +311,7 @@ impl WriteIcal for FreeBusy {
 // ============================================================================
 
 impl WriteIcal for TimeZone {
-    fn write_ical(&self, w: &mut dyn fmt::Write) -> fmt::Result {
+    fn write_ical<W: fmt::Write>(&self, w: &mut W) -> fmt::Result {
         w.write_str("BEGIN:VTIMEZONE\r\n")?;
 
         write_prop("TZID", self.tz_id(), w)?;
@@ -344,7 +335,7 @@ impl WriteIcal for TimeZone {
 // ============================================================================
 
 impl WriteIcal for TzRule {
-    fn write_ical(&self, w: &mut dyn fmt::Write) -> fmt::Result {
+    fn write_ical<W: fmt::Write>(&self, w: &mut W) -> fmt::Result {
         let name = match self.kind() {
             &TzRuleKind::Standard => "STANDARD",
             &TzRuleKind::Daylight => "DAYLIGHT",
@@ -377,7 +368,7 @@ impl WriteIcal for TzRule {
 // ============================================================================
 
 impl WriteIcal for Alarm {
-    fn write_ical(&self, w: &mut dyn fmt::Write) -> fmt::Result {
+    fn write_ical<W: fmt::Write>(&self, w: &mut W) -> fmt::Result {
         match self {
             Alarm::Audio(a) => a.write_ical(w),
             Alarm::Display(a) => a.write_ical(w),
@@ -388,7 +379,7 @@ impl WriteIcal for Alarm {
 }
 
 impl WriteIcal for AudioAlarm {
-    fn write_ical(&self, w: &mut dyn fmt::Write) -> fmt::Result {
+    fn write_ical<W: fmt::Write>(&self, w: &mut W) -> fmt::Result {
         w.write_str("BEGIN:VALARM\r\n")?;
         write_action("AUDIO", w)?;
         write_trigger_prop(self.trigger(), w)?;
@@ -405,7 +396,7 @@ impl WriteIcal for AudioAlarm {
 }
 
 impl WriteIcal for DisplayAlarm {
-    fn write_ical(&self, w: &mut dyn fmt::Write) -> fmt::Result {
+    fn write_ical<W: fmt::Write>(&self, w: &mut W) -> fmt::Result {
         w.write_str("BEGIN:VALARM\r\n")?;
         write_action("DISPLAY", w)?;
         write_trigger_prop(self.trigger(), w)?;
@@ -420,7 +411,7 @@ impl WriteIcal for DisplayAlarm {
 }
 
 impl WriteIcal for EmailAlarm {
-    fn write_ical(&self, w: &mut dyn fmt::Write) -> fmt::Result {
+    fn write_ical<W: fmt::Write>(&self, w: &mut W) -> fmt::Result {
         w.write_str("BEGIN:VALARM\r\n")?;
         write_action("EMAIL", w)?;
         write_trigger_prop(self.trigger(), w)?;
@@ -438,7 +429,7 @@ impl WriteIcal for EmailAlarm {
 }
 
 impl WriteIcal for OtherAlarm {
-    fn write_ical(&self, w: &mut dyn fmt::Write) -> fmt::Result {
+    fn write_ical<W: fmt::Write>(&self, w: &mut W) -> fmt::Result {
         w.write_str("BEGIN:VALARM\r\n")?;
         write_prop("ACTION", self.action(), w)?;
         write_trigger_prop(self.trigger(), w)?;
@@ -460,7 +451,7 @@ impl WriteIcal for OtherAlarm {
 // ============================================================================
 
 impl WriteIcal for LocationComponent {
-    fn write_ical(&self, w: &mut dyn fmt::Write) -> fmt::Result {
+    fn write_ical<W: fmt::Write>(&self, w: &mut W) -> fmt::Result {
         w.write_str("BEGIN:VLOCATION\r\n")?;
         write_prop("UID", self.uid(), w)?;
         write_opt_prop("DESCRIPTION", self.description(), w)?;
@@ -475,7 +466,7 @@ impl WriteIcal for LocationComponent {
 }
 
 impl WriteIcal for ResourceComponent {
-    fn write_ical(&self, w: &mut dyn fmt::Write) -> fmt::Result {
+    fn write_ical<W: fmt::Write>(&self, w: &mut W) -> fmt::Result {
         w.write_str("BEGIN:VRESOURCE\r\n")?;
         write_prop("UID", self.uid(), w)?;
         write_opt_prop("DESCRIPTION", self.description(), w)?;
@@ -489,7 +480,7 @@ impl WriteIcal for ResourceComponent {
 }
 
 impl WriteIcal for Participant {
-    fn write_ical(&self, w: &mut dyn fmt::Write) -> fmt::Result {
+    fn write_ical<W: fmt::Write>(&self, w: &mut W) -> fmt::Result {
         w.write_str("BEGIN:PARTICIPANT\r\n")?;
         write_prop("UID", self.uid(), w)?;
         write_prop("PARTICIPANT-TYPE", self.participant_type(), w)?;
@@ -537,7 +528,7 @@ impl WriteIcal for Participant {
 // ============================================================================
 
 impl WriteIcal for OtherComponent {
-    fn write_ical(&self, w: &mut dyn fmt::Write) -> fmt::Result {
+    fn write_ical<W: fmt::Write>(&self, w: &mut W) -> fmt::Result {
         w.write_str("BEGIN:")?;
         w.write_str(&self.name)?;
         write_crlf(w)?;
@@ -554,16 +545,16 @@ impl WriteIcal for OtherComponent {
 // Helpers
 // ============================================================================
 
-fn write_action(action: &str, w: &mut dyn fmt::Write) -> fmt::Result {
+fn write_action<W: fmt::Write>(action: &str, w: &mut W) -> fmt::Result {
     w.write_str("ACTION:")?;
     w.write_str(action)?;
     write_crlf(w)
 }
 
-fn write_attach_vec(
+fn write_attach_vec<W: fmt::Write>(
     name: &str,
     props: Option<&Vec<crate::model::property::Prop<rfc5545_types::value::Attachment, Params>>>,
-    w: &mut dyn fmt::Write,
+    w: &mut W,
 ) -> fmt::Result {
     if let Some(ps) = props {
         for p in ps {
@@ -573,9 +564,9 @@ fn write_attach_vec(
     Ok(())
 }
 
-fn write_rdate_vec(
+fn write_rdate_vec<W: fmt::Write>(
     props: Option<&Vec<crate::model::property::Prop<rfc5545_types::time::RDateSeq, Params>>>,
-    w: &mut dyn fmt::Write,
+    w: &mut W,
 ) -> fmt::Result {
     if let Some(ps) = props {
         for p in ps {
@@ -585,9 +576,9 @@ fn write_rdate_vec(
     Ok(())
 }
 
-fn write_exdate_vec(
+fn write_exdate_vec<W: fmt::Write>(
     props: Option<&Vec<crate::model::property::Prop<rfc5545_types::time::DateTimeOrDate, Params>>>,
-    w: &mut dyn fmt::Write,
+    w: &mut W,
 ) -> fmt::Result {
     if let Some(ps) = props {
         for p in ps {
@@ -597,9 +588,9 @@ fn write_exdate_vec(
     Ok(())
 }
 
-fn write_styled_description_vec(
+fn write_styled_description_vec<W: fmt::Write>(
     props: Option<&Vec<crate::model::property::Prop<rfc5545_types::value::StyledDescriptionValue, Params>>>,
-    w: &mut dyn fmt::Write,
+    w: &mut W,
 ) -> fmt::Result {
     if let Some(ps) = props {
         for p in ps {

@@ -11,14 +11,14 @@ use crate::model::{
 };
 
 /// Writes a parameter value that must be quoted (URI values per RFC 5545 §3.2).
-fn write_quoted_uri(uri: &Uri, w: &mut dyn fmt::Write) -> fmt::Result {
+fn write_quoted_uri<W: fmt::Write>(uri: &Uri, w: &mut W) -> fmt::Result {
     w.write_char('"')?;
     w.write_str(uri.as_str())?;
     w.write_char('"')
 }
 
 /// Writes a list of quoted URIs, comma-separated.
-fn write_quoted_uri_list(uris: &Vec1<Box<Uri>>, w: &mut dyn fmt::Write) -> fmt::Result {
+fn write_quoted_uri_list<W: fmt::Write>(uris: &Vec1<Box<Uri>>, w: &mut W) -> fmt::Result {
     for (i, uri) in uris.iter().enumerate() {
         if i > 0 {
             w.write_char(',')?;
@@ -30,13 +30,13 @@ fn write_quoted_uri_list(uris: &Vec1<Box<Uri>>, w: &mut dyn fmt::Write) -> fmt::
 
 /// Writes a `ParamValue`, quoting it if it contains characters that require quoting
 /// (colons, semicolons, commas, or spaces).
-fn write_param_value(pv: &ParamValue, w: &mut dyn fmt::Write) -> fmt::Result {
+fn write_param_value<W: fmt::Write>(pv: &ParamValue, w: &mut W) -> fmt::Result {
     let s = pv.as_str();
     write_maybe_quoted(s, w)
 }
 
 /// Writes a string, quoting it if it contains `:`, `;`, `,`, or space.
-fn write_maybe_quoted(s: &str, w: &mut dyn fmt::Write) -> fmt::Result {
+fn write_maybe_quoted<W: fmt::Write>(s: &str, w: &mut W) -> fmt::Result {
     let needs_quoting = s.contains(':') || s.contains(';') || s.contains(',') || s.contains(' ');
     if needs_quoting {
         w.write_char('"')?;
@@ -52,7 +52,7 @@ fn write_maybe_quoted(s: &str, w: &mut dyn fmt::Write) -> fmt::Result {
 /// This is a macro because both types have the same field names but are different types.
 macro_rules! write_shared_params {
     ($self:expr, $w:expr) => {{
-        let w: &mut dyn fmt::Write = $w;
+        let w = $w;
         if let Some(uri) = $self.alternate_representation() {
             w.write_str(";ALTREP=")?;
             write_quoted_uri(uri, w)?;
@@ -167,7 +167,7 @@ macro_rules! write_shared_params {
 }
 
 impl WriteIcal for Params {
-    fn write_ical(&self, w: &mut dyn fmt::Write) -> fmt::Result {
+    fn write_ical<W: fmt::Write>(&self, w: &mut W) -> fmt::Result {
         if let Some(ft) = self.format_type() {
             w.write_str(";FMTTYPE=")?;
             w.write_str(ft.as_str())?;
@@ -181,7 +181,7 @@ impl WriteIcal for Params {
 }
 
 impl WriteIcal for StructuredDataParams {
-    fn write_ical(&self, w: &mut dyn fmt::Write) -> fmt::Result {
+    fn write_ical<W: fmt::Write>(&self, w: &mut W) -> fmt::Result {
         // Required params
         w.write_str(";FMTTYPE=")?;
         w.write_str(self.format_type().as_str())?;
