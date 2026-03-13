@@ -18,7 +18,7 @@ use std::fmt;
 /// Writes a value in iCalendar text format.
 pub trait WriteIcal {
     /// Writes this value to the given writer in iCalendar wire format.
-    fn write_ical(&self, w: &mut dyn fmt::Write) -> fmt::Result;
+    fn write_ical<W: fmt::Write>(&self, w: &mut W) -> fmt::Result;
 
     /// Convenience method that serializes to a `String`.
     fn to_ical_string(&self) -> String {
@@ -83,7 +83,7 @@ impl<W: fmt::Write> fmt::Write for FoldingWriter<W> {
 /// Escapes a TEXT value for iCalendar content lines.
 ///
 /// Backslash-escapes semicolons, commas, backslashes, and newlines per RFC 5545 §3.3.11.
-pub fn escape_text(s: &str, w: &mut dyn fmt::Write) -> fmt::Result {
+pub fn escape_text<W: fmt::Write>(s: &str, w: &mut W) -> fmt::Result {
     for ch in s.chars() {
         match ch {
             '\\' => w.write_str("\\\\")?,
@@ -97,7 +97,7 @@ pub fn escape_text(s: &str, w: &mut dyn fmt::Write) -> fmt::Result {
 }
 
 /// Writes a CRLF line ending.
-pub fn write_crlf(w: &mut dyn fmt::Write) -> fmt::Result {
+pub fn write_crlf<W: fmt::Write>(w: &mut W) -> fmt::Result {
     w.write_str("\r\n")
 }
 

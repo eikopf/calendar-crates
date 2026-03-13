@@ -31,13 +31,13 @@ use crate::model::{
 // ============================================================================
 
 impl WriteIcal for Date {
-    fn write_ical(&self, w: &mut dyn fmt::Write) -> fmt::Result {
+    fn write_ical<W: fmt::Write>(&self, w: &mut W) -> fmt::Result {
         write!(w, "{:04}{:02}{:02}", self.year().get(), self.month() as u8, self.day() as u8)
     }
 }
 
 impl WriteIcal for Time {
-    fn write_ical(&self, w: &mut dyn fmt::Write) -> fmt::Result {
+    fn write_ical<W: fmt::Write>(&self, w: &mut W) -> fmt::Result {
         write!(
             w,
             "{:02}{:02}{:02}",
@@ -57,7 +57,7 @@ impl WriteIcal for Time {
 }
 
 impl WriteIcal for DateTime<Utc> {
-    fn write_ical(&self, w: &mut dyn fmt::Write) -> fmt::Result {
+    fn write_ical<W: fmt::Write>(&self, w: &mut W) -> fmt::Result {
         self.date.write_ical(w)?;
         w.write_char('T')?;
         self.time.write_ical(w)?;
@@ -66,7 +66,7 @@ impl WriteIcal for DateTime<Utc> {
 }
 
 impl WriteIcal for DateTime<Local> {
-    fn write_ical(&self, w: &mut dyn fmt::Write) -> fmt::Result {
+    fn write_ical<W: fmt::Write>(&self, w: &mut W) -> fmt::Result {
         self.date.write_ical(w)?;
         w.write_char('T')?;
         self.time.write_ical(w)
@@ -74,7 +74,7 @@ impl WriteIcal for DateTime<Local> {
 }
 
 impl WriteIcal for DateTime<TimeFormat> {
-    fn write_ical(&self, w: &mut dyn fmt::Write) -> fmt::Result {
+    fn write_ical<W: fmt::Write>(&self, w: &mut W) -> fmt::Result {
         self.date.write_ical(w)?;
         w.write_char('T')?;
         self.time.write_ical(w)?;
@@ -90,7 +90,7 @@ impl WriteIcal for DateTime<TimeFormat> {
 // ============================================================================
 
 impl WriteIcal for UtcOffset {
-    fn write_ical(&self, w: &mut dyn fmt::Write) -> fmt::Result {
+    fn write_ical<W: fmt::Write>(&self, w: &mut W) -> fmt::Result {
         write!(
             w,
             "{}{:02}{:02}",
@@ -111,7 +111,7 @@ impl WriteIcal for UtcOffset {
 // ============================================================================
 
 impl WriteIcal for DateTimeOrDate<Utc> {
-    fn write_ical(&self, w: &mut dyn fmt::Write) -> fmt::Result {
+    fn write_ical<W: fmt::Write>(&self, w: &mut W) -> fmt::Result {
         match self {
             DateTimeOrDate::DateTime(dt) => dt.write_ical(w),
             DateTimeOrDate::Date(d) => d.write_ical(w),
@@ -120,7 +120,7 @@ impl WriteIcal for DateTimeOrDate<Utc> {
 }
 
 impl WriteIcal for DateTimeOrDate<TimeFormat> {
-    fn write_ical(&self, w: &mut dyn fmt::Write) -> fmt::Result {
+    fn write_ical<W: fmt::Write>(&self, w: &mut W) -> fmt::Result {
         match self {
             DateTimeOrDate::DateTime(dt) => dt.write_ical(w),
             DateTimeOrDate::Date(d) => d.write_ical(w),
@@ -133,7 +133,7 @@ impl WriteIcal for DateTimeOrDate<TimeFormat> {
 // ============================================================================
 
 impl WriteIcal for Period<TimeFormat> {
-    fn write_ical(&self, w: &mut dyn fmt::Write) -> fmt::Result {
+    fn write_ical<W: fmt::Write>(&self, w: &mut W) -> fmt::Result {
         match self {
             Period::Explicit { start, end } => {
                 start.write_ical(w)?;
@@ -154,13 +154,13 @@ impl WriteIcal for Period<TimeFormat> {
 // ============================================================================
 
 impl WriteIcal for Duration {
-    fn write_ical(&self, w: &mut dyn fmt::Write) -> fmt::Result {
+    fn write_ical<W: fmt::Write>(&self, w: &mut W) -> fmt::Result {
         write!(w, "{self}")
     }
 }
 
 impl WriteIcal for SignedDuration {
-    fn write_ical(&self, w: &mut dyn fmt::Write) -> fmt::Result {
+    fn write_ical<W: fmt::Write>(&self, w: &mut W) -> fmt::Result {
         write!(w, "{self}")
     }
 }
@@ -170,7 +170,7 @@ impl WriteIcal for SignedDuration {
 // ============================================================================
 
 impl WriteIcal for Geo {
-    fn write_ical(&self, w: &mut dyn fmt::Write) -> fmt::Result {
+    fn write_ical<W: fmt::Write>(&self, w: &mut W) -> fmt::Result {
         write!(w, "{};{}", self.lat, self.lon)
     }
 }
@@ -180,7 +180,7 @@ impl WriteIcal for Geo {
 // ============================================================================
 
 impl WriteIcal for RDateSeq {
-    fn write_ical(&self, w: &mut dyn fmt::Write) -> fmt::Result {
+    fn write_ical<W: fmt::Write>(&self, w: &mut W) -> fmt::Result {
         match self {
             RDateSeq::DateTime(dts) => write_comma_separated(dts, w),
             RDateSeq::Date(ds) => write_comma_separated(ds, w),
@@ -190,7 +190,7 @@ impl WriteIcal for RDateSeq {
 }
 
 impl WriteIcal for ExDateSeq {
-    fn write_ical(&self, w: &mut dyn fmt::Write) -> fmt::Result {
+    fn write_ical<W: fmt::Write>(&self, w: &mut W) -> fmt::Result {
         match self {
             ExDateSeq::DateTime(dts) => write_comma_separated(dts, w),
             ExDateSeq::Date(ds) => write_comma_separated(ds, w),
@@ -203,7 +203,7 @@ impl WriteIcal for ExDateSeq {
 // ============================================================================
 
 impl WriteIcal for TriggerValue {
-    fn write_ical(&self, w: &mut dyn fmt::Write) -> fmt::Result {
+    fn write_ical<W: fmt::Write>(&self, w: &mut W) -> fmt::Result {
         match self {
             TriggerValue::Duration(d) => d.write_ical(w),
             TriggerValue::DateTime(dt) => dt.write_ical(w),
@@ -216,7 +216,7 @@ impl WriteIcal for TriggerValue {
 // ============================================================================
 
 impl WriteIcal for RequestStatus {
-    fn write_ical(&self, w: &mut dyn fmt::Write) -> fmt::Result {
+    fn write_ical<W: fmt::Write>(&self, w: &mut W) -> fmt::Result {
         // RequestStatus Display writes: code;description[;exception_data]
         // but description/exception_data TEXT values need escaping
         write!(w, "{}", self.code)?;
@@ -235,7 +235,7 @@ impl WriteIcal for RequestStatus {
 // ============================================================================
 
 impl WriteIcal for Attachment {
-    fn write_ical(&self, w: &mut dyn fmt::Write) -> fmt::Result {
+    fn write_ical<W: fmt::Write>(&self, w: &mut W) -> fmt::Result {
         match self {
             Attachment::Uri(uri) => w.write_str(uri.as_str()),
             Attachment::Binary(data) => {
@@ -251,7 +251,7 @@ impl WriteIcal for Attachment {
 // ============================================================================
 
 impl WriteIcal for StyledDescriptionValue {
-    fn write_ical(&self, w: &mut dyn fmt::Write) -> fmt::Result {
+    fn write_ical<W: fmt::Write>(&self, w: &mut W) -> fmt::Result {
         match self {
             StyledDescriptionValue::Text(s) => super::escape_text(s, w),
             StyledDescriptionValue::Uri(uri) => w.write_str(uri.as_str()),
@@ -265,7 +265,7 @@ impl WriteIcal for StyledDescriptionValue {
 // ============================================================================
 
 impl<S: AsRef<str>> WriteIcal for Value<S> {
-    fn write_ical(&self, w: &mut dyn fmt::Write) -> fmt::Result {
+    fn write_ical<W: fmt::Write>(&self, w: &mut W) -> fmt::Result {
         match self {
             Value::Binary(data) => {
                 let encoded = BASE64.encode(data);
@@ -304,7 +304,7 @@ macro_rules! impl_write_ical_via_display {
     ($($ty:ty),+ $(,)?) => {
         $(
             impl WriteIcal for $ty {
-                fn write_ical(&self, w: &mut dyn fmt::Write) -> fmt::Result {
+                fn write_ical<W: fmt::Write>(&self, w: &mut W) -> fmt::Result {
                     write!(w, "{self}")
                 }
             }
@@ -344,7 +344,7 @@ impl_write_ical_via_display!(
 // ============================================================================
 
 impl<T: WriteIcal, S: fmt::Display> WriteIcal for calendar_types::set::Token<T, S> {
-    fn write_ical(&self, w: &mut dyn fmt::Write) -> fmt::Result {
+    fn write_ical<W: fmt::Write>(&self, w: &mut W) -> fmt::Result {
         match self {
             calendar_types::set::Token::Known(t) => t.write_ical(w),
             calendar_types::set::Token::Unknown(s) => write!(w, "{s}"),
@@ -357,7 +357,7 @@ impl<T: WriteIcal, S: fmt::Display> WriteIcal for calendar_types::set::Token<T, 
 // ============================================================================
 
 impl WriteIcal for Version {
-    fn write_ical(&self, w: &mut dyn fmt::Write) -> fmt::Result {
+    fn write_ical<W: fmt::Write>(&self, w: &mut W) -> fmt::Result {
         match self {
             Version::V2_0 => w.write_str("2.0"),
         }
@@ -365,74 +365,74 @@ impl WriteIcal for Version {
 }
 
 impl WriteIcal for rfc5545_types::set::Gregorian {
-    fn write_ical(&self, w: &mut dyn fmt::Write) -> fmt::Result {
+    fn write_ical<W: fmt::Write>(&self, w: &mut W) -> fmt::Result {
         w.write_str("GREGORIAN")
     }
 }
 
 impl WriteIcal for ThisAndFuture {
-    fn write_ical(&self, w: &mut dyn fmt::Write) -> fmt::Result {
+    fn write_ical<W: fmt::Write>(&self, w: &mut W) -> fmt::Result {
         w.write_str("THISANDFUTURE")
     }
 }
 
 impl WriteIcal for Priority {
-    fn write_ical(&self, w: &mut dyn fmt::Write) -> fmt::Result {
+    fn write_ical<W: fmt::Write>(&self, w: &mut W) -> fmt::Result {
         let n = *self as u8;
         write!(w, "{n}")
     }
 }
 
 impl WriteIcal for Percent {
-    fn write_ical(&self, w: &mut dyn fmt::Write) -> fmt::Result {
+    fn write_ical<W: fmt::Write>(&self, w: &mut W) -> fmt::Result {
         write!(w, "{}", self.get())
     }
 }
 
 impl WriteIcal for bool {
-    fn write_ical(&self, w: &mut dyn fmt::Write) -> fmt::Result {
+    fn write_ical<W: fmt::Write>(&self, w: &mut W) -> fmt::Result {
         w.write_str(if *self { "TRUE" } else { "FALSE" })
     }
 }
 
 impl WriteIcal for i32 {
-    fn write_ical(&self, w: &mut dyn fmt::Write) -> fmt::Result {
+    fn write_ical<W: fmt::Write>(&self, w: &mut W) -> fmt::Result {
         write!(w, "{self}")
     }
 }
 
 impl WriteIcal for f64 {
-    fn write_ical(&self, w: &mut dyn fmt::Write) -> fmt::Result {
+    fn write_ical<W: fmt::Write>(&self, w: &mut W) -> fmt::Result {
         write!(w, "{self}")
     }
 }
 
 impl WriteIcal for str {
-    fn write_ical(&self, w: &mut dyn fmt::Write) -> fmt::Result {
+    fn write_ical<W: fmt::Write>(&self, w: &mut W) -> fmt::Result {
         super::escape_text(self, w)
     }
 }
 
 impl WriteIcal for String {
-    fn write_ical(&self, w: &mut dyn fmt::Write) -> fmt::Result {
+    fn write_ical<W: fmt::Write>(&self, w: &mut W) -> fmt::Result {
         super::escape_text(self, w)
     }
 }
 
 impl WriteIcal for Box<Uri> {
-    fn write_ical(&self, w: &mut dyn fmt::Write) -> fmt::Result {
+    fn write_ical<W: fmt::Write>(&self, w: &mut W) -> fmt::Result {
         w.write_str(self.as_str())
     }
 }
 
 impl WriteIcal for Box<Uid> {
-    fn write_ical(&self, w: &mut dyn fmt::Write) -> fmt::Result {
+    fn write_ical<W: fmt::Write>(&self, w: &mut W) -> fmt::Result {
         w.write_str(self.as_str())
     }
 }
 
 impl WriteIcal for Box<TzId> {
-    fn write_ical(&self, w: &mut dyn fmt::Write) -> fmt::Result {
+    fn write_ical<W: fmt::Write>(&self, w: &mut W) -> fmt::Result {
         w.write_str(self.as_str())
     }
 }
@@ -442,7 +442,7 @@ impl WriteIcal for Box<TzId> {
 // ============================================================================
 
 impl WriteIcal for Vec<String> {
-    fn write_ical(&self, w: &mut dyn fmt::Write) -> fmt::Result {
+    fn write_ical<W: fmt::Write>(&self, w: &mut W) -> fmt::Result {
         for (i, s) in self.iter().enumerate() {
             if i > 0 {
                 w.write_char(',')?;
@@ -458,7 +458,7 @@ impl WriteIcal for Vec<String> {
 // ============================================================================
 
 impl WriteIcal for Vec<Period> {
-    fn write_ical(&self, w: &mut dyn fmt::Write) -> fmt::Result {
+    fn write_ical<W: fmt::Write>(&self, w: &mut W) -> fmt::Result {
         write_comma_separated(self, w)
     }
 }
@@ -468,7 +468,7 @@ impl WriteIcal for Vec<Period> {
 // ============================================================================
 
 impl WriteIcal for RRule {
-    fn write_ical(&self, w: &mut dyn fmt::Write) -> fmt::Result {
+    fn write_ical<W: fmt::Write>(&self, w: &mut W) -> fmt::Result {
         let freq = Freq::from(&self.freq);
         write!(w, "FREQ={}", freq_str(freq))?;
 
@@ -528,7 +528,7 @@ fn freq_str(freq: Freq) -> &'static str {
     }
 }
 
-fn write_weekday(wd: calendar_types::time::Weekday, w: &mut dyn fmt::Write) -> fmt::Result {
+fn write_weekday<W: fmt::Write>(wd: calendar_types::time::Weekday, w: &mut W) -> fmt::Result {
     w.write_str(match wd {
         calendar_types::time::Weekday::Monday => "MO",
         calendar_types::time::Weekday::Tuesday => "TU",
@@ -540,7 +540,7 @@ fn write_weekday(wd: calendar_types::time::Weekday, w: &mut dyn fmt::Write) -> f
     })
 }
 
-fn write_weekday_num(wn: &WeekdayNum, w: &mut dyn fmt::Write) -> fmt::Result {
+fn write_weekday_num<W: fmt::Write>(wn: &WeekdayNum, w: &mut W) -> fmt::Result {
     if let Some((sign, week)) = wn.ordinal {
         match sign {
             Sign::Pos => {}
@@ -551,7 +551,7 @@ fn write_weekday_num(wn: &WeekdayNum, w: &mut dyn fmt::Write) -> fmt::Result {
     write_weekday(wn.weekday, w)
 }
 
-fn write_core_by_rules(rules: &CoreByRules, w: &mut dyn fmt::Write) -> fmt::Result {
+fn write_core_by_rules<W: fmt::Write>(rules: &CoreByRules, w: &mut W) -> fmt::Result {
     if let Some(set) = &rules.by_second {
         w.write_str(";BYSECOND=")?;
         write_second_set(set, w)?;
@@ -593,7 +593,7 @@ fn write_core_by_rules(rules: &CoreByRules, w: &mut dyn fmt::Write) -> fmt::Resu
     Ok(())
 }
 
-fn write_by_period_day_rules(rules: &ByPeriodDayRules, w: &mut dyn fmt::Write) -> fmt::Result {
+fn write_by_period_day_rules<W: fmt::Write>(rules: &ByPeriodDayRules, w: &mut W) -> fmt::Result {
     if let Some(set) = &rules.by_month_day {
         w.write_str(";BYMONTHDAY=")?;
         write_month_day_set(set, w)?;
@@ -612,7 +612,7 @@ fn write_by_period_day_rules(rules: &ByPeriodDayRules, w: &mut dyn fmt::Write) -
     Ok(())
 }
 
-fn write_by_month_day_rule(rules: &ByMonthDayRule, w: &mut dyn fmt::Write) -> fmt::Result {
+fn write_by_month_day_rule<W: fmt::Write>(rules: &ByMonthDayRule, w: &mut W) -> fmt::Result {
     if let Some(set) = &rules.by_month_day {
         w.write_str(";BYMONTHDAY=")?;
         write_month_day_set(set, w)?;
@@ -620,7 +620,7 @@ fn write_by_month_day_rule(rules: &ByMonthDayRule, w: &mut dyn fmt::Write) -> fm
     Ok(())
 }
 
-fn write_yearly_by_rules(rules: &YearlyByRules, w: &mut dyn fmt::Write) -> fmt::Result {
+fn write_yearly_by_rules<W: fmt::Write>(rules: &YearlyByRules, w: &mut W) -> fmt::Result {
     if let Some(set) = &rules.by_month_day {
         w.write_str(";BYMONTHDAY=")?;
         write_month_day_set(set, w)?;
@@ -643,7 +643,7 @@ fn write_yearly_by_rules(rules: &YearlyByRules, w: &mut dyn fmt::Write) -> fmt::
     Ok(())
 }
 
-fn write_second_set(set: &SecondSet, w: &mut dyn fmt::Write) -> fmt::Result {
+fn write_second_set<W: fmt::Write>(set: &SecondSet, w: &mut W) -> fmt::Result {
     let mut first = true;
     for s in rfc5545_types::rrule::Second::iter() {
         if set.get(s) {
@@ -657,7 +657,7 @@ fn write_second_set(set: &SecondSet, w: &mut dyn fmt::Write) -> fmt::Result {
     Ok(())
 }
 
-fn write_minute_set(set: &MinuteSet, w: &mut dyn fmt::Write) -> fmt::Result {
+fn write_minute_set<W: fmt::Write>(set: &MinuteSet, w: &mut W) -> fmt::Result {
     let mut first = true;
     for m in rfc5545_types::rrule::Minute::iter() {
         if set.get(m) {
@@ -671,7 +671,7 @@ fn write_minute_set(set: &MinuteSet, w: &mut dyn fmt::Write) -> fmt::Result {
     Ok(())
 }
 
-fn write_hour_set(set: &HourSet, w: &mut dyn fmt::Write) -> fmt::Result {
+fn write_hour_set<W: fmt::Write>(set: &HourSet, w: &mut W) -> fmt::Result {
     let mut first = true;
     for h in rfc5545_types::rrule::Hour::iter() {
         if set.get(h) {
@@ -685,7 +685,7 @@ fn write_hour_set(set: &HourSet, w: &mut dyn fmt::Write) -> fmt::Result {
     Ok(())
 }
 
-fn write_month_set(set: &MonthSet, w: &mut dyn fmt::Write) -> fmt::Result {
+fn write_month_set<W: fmt::Write>(set: &MonthSet, w: &mut W) -> fmt::Result {
     let mut first = true;
     for m in calendar_types::time::Month::iter() {
         if set.get(m) {
@@ -699,7 +699,7 @@ fn write_month_set(set: &MonthSet, w: &mut dyn fmt::Write) -> fmt::Result {
     Ok(())
 }
 
-fn write_month_day_set(set: &MonthDaySet, w: &mut dyn fmt::Write) -> fmt::Result {
+fn write_month_day_set<W: fmt::Write>(set: &MonthDaySet, w: &mut W) -> fmt::Result {
     let mut first = true;
     // Positive days 1..=31
     for d in 1..=31u8 {
@@ -730,7 +730,7 @@ fn write_month_day_set(set: &MonthDaySet, w: &mut dyn fmt::Write) -> fmt::Result
     Ok(())
 }
 
-fn write_week_no_set(set: &WeekNoSet, w: &mut dyn fmt::Write) -> fmt::Result {
+fn write_week_no_set<W: fmt::Write>(set: &WeekNoSet, w: &mut W) -> fmt::Result {
     let mut first = true;
     // Positive weeks 1..=53
     for i in 1..=53u8 {
@@ -765,7 +765,7 @@ fn write_week_no_set(set: &WeekNoSet, w: &mut dyn fmt::Write) -> fmt::Result {
 // Helpers
 // ============================================================================
 
-fn write_comma_separated<T: WriteIcal>(items: &[T], w: &mut dyn fmt::Write) -> fmt::Result {
+fn write_comma_separated<T: WriteIcal, W: fmt::Write>(items: &[T], w: &mut W) -> fmt::Result {
     for (i, item) in items.iter().enumerate() {
         if i > 0 {
             w.write_char(',')?;

@@ -11,11 +11,11 @@ use crate::model::{
 };
 
 /// Writes a content line: `NAME` + params + `:` + value + CRLF.
-pub fn write_content_line(
+pub fn write_content_line<P: WriteIcal, V: WriteIcal, W: fmt::Write>(
     name: &str,
-    params: &dyn WriteIcal,
-    value: &dyn WriteIcal,
-    w: &mut dyn fmt::Write,
+    params: &P,
+    value: &V,
+    w: &mut W,
 ) -> fmt::Result {
     w.write_str(name)?;
     params.write_ical(w)?;
@@ -25,19 +25,19 @@ pub fn write_content_line(
 }
 
 /// Writes a single `Prop<V, P>` as a content line.
-pub fn write_prop<V: WriteIcal, P: WriteIcal>(
+pub fn write_prop<V: WriteIcal, P: WriteIcal, W: fmt::Write>(
     name: &str,
     prop: &Prop<V, P>,
-    w: &mut dyn fmt::Write,
+    w: &mut W,
 ) -> fmt::Result {
     write_content_line(name, &prop.params, &prop.value, w)
 }
 
 /// Writes an optional prop if present. Accepts `Option<&Prop>` (structible getter style).
-pub fn write_opt_prop<V: WriteIcal, P: WriteIcal>(
+pub fn write_opt_prop<V: WriteIcal, P: WriteIcal, W: fmt::Write>(
     name: &str,
     prop: Option<&Prop<V, P>>,
-    w: &mut dyn fmt::Write,
+    w: &mut W,
 ) -> fmt::Result {
     if let Some(p) = prop {
         write_prop(name, p, w)?;
@@ -46,10 +46,10 @@ pub fn write_opt_prop<V: WriteIcal, P: WriteIcal>(
 }
 
 /// Writes a vec of props if present. Accepts `Option<&Vec<Prop>>` (structible getter style).
-pub fn write_vec_prop<V: WriteIcal, P: WriteIcal>(
+pub fn write_vec_prop<V: WriteIcal, P: WriteIcal, W: fmt::Write>(
     name: &str,
     props: Option<&Vec<Prop<V, P>>>,
-    w: &mut dyn fmt::Write,
+    w: &mut W,
 ) -> fmt::Result {
     if let Some(ps) = props {
         for p in ps {
@@ -60,9 +60,9 @@ pub fn write_vec_prop<V: WriteIcal, P: WriteIcal>(
 }
 
 /// Writes a `StructuredDataProp`.
-pub fn write_structured_data_prop(
+pub fn write_structured_data_prop<W: fmt::Write>(
     prop: &StructuredDataProp,
-    w: &mut dyn fmt::Write,
+    w: &mut W,
 ) -> fmt::Result {
     match prop {
         StructuredDataProp::Binary(p) => {
@@ -91,9 +91,9 @@ pub fn write_structured_data_prop(
 }
 
 /// Writes a vec of `StructuredDataProp`s.
-pub fn write_structured_data_props(
+pub fn write_structured_data_props<W: fmt::Write>(
     props: Option<&Vec<StructuredDataProp>>,
-    w: &mut dyn fmt::Write,
+    w: &mut W,
 ) -> fmt::Result {
     if let Some(ps) = props {
         for p in ps {
@@ -104,9 +104,9 @@ pub fn write_structured_data_props(
 }
 
 /// Writes x-properties by iterating the structible catch-all.
-pub fn write_x_property_iter<'a>(
+pub fn write_x_property_iter<'a, W: fmt::Write>(
     iter: impl Iterator<Item = (&'a Box<CaselessStr>, &'a Vec<Prop<Value<String>, Params>>)>,
-    w: &mut dyn fmt::Write,
+    w: &mut W,
 ) -> fmt::Result {
     for (name, props) in iter {
         for prop in props {
@@ -121,10 +121,10 @@ pub fn write_x_property_iter<'a>(
 }
 
 /// Writes a DateTimeOrDate property with correct VALUE parameter.
-pub fn write_dtod_prop(
+pub fn write_dtod_prop<W: fmt::Write>(
     name: &str,
     prop: &Prop<rfc5545_types::time::DateTimeOrDate, Params>,
-    w: &mut dyn fmt::Write,
+    w: &mut W,
 ) -> fmt::Result {
     w.write_str(name)?;
     if prop.value.is_date() {
@@ -137,10 +137,10 @@ pub fn write_dtod_prop(
 }
 
 /// Writes an optional DateTimeOrDate property.
-pub fn write_opt_dtod_prop(
+pub fn write_opt_dtod_prop<W: fmt::Write>(
     name: &str,
     prop: Option<&Prop<rfc5545_types::time::DateTimeOrDate, Params>>,
-    w: &mut dyn fmt::Write,
+    w: &mut W,
 ) -> fmt::Result {
     if let Some(p) = prop {
         write_dtod_prop(name, p, w)?;
@@ -149,10 +149,10 @@ pub fn write_opt_dtod_prop(
 }
 
 /// Writes RDATE properties with correct VALUE parameter for date-only sequences.
-pub fn write_rdate_seq_prop(
+pub fn write_rdate_seq_prop<W: fmt::Write>(
     name: &str,
     prop: &Prop<rfc5545_types::time::RDateSeq, Params>,
-    w: &mut dyn fmt::Write,
+    w: &mut W,
 ) -> fmt::Result {
     w.write_str(name)?;
     match &prop.value {
@@ -167,9 +167,9 @@ pub fn write_rdate_seq_prop(
 }
 
 /// Writes EXDATE property with correct VALUE parameter.
-pub fn write_exdate_prop(
+pub fn write_exdate_prop<W: fmt::Write>(
     prop: &Prop<rfc5545_types::time::DateTimeOrDate, Params>,
-    w: &mut dyn fmt::Write,
+    w: &mut W,
 ) -> fmt::Result {
     w.write_str("EXDATE")?;
     if prop.value.is_date() {
@@ -182,10 +182,10 @@ pub fn write_exdate_prop(
 }
 
 /// Writes an Attachment property with correct VALUE/ENCODING params.
-pub fn write_attach_prop(
+pub fn write_attach_prop<W: fmt::Write>(
     name: &str,
     prop: &Prop<rfc5545_types::value::Attachment, Params>,
-    w: &mut dyn fmt::Write,
+    w: &mut W,
 ) -> fmt::Result {
     w.write_str(name)?;
     match &prop.value {
@@ -201,9 +201,9 @@ pub fn write_attach_prop(
 }
 
 /// Writes a StyledDescriptionValue property with correct VALUE param.
-pub fn write_styled_description_prop(
+pub fn write_styled_description_prop<W: fmt::Write>(
     prop: &Prop<rfc5545_types::value::StyledDescriptionValue, Params>,
-    w: &mut dyn fmt::Write,
+    w: &mut W,
 ) -> fmt::Result {
     w.write_str("STYLED-DESCRIPTION")?;
     match &prop.value {
@@ -225,9 +225,9 @@ pub fn write_styled_description_prop(
 }
 
 /// Writes a TriggerValue property with correct VALUE param.
-pub fn write_trigger_prop(
+pub fn write_trigger_prop<W: fmt::Write>(
     prop: &Prop<rfc5545_types::time::TriggerValue, Params>,
-    w: &mut dyn fmt::Write,
+    w: &mut W,
 ) -> fmt::Result {
     w.write_str("TRIGGER")?;
     match &prop.value {
